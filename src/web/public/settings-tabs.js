@@ -32,6 +32,7 @@ export function tabList(initial, getActive, select) {
           },
           it.running ? h("span", { class: "sdot running tab-run", "aria-hidden": "true" }) : null,
           h("span", { text: it.label }),
+          it.issues ? h("span", { class: `badge-count${it.level === "error" ? " err" : ""}`, "aria-label": `${it.issues} issues`, text: String(it.issues) }) : null,
           it.dirty ? h("span", { class: "dirty", title: "Unsaved changes", "aria-label": "unsaved changes", text: "•" }) : null,
         ),
       );

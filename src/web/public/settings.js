@@ -15,6 +15,8 @@ import {
   errorTab,
   formDirty,
   formToPayload,
+  hasFixableIdIssues,
+  issueSummary,
   moveItem,
 } from "./logic.js";
 
@@ -29,6 +31,7 @@ let banner = ""; // "" | "external" | "stale"
 let preview = null; // pending save confirmation: {changes}
 let formError = "";
 let busy = false;
+let fixPlan = null; // dry-run `fix` preview: {changes} | {changes: []} | {error}
 
 export const isOpen = () => dlg().open;
 
@@ -51,8 +54,18 @@ export function init(applied, logsCtx) {
     dlg().dataset.bd = e.target === dlg() ? "1" : "";
   });
   dlg().addEventListener("click", (e) => {
-    if (e.target === dlg() && dlg().dataset.bd === "1") dlg().close();
+    if (e.target === dlg() && dlg().dataset.bd === "1") requestClose();
   });
+  dlg().addEventListener("cancel", (e) => {
+    e.preventDefault();
+    requestClose();
+  });
+}
+
+/** Single close path (header ×, footer Close, Escape, backdrop): confirms when the form has unsaved changes. */
+export function requestClose() {
+  if (form && loaded && formDirty(form, loaded.config) && !confirm("Discard unsaved changes?")) return;
+  dlg().close();
 }
 
 export function setBoardWarnings(w) {
@@ -63,6 +76,7 @@ export async function open() {
   if (!dlg().open) dlg().showModal();
   banner = "";
   preview = null;
+  fixPlan = null;
   formError = "";
   activeTab = "config";
   await loadConfig();
@@ -95,7 +109,7 @@ export async function refresh() {
     return;
   }
   refreshTabs();
-  if (activeTab === "health") await renderPanel(); // only the health panel depends on live data
+  updateHealth(); // Health section + footer summary only: form and scroll stay untouched
 }
 
 async function loadConfig() {
@@ -124,10 +138,9 @@ function tabItems() {
   const bad = formError ? errorTab(formError) : "";
   const n = healthCount();
   return [
-    { id: "config", label: "Config", dirty: d.config, error: bad === "config" },
+    { id: "config", label: "Config", issues: n, level: issueSummary(validation, boardWarnings).level, dirty: d.config, error: bad === "config" },
     { id: "automations", label: "Automations", dirty: d.automations, error: bad === "automations" },
     { id: "live", label: liveLabel(live.count()), running: live.count() > 0 },
-    { id: "health", label: n ? `Health (${n})` : "Health" },
     { id: "logs", label: "Logs" },
   ];
 }
@@ -161,8 +174,8 @@ async function renderPanel() {
   const slot = document.getElementById("settings-panel-slot");
   if (!slot) return;
   const panel = tabPanel(activeTab);
-  slot.replaceChildren(panel);
-  if (activeTab === "health") return void panel.append(...(await healthPanel()));
+  const formTab = activeTab === "config" || activeTab === "automations";
+  slot.replaceChildren(panel, footer(formTab && form ? activeTab : "other"));
   if (activeTab === "logs") return void logs.mount(panel);
   if (activeTab === "live") return void live.mount(panel);
   if (!form) return void panel.append(h("p", { class: "form-error", text: formError || "Cannot load the config." }));
@@ -173,7 +186,7 @@ async function renderPanel() {
 const rerenderConfig = () => {
   refreshTabs();
   const panel = document.querySelector(".set-panel");
-  if (!panel || activeTab === "health" || activeTab === "logs" || activeTab === "live") return;
+  if (!panel || activeTab === "logs" || activeTab === "live") return;
   const keep = panel.scrollTop;
   renderPanel().then(() => {
     const p = document.querySelector(".set-panel");
@@ -203,20 +216,87 @@ function bannerBox() {
   );
 }
 
-/** Shared by Config and Automations tabs: error, preview, Revert/Save. */
-function formFooter() {
+/** Footer for every tab: form errors/preview above, summary left, actions right. kind: config | automations | other. */
+function footer(kind) {
+  const formTab = kind !== "other";
+  const dirty = formTab && formDirty(form, loaded.config);
+  const sum = issueSummary(validation, boardWarnings);
+  const fixable = hasFixableIdIssues(validation, boardWarnings);
   return h(
-    "div",
-    { class: "form-footer" },
-    formError ? h("p", { class: "form-error", role: "alert", text: formError }) : null,
-    preview ? previewBox() : null,
+    "footer",
+    { class: "form-footer", id: "settings-footer" },
+    formTab && formError ? h("p", { class: "form-error", role: "alert", text: formError }) : null,
+    formTab && preview ? previewBox() : null,
     h(
       "div",
-      { class: "actions" },
-      h("button", { id: "config-revert", type: "button", class: "btn", text: "Revert", disabled: !formDirty(form, loaded.config), onclick: reload }),
-      h("button", { id: "config-save", type: "button", class: "btn primary", text: "Save config", disabled: !formDirty(form, loaded.config) || busy, onclick: () => save(false) }),
+      { class: "footer-bar" },
+      formTab ? summaryButton(sum) : h("span"),
+      h(
+        "div",
+        { class: "actions" },
+        kind === "config"
+          ? h("button", {
+              id: "config-fix",
+              type: "button",
+              class: "btn",
+              text: "Fix ids…",
+              disabled: !fixable,
+              title: fixable ? "Preview id fixes" : "Nothing to fix",
+              onclick: showFix,
+            })
+          : null,
+        formTab ? h("button", { id: "config-revert", type: "button", class: "btn", text: "Revert", disabled: !dirty, onclick: reload }) : null,
+        formTab ? h("button", { id: "config-save", type: "button", class: "btn primary", text: "Save config", disabled: !dirty || busy, onclick: () => save(false) }) : null,
+        h("button", { id: "config-close", type: "button", class: "btn", text: "Close", onclick: requestClose }),
+      ),
     ),
   );
+}
+
+function summaryButton(sum) {
+  return h("button", {
+    type: "button",
+    id: "issue-summary",
+    class: `issue-summary ${sum.level}`,
+    text: sum.text,
+    "aria-describedby": "health-section",
+    title: sum.count ? "Go to Health" : "",
+    onclick: gotoHealth,
+  });
+}
+
+async function gotoHealth() {
+  if (activeTab !== "config") {
+    activeTab = "config";
+    refreshTabs();
+    await renderPanel();
+  }
+  document.getElementById("health-section")?.scrollIntoView({ block: "nearest" });
+  document.getElementById("health-section")?.focus({ preventScroll: true });
+}
+
+async function showFix() {
+  try {
+    fixPlan = await api.fix(true);
+  } catch (e) {
+    fixPlan = { error: e.message };
+  }
+  updateHealth();
+  document.getElementById("health-section")?.scrollIntoView({ block: "nearest" });
+}
+
+/** Re-render only the Health section and footer summary/fix button (keeps form state and scroll). */
+function updateHealth() {
+  const old = document.getElementById("health-section");
+  if (old) old.replaceWith(healthSection());
+  const sum = document.getElementById("issue-summary");
+  if (sum) sum.replaceWith(summaryButton(issueSummary(validation, boardWarnings)));
+  const fix = document.getElementById("config-fix");
+  if (fix) {
+    const fixable = hasFixableIdIssues(validation, boardWarnings);
+    fix.disabled = !fixable;
+    fix.title = fixable ? "Preview id fixes" : "Nothing to fix";
+  }
 }
 
 function configPanel() {
@@ -265,7 +345,7 @@ function configPanel() {
         },
       }),
     ),
-    formFooter(),
+    healthSection(),
   );
   return sec;
 }
@@ -286,7 +366,6 @@ function automationsPanel() {
       ),
     );
   });
-  sec.append(formFooter());
   return sec;
 }
 
@@ -396,18 +475,18 @@ async function save(overwrite, confirmed = false) {
 
 // ---- health ----
 
-async function healthPanel() {
+function healthSection() {
   const v = validation;
-  const fixBox = h("div", { class: "fix-box" });
-  return [
-    section("Errors", v.errors, "error"),
-    section("Warnings", v.warnings, "warn"),
-    boardSection(),
-    h("div", { class: "fix-area" }, h("button", { type: "button", class: "btn", text: "Fix ids…", onclick: () => planFix(fixBox) }), fixBox),
-  ];
+  const sec = h("section", { id: "health-section", class: "health", tabIndex: -1, "aria-label": "Health" }, h("h3", { class: "section-title", text: "Health" }));
+  const none = !v.errors.length && !v.warnings.length && !boardWarnings.length;
+  if (none) sec.append(h("p", { class: "muted", text: "No issues found." }));
+  else sec.append(...[section("Errors", v.errors, "error"), section("Warnings", v.warnings, "warn"), boardSection()].filter(Boolean));
+  sec.append(fixBox());
+  return sec;
 }
 
 function section(title, issues, kind) {
+  if (!issues.length) return null;
   return h(
     "section",
     { class: "issues" },
@@ -445,14 +524,18 @@ function boardSection() {
   );
 }
 
-async function planFix(box) {
-  clear(box);
-  try {
-    const r = await api.fix(true);
-    if (!r.changes.length) return box.append(h("p", { class: "muted", text: "Nothing to fix." }));
-    box.append(
-      h("p", { text: `${r.changes.length} change(s) planned:` }),
-      h("ul", { class: "mono" }, r.changes.map((c) => h("li", { text: describeChange(c) }))),
+function fixBox() {
+  const box = h("div", { class: "fix-box" });
+  if (!fixPlan) return box;
+  if (fixPlan.error) return box.append(h("p", { class: "form-error", role: "alert", text: fixPlan.error })), box;
+  if (!fixPlan.changes.length) return box.append(h("p", { class: "muted", text: "Nothing to fix." })), box;
+  box.append(
+    h("p", { text: `${fixPlan.changes.length} change(s) planned:` }),
+    h("ul", { class: "mono" }, fixPlan.changes.map((c) => h("li", { text: describeChange(c) }))),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { type: "button", class: "btn", text: "Cancel", onclick: () => ((fixPlan = null), updateHealth()) }),
       h("button", {
         type: "button",
         class: "btn primary",
@@ -461,19 +544,21 @@ async function planFix(box) {
           e.target.disabled = true;
           try {
             const a = await api.fix(false);
+            fixPlan = null;
             toast(`Fixed ${a.changes.length} file(s)`, "ok");
             onApplied();
-            await renderAll();
+            validation = await api.validate();
+            refreshTabs();
+            updateHealth();
           } catch (err) {
             toast(err.message, "error");
             e.target.disabled = false;
           }
         },
       }),
-    );
-  } catch (e) {
-    box.append(h("p", { class: "form-error", text: e.message }));
-  }
+    ),
+  );
+  return box;
 }
 
 /** Count shown in the header badge. */

@@ -438,3 +438,21 @@ export function dirtyTabs(f, loaded) {
   const strip = (c) => JSON.stringify({ ...c, automations: undefined, boards: Object.fromEntries(Object.entries(c.boards).map(([n, x]) => [n, { columns: x.columns }])) });
   return { config: strip(a) !== strip(b), automations: autos(a) !== autos(b) };
 }
+
+/** Footer/tab summary of validate output + board warnings: {text, level: "error"|"warning"|"ok", count}. */
+export function issueSummary(v, boardWarnings = []) {
+  const e = v?.errors?.length ?? 0;
+  const w = (v?.warnings?.length ?? 0) + (boardWarnings?.length ?? 0);
+  if (!e && !w) return { text: "No issues", level: "ok", count: 0 };
+  const parts = [];
+  if (e) parts.push(`${e} error${e === 1 ? "" : "s"}`);
+  if (w) parts.push(`${w} warning${w === 1 ? "" : "s"}`);
+  return { text: parts.join(", "), level: e ? "error" : "warning", count: e + w };
+}
+
+/** True when validate output / board warnings contain missing or duplicate id problems (what `fix` repairs). */
+export function hasFixableIdIssues(v, boardWarnings = []) {
+  const msg = (i) => /^(missing id|duplicate id)/.test(i.message ?? "");
+  const kind = (w) => w.kind === "missing-id" || w.kind === "duplicate-id";
+  return Boolean(v?.errors?.some(msg) || v?.warnings?.some(msg) || boardWarnings?.some((w) => kind(w) || msg(w)));
+}

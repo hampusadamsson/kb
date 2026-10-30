@@ -165,7 +165,17 @@ dialog#settings-dialog { width: min(760px, 96vw); }
 .set-panel[hidden] { display: none; }
 .board-auto { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
 .board-auto h4 { margin: 0 0 6px; }
-.form-footer { position: sticky; bottom: 0; background: var(--bg); padding-top: 6px; border-top: 1px solid var(--border); margin-top: 8px; }
+.form-footer { position: sticky; bottom: 0; background: var(--bg); padding-top: 8px; border-top: 1px solid var(--border); margin-top: 8px; }
+.footer-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.issue-summary { background: none; border: 0; padding: 4px 0; font: inherit; cursor: pointer; text-decoration: underline; }
+.issue-summary.error { color: var(--err); }
+.issue-summary.warning { color: var(--warn); }
+.issue-summary.ok { color: var(--muted); text-decoration: none; }
+.dlg-head { display: flex; justify-content: space-between; align-items: center; }
+.dlg-head h2 { margin: 0; }
+.health { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 4px; }
+.health:focus { outline: none; }
+.tab .badge-count { margin-left: 6px; }
 
 /* logs tab */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

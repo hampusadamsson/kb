@@ -168,7 +168,7 @@ const handlers = {
 };
 
 $("settings-btn").addEventListener("click", () => settings.open());
-$("settings-close").addEventListener("click", () => $("settings-dialog").close());
+$("settings-close").addEventListener("click", () => settings.requestClose());
 settings.init(() => load(), {
   boardNames: () => state.data?.boardNames ?? [],
   async openTicket(id) {

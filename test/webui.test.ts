@@ -284,13 +284,25 @@ describe("automation status helpers", () => {
     expect(s.worstFirst).toHaveLength(5);
     expect(any.runningText(any.summarizeAutomations({ a: { status: "done" } }))).toBe("");
   });
+  it("issueSummary", () => {
+    expect(any.issueSummary({ errors: [], warnings: [] }, [])).toEqual({ text: "No issues", level: "ok", count: 0 });
+    expect(any.issueSummary({ errors: [{}, {}], warnings: [{}] }, [])).toEqual({ text: "2 errors, 1 warning", level: "error", count: 3 });
+    expect(any.issueSummary({ errors: [], warnings: [{}] }, [{}])).toEqual({ text: "2 warnings", level: "warning", count: 2 });
+    expect(any.issueSummary(null)).toMatchObject({ level: "ok" });
+  });
+  it("hasFixableIdIssues", () => {
+    expect(any.hasFixableIdIssues({ errors: [{ message: "missing id" }], warnings: [] })).toBe(true);
+    expect(any.hasFixableIdIssues({ errors: [{ message: "duplicate id 3 (a, b)" }], warnings: [] })).toBe(true);
+    expect(any.hasFixableIdIssues({ errors: [{ message: "missing status" }], warnings: [] }, [{ kind: "unsorted" }])).toBe(false);
+    expect(any.hasFixableIdIssues({ errors: [], warnings: [] }, [{ kind: "missing-id" }])).toBe(true);
+  });
   it("nextTab", () => {
-    const t = ["config", "automations", "health"];
+    const t = ["config", "automations", "live", "logs"];
     expect(any.nextTab(t, "config", "ArrowRight")).toBe("automations");
-    expect(any.nextTab(t, "health", "ArrowRight")).toBe("config");
-    expect(any.nextTab(t, "config", "ArrowLeft")).toBe("health");
+    expect(any.nextTab(t, "logs", "ArrowRight")).toBe("config");
+    expect(any.nextTab(t, "config", "ArrowLeft")).toBe("logs");
     expect(any.nextTab(t, "automations", "Home")).toBe("config");
-    expect(any.nextTab(t, "automations", "End")).toBe("health");
+    expect(any.nextTab(t, "automations", "End")).toBe("logs");
     expect(any.nextTab(t, "automations", "x")).toBeNull();
     expect(any.nextTab([], "a", "End")).toBeNull();
   });
