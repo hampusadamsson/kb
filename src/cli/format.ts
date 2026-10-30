@@ -22,7 +22,5 @@ export function fmtValue(v: unknown): string {
   return String(v);
 }
 
-export interface Result {
-  out: string;
-  warnings: string[];
-}
+export const fmtWarning = (w: { path?: string; message: string }): string =>
+  w.path ? `warning: ${w.path}: ${w.message}` : `warning: ${w.message}`;

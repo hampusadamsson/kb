@@ -1,10 +1,8 @@
-import { loadConfig } from "../config.js";
-import { findById, scan } from "../tickets.js";
-import { fmtId, fmtValue } from "./format.js";
+import { createKanban } from "../../core/index.js";
+import { fmtId, fmtValue } from "../format.js";
 
 export function show(cwd: string, id: string): string {
-  const config = loadConfig(cwd);
-  const t = findById(scan(cwd, config).tickets, id);
+  const t = createKanban({ dir: cwd }).get(id);
   const out = [
     t.path,
     `#${fmtId(t.id)} ${t.name}`,

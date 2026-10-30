@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { parseDocument } from "yaml";
 import { beforeEach, describe, expect, it } from "vitest";
-import { columnsFor, loadConfig, type Config } from "../src/config.js";
-import { addComment, createFile, readFile, updateFile } from "../src/frontmatter.js";
-import { boardNames, duplicates, findById, nextId, numericId, scan, sortTickets } from "../src/tickets.js";
-import { filenameFor, padId, parseProperty, slugify } from "../src/util.js";
+import { columnsFor, loadConfig, type Config } from "../src/core/config.js";
+import { addComment, createFile, readFile, updateFile } from "../src/core/frontmatter.js";
+import { boardNames, duplicates, findById, nextId, numericId, scan, sortTickets } from "../src/core/tickets.js";
+import { filenameFor, padId, slugify } from "../src/core/util.js";
+import { parseProperty } from "../src/core/parse.js";
 
 let dir: string;
 beforeEach(() => {

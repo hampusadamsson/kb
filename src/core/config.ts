@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { KanbanError } from "./errors.js";
 
 export const CONFIG_FILE = "kanban.yaml";
 
@@ -27,20 +28,20 @@ export function loadConfig(cwd: string): Config {
   try {
     text = fs.readFileSync(file, "utf8");
   } catch {
-    throw new Error(`${CONFIG_FILE} not found in ${cwd} (run \`kb init\`)`);
+    throw new KanbanError("config", `${CONFIG_FILE} not found in ${cwd} (run \`kb init\`)`);
   }
   let data: unknown;
   try {
     data = parse(text);
   } catch (e) {
-    throw new Error(`${CONFIG_FILE}: invalid YAML: ${(e as Error).message}`);
+    throw new KanbanError("config", `${CONFIG_FILE}: invalid YAML: ${(e as Error).message}`);
   }
   const result = configSchema.safeParse(data);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
       .join("; ");
-    throw new Error(`${CONFIG_FILE}: invalid config: ${issues}`);
+    throw new KanbanError("config", `${CONFIG_FILE}: invalid config: ${issues}`);
   }
   return result.data;
 }

@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { boards } from "./commands/boards.js";
-import { useColor } from "./commands/format.js";
+import { useColor } from "./format.js";
 import { fix } from "./commands/fix.js";
 import { init } from "./commands/init.js";
 import { ls } from "./commands/ls.js";

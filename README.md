@@ -235,6 +235,39 @@ kb validate
 - Writes never fold long strings (`lineWidth: 0`).
 - CRLF: if the frontmatter starts with `---\r\n`, it is re-rendered with CRLF; the body is never modified.
 
+## Architecture
+
+Two layers:
+
+```
+src/core/   UI-agnostic domain/service layer (Kanban API, config, tickets, frontmatter, parse helpers, KanbanError)
+src/cli/    thin adapter: commander wiring, flag parsing, output formatting, stdin, $EDITOR, colour/TTY, exit codes
+src/index.ts  public library entry (re-exports core)
+```
+
+The CLI parses flags into plain objects, calls `Kanban`, and formats the structured result. Core methods
+take structured options and return plain data (no strings meant for display, no printing); failures throw
+`KanbanError` with a `code` (`not-found`, `ambiguous`, `invalid`, `exists`, `config`, `parse`).
+Text syntax shared by UIs (`key:value` properties, `!` negation in filters) lives in `src/core/parse.ts`.
+
+To build another UI (TUI, web, MCP): import from `kb` (or `src/index.ts`), call `Kanban`, render the results yourself.
+Reading stdin, spawning editors and warnings output are the UI's job (use `pathOf(id)` to find the file to edit).
+
+```ts
+import { createKanban, KanbanError } from "kb";
+
+const kb = createKanban({ dir: process.cwd() });
+const { id, warnings } = kb.add({ name: "Fix login", labels: ["bug"], properties: { priority: "high" } });
+kb.move(id, "doing");
+kb.comment(id, "started");
+const { boards } = kb.list({ labels: ["bug"], props: ["!priority:low"] });
+const { errors } = kb.validate();
+kb.fix({ dryRun: true }); // [{ path, from, to }]
+```
+
+Boundary rule: nothing in `src/core` may import `commander` or `../cli`, or use `process.stdout`/`stderr`/`exit`/`argv`/`env`
+or `readline`. Enforced by `test/architecture.test.ts`.
+
 ## Design decisions
 
 - **Markdown files as DB** — portable, and frontmatter is Obsidian-compatible.

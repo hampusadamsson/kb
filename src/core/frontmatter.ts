@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Document, parseDocument, Scalar, YAMLMap, type Pair } from "yaml";
+import { KanbanError } from "./errors.js";
 
 const FM_RE = /^---\r?\n(?:([\s\S]*?\r?\n)?)---[ \t]*(?:\r?\n|$)/;
 
@@ -36,7 +37,7 @@ export function render(doc: Document, body: string, crlf = false): string {
 /** Read, mutate the YAML document, write back. Body is untouched. */
 export function updateFile(file: string, fn: (doc: Document) => void): void {
   const { doc, body, crlf } = readFile(file);
-  if (doc.errors.length) throw new Error(`${file}: ${doc.errors[0].message}`);
+  if (doc.errors.length) throw new KanbanError("parse", `${file}: ${doc.errors[0].message}`);
   fn(doc);
   fs.writeFileSync(file, render(doc, body, crlf));
 }

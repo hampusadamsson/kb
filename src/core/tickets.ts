@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
 import { columnsFor, type Config } from "./config.js";
+import { KanbanError } from "./errors.js";
 import { splitFrontmatter } from "./frontmatter.js";
+import { parsePropertyFilter, splitNegation } from "./parse.js";
 
 export const RESERVED = ["type", "id", "name", "status", "board", "labels", "comments"];
 export const UNSORTED = "unsorted";
@@ -121,9 +123,9 @@ export function findById(tickets: Ticket[], arg: string): Ticket {
     const n = numericId(arg);
     if (n !== undefined) found = tickets.filter((t) => hasId(t) && numericId(t.id) === n);
   }
-  if (found.length === 0) throw new Error(`no ticket ${arg}`);
+  if (found.length === 0) throw new KanbanError("not-found", `no ticket ${arg}`);
   if (found.length > 1) {
-    throw new Error(`duplicate id ${arg}:\n${found.map((t) => `  ${t.path}`).join("\n")}`);
+    throw new KanbanError("ambiguous", `duplicate id ${arg}:\n${found.map((t) => `  ${t.path}`).join("\n")}`);
   }
   return found[0];
 }
@@ -189,30 +191,23 @@ export interface Filters {
 export const hasFilters = (f: Filters): boolean =>
   !!f.text || !!f.labels?.length || !!f.props?.length;
 
-/** Split a leading "!" (negation) off a filter value. */
-function neg(v: string): [boolean, string] {
-  return v.startsWith("!") ? [true, v.slice(1)] : [false, v];
-}
-
 /** All filters AND together; a leading "!" negates a single filter. */
 export function matches(t: Ticket, f: Filters): boolean {
   if (f.text) {
-    const [n, text] = neg(f.text);
+    const [n, text] = splitNegation(f.text);
     if (t.raw.toLowerCase().includes(text.toLowerCase()) === n) return false;
   }
   for (const l of f.labels ?? []) {
-    const [n, label] = neg(l);
+    const [n, label] = splitNegation(l);
     if (t.labels.includes(label) === n) return false;
   }
   for (const p of f.props ?? []) {
-    const [n, spec] = neg(p);
-    const i = spec.indexOf(":");
-    const key = i < 0 ? spec : spec.slice(0, i);
+    const [n, spec] = splitNegation(p);
+    const { key, value: want } = parsePropertyFilter(spec);
     const v = t.data[key];
     let ok: boolean;
-    if (i < 0) ok = v !== undefined && v !== null;
+    if (want === undefined) ok = v !== undefined && v !== null;
     else {
-      const want = spec.slice(i + 1);
       ok = Array.isArray(v) ? v.some((e) => String(e) === want) : v != null && String(v) === want;
     }
     if (ok === n) return false;

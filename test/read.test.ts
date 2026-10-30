@@ -3,10 +3,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { init } from "../src/commands/init.js";
-import { ls } from "../src/commands/ls.js";
-import { boards } from "../src/commands/boards.js";
-import { show } from "../src/commands/show.js";
+import { init } from "../src/cli/commands/init.js";
+import { ls } from "../src/cli/commands/ls.js";
+import { boards } from "../src/cli/commands/boards.js";
+import { show } from "../src/cli/commands/show.js";
 
 let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-")); });
@@ -144,7 +144,7 @@ describe("string ids", () => {
 describe("cli e2e", () => {
   it("runs built cli", () => {
     execFileSync("npx", ["tsc"], { cwd: process.cwd() });
-    const cli = path.resolve("dist/cli.js");
+    const cli = path.resolve("dist/cli/main.js");
     const run = (...a: string[]) => spawnSync("node", [cli, ...a], { cwd: dir, encoding: "utf8" });
     expect(run("ls").status).toBe(1);
     expect(run("ls").stderr).toContain("kb init");

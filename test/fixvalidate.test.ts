@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fix } from "../src/commands/fix.js";
-import { validate } from "../src/commands/validate.js";
+import { fix } from "../src/cli/commands/fix.js";
+import { validate } from "../src/cli/commands/validate.js";
 
 let dir: string;
 beforeEach(() => {

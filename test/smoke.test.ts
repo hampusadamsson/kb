@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { buildProgram, commandNames } from "../src/program.js";
+import { buildProgram, commandNames } from "../src/cli/program.js";
 
 describe("kb", () => {
   it("registers all commands", () => {

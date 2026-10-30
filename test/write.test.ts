@@ -3,9 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
-import { ls } from "../src/commands/ls.js";
-import { add, comment, edit, mv, set, type Io } from "../src/commands/write.js";
-import { splitFrontmatter } from "../src/frontmatter.js";
+import { ls } from "../src/cli/commands/ls.js";
+import { add, comment, edit, mv, set, type Io } from "../src/cli/commands/write.js";
+import { splitFrontmatter } from "../src/core/frontmatter.js";
 
 let dir: string;
 let warns: string[];
