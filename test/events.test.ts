@@ -120,6 +120,18 @@ describe("core events", () => {
     expect(d.columns.renamed).toEqual([{ board: "default", from: "doing", to: "review" }]);
     expect(d.automations.added).toEqual([{ board: "default", name: "r" }]);
   });
+
+  it("config.updated reports a default-board column rename keyed \"\" (as the web UI sends it)", () => {
+    const k = mk();
+    k.add({ name: "A", status: "doing" });
+    evs = [];
+    const cfg = k.getConfig().config as any;
+    k.updateConfig({ ...cfg, columns: ["todo", "review", "done"] }, { renames: { columns: { "": { doing: "review" } } } });
+    const d = evs.find((e) => e.type === "config.updated")!.data as any;
+    expect(d.columns.renamed).toEqual([{ board: "default", from: "doing", to: "review" }]);
+    expect(d.columns.added).toEqual([]);
+    expect(d.columns.removed).toEqual([]);
+  });
 });
 
 describe("automation events", () => {

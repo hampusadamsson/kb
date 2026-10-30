@@ -114,7 +114,7 @@ export function diffConfig(old: Config, next: Config, rawRenames: unknown): Conf
     matched.add(oldName);
     if (oldName !== name) d.boards.renamed.push({ from: oldName, to: name });
     const cr: Record<string, string> = {};
-    for (const [f, t] of Object.entries(rec(colRen[name] ?? colRen[oldName]))) if (typeof t === "string") cr[f] = t;
+    for (const [f, t] of Object.entries(rec(colRen[oldName === old.name ? "" : oldName] ?? colRen[oldName] ?? colRen[name]))) if (typeof t === "string") cr[f] = t;
     const renamedFrom = new Set<string>();
     for (const c of n.columns) {
       if (o.columns.includes(c)) continue;
