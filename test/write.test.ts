@@ -100,7 +100,7 @@ describe("set", () => {
     );
   it("labels, props, unset, name; preserves formatting and body", () => {
     seed();
-    expect(set(dir, "1", { label: ["bug", "new"], unlabel: ["ui"], property: ["prio:low", "x:1"], name: "New" }, io)).toBe("#1 updated");
+    expect(set(dir, "1", { label: ["bug", "new"], unlabel: ["ui"], property: ["prio:low", "x:1"], name: "New" }, io)).toBe("#001 updated");
     const text = read("a.md");
     expect(text).toContain("# keep");
     expect(text.endsWith("---\n\nBody here\n")).toBe(true);
@@ -135,7 +135,7 @@ describe("set", () => {
   });
   it("mv", () => {
     seed();
-    expect(mv(dir, "1", "done", io)).toBe("#1 updated");
+    expect(mv(dir, "1", "done", io)).toBe("#001 updated");
     expect(fm("a.md").status).toBe("done");
     expect(warns).toEqual([]);
     mv(dir, "1", "nope", io);

@@ -170,7 +170,7 @@ export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): st
     fs.writeFileSync(abs, render(doc, body, crlf));
   }
   if (o.edit) openEditor(abs);
-  return `#${t.id} updated`;
+  return `#${fmtId(t.id)} updated`;
 }
 
 export function mv(cwd: string, id: string, status: string, io: Io = defaultIo): string {
