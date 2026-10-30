@@ -8,7 +8,7 @@ export const CONFIG_FILE = "kanban.yaml";
 
 const columnsSchema = z.array(z.string()).min(1, "columns must not be empty");
 
-const automationSchema = z.object({
+export const automationSchema = z.object({
   name: z.string(),
   when: z
     .object({

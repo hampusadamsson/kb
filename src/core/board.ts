@@ -5,6 +5,7 @@ import {
   matchRule,
   renderCommand,
   ticketVars,
+  unknownVars,
   type AutomationEvent,
   type AutomationRecord,
   type AutomationRunner,
@@ -544,6 +545,38 @@ export class Kanban {
     for (const g of duplicates(tickets)) {
       const paths = g.map((t) => t.path).join(", ");
       for (const t of g) err(t.path, `duplicate id ${String(t.id)} (${paths})`);
+    }
+
+    const boardNames = [config.name, ...Object.keys(config.boards ?? {})];
+    for (const board of boardNames) {
+      const cols = columnsFor(config, board);
+      const seen = new Set<string>();
+      for (const rule of automationsFor(config, board)) {
+        const where = `automation "${rule.name}" on board "${board}"`;
+        if (!rule.name.trim()) err(CONFIG_FILE, `automation on board "${board}" has an empty name`);
+        else if (seen.has(rule.name)) err(CONFIG_FILE, `duplicate ${where}`);
+        seen.add(rule.name);
+        if (!rule.run.trim()) err(CONFIG_FILE, `${where} has an empty run command`);
+        for (const v of unknownVars(rule.run)) err(CONFIG_FILE, `${where}: unknown template variable "${v}"`);
+        const col = rule.when.moved_to ?? rule.when.created_in;
+        if (col !== undefined && !cols.includes(col)) {
+          err(CONFIG_FILE, `${where}: column "${col}" is not a column of board "${board}"`);
+        }
+      }
+    }
+    const nowMs = this.now().getTime();
+    for (const t of tickets) {
+      const autos = t.data.automations;
+      if (autos === null || typeof autos !== "object" || Array.isArray(autos)) continue;
+      for (const [rule, e] of Object.entries(autos as Record<string, unknown>)) {
+        if (e === null || typeof e !== "object") continue;
+        const { status, at } = e as { status?: unknown; at?: unknown };
+        if (status !== "running") continue;
+        const ms = at instanceof Date ? at.getTime() : typeof at === "string" ? new Date(at).getTime() : NaN;
+        if (Number.isNaN(ms) || nowMs - ms > 5 * 60_000) {
+          warn(t.path, `automation "${rule}" on board "${t.board}" has been running since ${String(at)} (stale?)`);
+        }
+      }
     }
     return result();
   }

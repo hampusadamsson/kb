@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isMap, isSeq, parseDocument, Scalar, type Document, type YAMLSeq } from "yaml";
 import { z } from "zod";
-import { CONFIG_FILE, loadConfig, type Config } from "./config.js";
+import { automationSchema, columnsFor, CONFIG_FILE, loadConfig, type Automation, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
 import { updateFile } from "./frontmatter.js";
 import { scan, UNSORTED, type Ticket } from "./tickets.js";
@@ -13,7 +13,8 @@ export interface ConfigInput {
   name: string;
   columns: string[];
   glob: string;
-  boards: Record<string, { columns: string[] }>;
+  automations?: Automation[];
+  boards: Record<string, { columns: string[]; automations?: Automation[] }>;
 }
 
 export interface ConfigSnapshot {
@@ -68,7 +69,10 @@ const inputSchema = z.object({
   name: nonEmpty("name"),
   glob: nonEmpty("glob"),
   columns: columnsSchema,
-  boards: z.record(nonEmpty("board name"), z.object({ columns: columnsSchema })).default({}),
+  automations: z.array(automationSchema).optional(),
+  boards: z
+    .record(nonEmpty("board name"), z.object({ columns: columnsSchema, automations: z.array(automationSchema).optional() }))
+    .default({}),
 });
 
 const renamesSchema = z.object({
@@ -92,6 +96,47 @@ function boardRenames(old: Config, next: ConfigInput, renames: Renames): Record<
   return map;
 }
 
+/** Follow column renames in automations the client left on the old column name. */
+function rewriteRenamedColumns(old: Config, next: ConfigInput, renames: Renames, boardRen: Record<string, string>): void {
+  const oldOf: Record<string, string> = {};
+  for (const [from, to] of Object.entries(boardRen)) oldOf[to] = from;
+  const fix = (rules: Automation[] | undefined, map: Record<string, string> | undefined, cols: string[]) => {
+    if (!rules || !map) return;
+    for (const r of rules) {
+      for (const k of ["moved_to", "created_in"] as const) {
+        const c = r.when[k];
+        if (c !== undefined && !cols.includes(c) && map[c] !== undefined) r.when[k] = map[c];
+      }
+    }
+  };
+  fix(next.automations, renames.columns[""], next.columns);
+  for (const [name, b] of Object.entries(next.boards)) {
+    const o = oldOf[name] ?? name;
+    if (o in (old.boards ?? {})) fix(b.automations, renames.columns[o], b.columns);
+  }
+}
+
+/** Automations whose column was removed from their board (by the new board name). */
+function automationBlocks(old: Config, next: ConfigInput, boardRen: Record<string, string>): string[] {
+  const reverse: Record<string, string> = {};
+  for (const [from, to] of Object.entries(boardRen)) reverse[to] = from;
+  const out: string[] = [];
+  for (const board of [next.name, ...Object.keys(next.boards)]) {
+    const rules = board === next.name ? next.automations : next.boards[board]?.automations;
+    const oldName = board === next.name ? old.name : (reverse[board] ?? board);
+    const known = oldName === old.name || oldName in (old.boards ?? {});
+    const oldCols = known ? columnsFor(old, oldName) : [];
+    const cols = next.boards[board]?.columns ?? next.columns;
+    for (const r of rules ?? []) {
+      const col = r.when.moved_to ?? r.when.created_in;
+      if (col !== undefined && !cols.includes(col) && oldCols.includes(col)) {
+        out.push(`cannot remove column "${col}": used by automation "${r.name}" on board "${board}"`);
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Ticket edits that keep tickets valid under the new config: column renames rewrite `status`,
  * board renames rewrite an explicit `board`. Throws if a column still in use would disappear.
@@ -102,6 +147,7 @@ function planTicketChanges(
   tickets: Ticket[],
   renames: Renames,
   boardRen: Record<string, string>,
+  autoBlocked: string[] = [],
 ): TicketChange[] {
   const existing = new Set([old.name, ...Object.keys(old.boards ?? {}), ...tickets.map((t) => t.board)]);
   for (const [from, to] of Object.entries(boardRen)) {
@@ -132,12 +178,13 @@ function planTicketChanges(
       changes.push({ path: t.path, id: t.id, field: "board", from: t.board, to });
     }
   }
-  if (blocked.length) {
-    const shown = blocked.slice(0, 10).join(", ") + (blocked.length > 10 ? `, … (+${blocked.length - 10})` : "");
-    throw new KanbanError(
-      "invalid",
-      `cannot remove columns still in use by ${blocked.length} ticket(s): ${shown}. Move or rename them first.`,
-    );
+  if (blocked.length || autoBlocked.length) {
+    const reasons = [...autoBlocked];
+    if (blocked.length) {
+      const shown = blocked.slice(0, 10).join(", ") + (blocked.length > 10 ? `, … (+${blocked.length - 10})` : "");
+      reasons.push(`cannot remove columns still in use by ${blocked.length} ticket(s): ${shown}. Move or rename them first.`);
+    }
+    throw new KanbanError("invalid", reasons.join("; "));
   }
   return changes;
 }
@@ -145,6 +192,13 @@ function planTicketChanges(
 // ---- writing ----
 
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+const sameAuto = (a: Automation[] | undefined, b: Automation[] | undefined) =>
+  JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+
+function setAutomations(doc: Document, at: string[], rules: Automation[] | undefined): void {
+  if (!rules || rules.length === 0) doc.deleteIn(at);
+  else doc.setIn(at, doc.createNode(rules));
+}
 
 function setColumns(doc: Document, at: string[], cols: string[]): void {
   const node = doc.getIn(at, true);
@@ -174,11 +228,23 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
     }
   }
   const before: Record<string, string[]> = {};
-  for (const [k, v] of Object.entries(old.boards ?? {})) before[keyAfter(k)] = v.columns;
+  const beforeAuto: Record<string, Automation[] | undefined> = {};
+  for (const [k, v] of Object.entries(old.boards ?? {})) {
+    before[keyAfter(k)] = v.columns;
+    beforeAuto[keyAfter(k)] = v.automations;
+  }
+  if (!sameAuto(old.automations, next.automations)) {
+    setAutomations(doc, ["automations"], next.automations);
+    changed = true;
+  }
 
   for (const [name, b] of Object.entries(next.boards)) {
     if (!(name in before) || !same(b.columns, before[name])) {
       setColumns(doc, ["boards", name, "columns"], b.columns);
+      changed = true;
+    }
+    if (!sameAuto(beforeAuto[name], b.automations)) {
+      setAutomations(doc, ["boards", name, "automations"], b.automations);
       changed = true;
     }
   }
@@ -207,9 +273,14 @@ function applyTicketChanges(dir: string, changes: TicketChange[]): void {
 export function getConfigSnapshot(dir: string): ConfigSnapshot {
   const c = loadConfig(dir);
   const boards: ConfigInput["boards"] = {};
-  for (const [k, v] of Object.entries(c.boards ?? {})) boards[k] = { columns: [...v.columns] };
+  for (const [k, v] of Object.entries(c.boards ?? {})) {
+    boards[k] = { columns: [...v.columns] };
+    if (v.automations?.length) boards[k].automations = structuredClone(v.automations);
+  }
+  const config: ConfigInput = { name: c.name, columns: [...c.columns], glob: c.glob, boards };
+  if (c.automations?.length) config.automations = structuredClone(c.automations);
   return {
-    config: { name: c.name, columns: [...c.columns], glob: c.glob, boards },
+    config,
     mtime: fs.statSync(path.join(dir, CONFIG_FILE)).mtimeMs,
   };
 }
@@ -226,7 +297,8 @@ export function updateConfigFile(dir: string, raw: unknown, opts: UpdateConfigOp
 
   const { tickets } = scan(dir, old);
   const boardRen = boardRenames(old, next, renames);
-  const changes = planTicketChanges(old, next, tickets, renames, boardRen);
+  rewriteRenamedColumns(old, next, renames, boardRen);
+  const changes = planTicketChanges(old, next, tickets, renames, boardRen, automationBlocks(old, next, boardRen));
   const doc = parseDocument(fs.readFileSync(file, "utf8"));
   const configChanged = applyConfigToDoc(doc, old, next, boardRen);
 
