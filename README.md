@@ -748,5 +748,6 @@ Implemented: v1, the web UI (`kb web`), automations with the loop guardrail, the
 - The guardrail limit (15) is a constant, not configurable.
 - `GET /api/events` reads the whole log (and `events.1.log`, so up to ~10 MB) per request and filters in memory; fine for a local tool, not for huge logs.
 - Event ids are time-based per machine; clock changes can make ordering odd.
-- Browser verification is limited. Automated: vitest (API, e2e web server tests) and a headless Chrome smoke check (synthetic drag events); the Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner). **Not** verified in a real browser: the Logs tab (rendering, filters, live pill, expand), the guard checkbox and Reset button, the orange skipped dots, rules inside board overrides, the failed-run and 503 displays, the create dialog and the Health fix buttons.
+- Browser verification is limited. Automated: vitest (API, e2e web server tests) and a headless Chrome smoke check (synthetic drag events); the Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner). **Not** verified in a real browser: rules inside board overrides, the failed-run and 503 displays, the create dialog and the Health fix buttons.
+- Logs tab, guard checkbox, skipped dots and Reset were exercised in headless Chrome (synthetic CDP input), not in a real desktop browser.
 - Shell completion: live TAB behaviour in an interactive zsh/bash was not tested (only generation, sourcing and syntax).
