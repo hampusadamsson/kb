@@ -6,7 +6,7 @@ import { KanbanError } from "./errors.js";
 import { splitFrontmatter } from "./frontmatter.js";
 import { parsePropertyFilter, splitNegation } from "./parse.js";
 
-export const RESERVED = ["type", "id", "name", "status", "board", "labels", "comments"];
+export const RESERVED = ["type", "id", "name", "status", "board", "labels", "comments", "automations"];
 export const UNSORTED = "unsorted";
 
 export interface Ticket {

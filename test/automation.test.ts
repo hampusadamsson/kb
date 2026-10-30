@@ -1,0 +1,268 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  matchRule,
+  renderCommand,
+  templateVars,
+  unknownVars,
+  type AutomationEvent,
+  type AutomationRecord,
+  type AutomationRunner,
+  type RunResult,
+} from "../src/core/automation.js";
+import { automationsFor, loadConfig, type Automation } from "../src/core/config.js";
+import { createKanban } from "../src/core/board.js";
+import { readFile } from "../src/core/frontmatter.js";
+import type { Ticket } from "../src/core/tickets.js";
+
+let dir: string;
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-auto-"));
+});
+const w = (name: string, text: string) => fs.writeFileSync(path.join(dir, name), text);
+
+class FakeRunner implements AutomationRunner {
+  calls: { command: string; cwd: string; env: Record<string, string> }[] = [];
+  pending: ((r: RunResult) => void)[] = [];
+  run(command: string, opts: { cwd: string; env: Record<string, string> }) {
+    this.calls.push({ command, ...opts });
+    return new Promise<RunResult>((res) => this.pending.push(res));
+  }
+  finish(r: Partial<RunResult> = {}, i = 0) {
+    this.pending[i]({ exitCode: 0, stdout: "", stderr: "", ...r });
+  }
+}
+
+const NOW = new Date(2026, 9, 30, 14, 20, 5);
+const AT = "2026-10-30T14:20:05";
+
+const rule = (over: Partial<Automation> = {}): Automation => ({
+  name: "r",
+  when: { moved_to: "done" },
+  run: "echo {{ id }}",
+  ...over,
+});
+const tk = (over: Partial<Ticket> = {}): Ticket =>
+  ({
+    path: "1.md", id: "001", name: "T", status: "done", column: "done", board: "default",
+    labels: [], comments: {}, props: {}, body: "", raw: "", data: {}, mtime: 0, ...over,
+  }) as Ticket;
+const mv: AutomationEvent = { type: "moved_to", to: "done", from: "todo" };
+
+function setup(yaml: string, opts: { automations?: boolean; noRunner?: boolean } = {}) {
+  w("kanban.yaml", yaml);
+  const runner = new FakeRunner();
+  const records: AutomationRecord[] = [];
+  const kb = createKanban({
+    dir,
+    now: () => NOW,
+    runner: opts.noRunner ? undefined : runner,
+    automations: opts.automations,
+    onAutomation: (r) => records.push(r),
+  });
+  return { kb, runner, records };
+}
+const BASIC = `columns: [todo, done]
+automations:
+  - name: n
+    when: { moved_to: done }
+    run: "echo {{ id }}"
+  - name: c
+    when: { created_in: todo }
+    run: "echo created {{ id }}"
+`;
+const fm = (rel: string) => readFile(path.join(dir, rel)).doc.toJS() as Record<string, any>;
+
+describe("config", () => {
+  it("parses automations and per-board lists, not inherited", () => {
+    w("kanban.yaml", BASIC + "boards:\n  other:\n    columns: [a, b]\n  third:\n    columns: [a]\n    automations:\n      - { name: x, when: { created_in: a }, run: ls }\n");
+    const c = loadConfig(dir);
+    expect(automationsFor(c, "default")).toHaveLength(2);
+    expect(automationsFor(c, "other")).toEqual([]);
+    expect(automationsFor(c, "third").map((a) => a.name)).toEqual(["x"]);
+  });
+  it("rejects wrong types and bad when", () => {
+    w("kanban.yaml", "columns: [a]\nautomations:\n  - { name: x, when: { moved_to: 3 }, run: ls }\n");
+    expect(() => loadConfig(dir)).toThrow();
+    w("kanban.yaml", "columns: [a]\nautomations:\n  - { name: x, when: { moved_to: a, created_in: a }, run: ls }\n");
+    expect(() => loadConfig(dir)).toThrow(/exactly one/);
+  });
+});
+
+describe("matchRule", () => {
+  it("event types", () => {
+    expect(matchRule(rule(), mv, tk())).toBe(true);
+    expect(matchRule(rule(), { type: "moved_to", to: "todo" }, tk())).toBe(false);
+    expect(matchRule(rule(), { type: "created_in", to: "done" }, tk())).toBe(false);
+    expect(matchRule(rule({ when: { created_in: "done" } }), { type: "created_in", to: "done" }, tk())).toBe(true);
+  });
+  it("enabled false", () => {
+    expect(matchRule(rule({ enabled: false }), mv, tk())).toBe(false);
+  });
+  it("labels incl. negation", () => {
+    const r = rule({ when: { moved_to: "done", labels: ["bug"] } });
+    expect(matchRule(r, mv, tk({ labels: ["bug"] }))).toBe(true);
+    expect(matchRule(r, mv, tk())).toBe(false);
+    const n = rule({ when: { moved_to: "done", labels: ["!bug"] } });
+    expect(matchRule(n, mv, tk({ labels: ["bug"] }))).toBe(false);
+    expect(matchRule(n, mv, tk())).toBe(true);
+  });
+  it("props incl. negation", () => {
+    const r = rule({ when: { moved_to: "done", props: { priority: "high", n: 2 } } });
+    expect(matchRule(r, mv, tk({ data: { priority: "high", n: 2 } }))).toBe(true);
+    expect(matchRule(r, mv, tk({ data: { priority: "low", n: 2 } }))).toBe(false);
+    const n = rule({ when: { moved_to: "done", props: { priority: "!high" } } });
+    expect(matchRule(n, mv, tk({ data: { priority: "high" } }))).toBe(false);
+    expect(matchRule(n, mv, tk({ data: { priority: "low" } }))).toBe(true);
+  });
+});
+
+describe("templates", () => {
+  const vars = { id: "001", name: "it's", body: "x'; rm -rf ~ $(whoami)\n", labels: "a,b", props: { p: 1, o: { a: 1 }, s: "z" } };
+  it("quotes every value", () => {
+    expect(renderCommand("echo {{id}} {{ name }} {{labels}}", vars)).toBe(`echo '001' 'it'\\''s' 'a,b'`);
+    expect(renderCommand("echo {{ body }}", vars)).toBe(`echo 'x'\\''; rm -rf ~ $(whoami)\n'`);
+  });
+  it("missing → empty, props", () => {
+    expect(renderCommand("{{ from }}|{{ props.p }}|{{ props.o }}|{{ props.nope }}", vars)).toBe(`''|'1'|'{"a":1}'|''`);
+  });
+  it("unknown var throws", () => {
+    expect(() => renderCommand("{{ bogus }}", vars)).toThrow(/bogus/);
+    expect(unknownVars("{{ id }} {{ x }} {{ props.a }}")).toEqual(["x"]);
+    expect(templateVars("{{ id }}{{id}}{{ props.a }}")).toEqual(["id", "props.a"]);
+  });
+  it("injection in body stays inside one quoted word", () => {
+    const { kb, runner } = setup(BASIC.replace("echo {{ id }}", "echo {{ body }}"));
+    const { id } = kb.add({ name: "a", body: "'; rm -rf ~ $(touch x)" });
+    kb.move(id, "done");
+    expect(runner.calls.at(-1)!.command).toBe(`echo ''\\''; rm -rf ~ $(touch x)\n'`);
+  });
+});
+
+describe("dispatch", () => {
+  it("moved_to: running → done, preserves frontmatter", async () => {
+    const { kb, runner, records } = setup(BASIC);
+    const { id, path: p } = kb.add({ name: "a", comment: "hi", properties: { x: 1 } });
+    expect(runner.calls).toHaveLength(1); // created_in rule
+    runner.finish();
+    await kb.settled();
+    runner.calls.length = 0;
+    runner.pending.length = 0;
+
+    kb.move(id, "done");
+    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls[0]).toMatchObject({ command: "echo '001'", cwd: dir, env: { KB_AUTOMATION: "1" } });
+    let d = fm(p);
+    expect(d.automations.n).toEqual({ status: "running", at: AT });
+    expect(d.automations.c.status).toBe("done");
+    expect(d.x).toBe(1);
+    expect(Object.values(d.comments)).toEqual(["hi"]);
+    runner.finish();
+    await kb.settled();
+    d = fm(p);
+    expect(d.automations.n).toEqual({ status: "done", at: AT, exit: 0 });
+    expect(d.status).toBe("done");
+    expect(records.at(-1)).toMatchObject({ rule: "n", status: "done", board: "default", path: p, ticketId: "001" });
+  });
+
+  it("failed on non-zero exit and on error", async () => {
+    const { kb, runner } = setup(BASIC);
+    const { id, path: p } = kb.add({ name: "a" });
+    runner.finish({ exitCode: 3 });
+    await kb.settled();
+    expect(fm(p).automations.c).toEqual({ status: "failed", at: AT, exit: 3 });
+    kb.move(id, "done");
+    runner.finish({ exitCode: null, error: "boom" }, 1);
+    await kb.settled();
+    expect(fm(p).automations.n).toEqual({ status: "failed", at: AT, exit: null, error: "boom" });
+  });
+
+  it("render error → failed without running", async () => {
+    const { kb, runner, records } = setup(BASIC.replace("echo {{ id }}", "echo {{ nope }}"));
+    const { id, path: p } = kb.add({ name: "a" });
+    runner.finish();
+    await kb.settled();
+    runner.calls.length = 0;
+    kb.move(id, "done");
+    await kb.settled();
+    expect(runner.calls).toHaveLength(0);
+    expect(fm(p).automations.n.status).toBe("failed");
+    expect(fm(p).automations.n.error).toMatch(/nope/);
+    expect(records.at(-1)!.status).toBe("failed");
+  });
+
+  it("no trigger when status unchanged or non-status edits", () => {
+    const { kb, runner } = setup(BASIC);
+    const { id } = kb.add({ name: "a", status: "done" });
+    runner.calls.length = 0;
+    kb.move(id, "done");
+    kb.update(id, { name: "b", addLabels: ["x"] });
+    kb.comment(id, "c");
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it("settled waits", async () => {
+    const { kb, runner } = setup(BASIC);
+    kb.add({ name: "a" });
+    let done = false;
+    const s = kb.settled().then(() => (done = true));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(done).toBe(false);
+    runner.finish();
+    await s;
+    expect(done).toBe(true);
+  });
+
+  it("status writes don't retrigger", async () => {
+    const { kb, runner } = setup(BASIC);
+    kb.add({ name: "a" });
+    runner.finish();
+    await kb.settled();
+    expect(runner.calls).toHaveLength(1);
+  });
+
+  it("disabled or no runner: nothing runs, nothing written", async () => {
+    for (const o of [{ automations: false }, { noRunner: true }]) {
+      const { kb, runner } = setup(BASIC, o);
+      const { id, path: p } = kb.add({ name: "a" });
+      kb.move(id, "done");
+      await kb.settled();
+      expect(runner.calls).toHaveLength(0);
+      expect(fm(p).automations).toBeUndefined();
+      fs.rmSync(path.join(dir, p));
+    }
+  });
+
+  it("file deleted before completion is fine", async () => {
+    const { kb, runner, records } = setup(BASIC);
+    const { path: p } = kb.add({ name: "a" });
+    fs.rmSync(path.join(dir, p));
+    runner.finish();
+    await kb.settled();
+    expect(fs.existsSync(path.join(dir, p))).toBe(false);
+    expect(records).toHaveLength(1);
+  });
+
+  it("rules are per board", async () => {
+    const { kb, runner } = setup(
+      BASIC + "boards:\n  other:\n    columns: [todo, done]\n  third:\n    columns: [todo, done]\n    automations:\n      - { name: t, when: { created_in: todo }, run: 'echo {{ board }}' }\n",
+    );
+    kb.add({ name: "a", board: "other" });
+    expect(runner.calls).toHaveLength(0);
+    kb.add({ name: "b", board: "third" });
+    expect(runner.calls.map((c) => c.command)).toEqual(["echo 'third'"]);
+    runner.finish();
+    await kb.settled();
+  });
+
+  it("automations is a reserved prop and not a user prop", async () => {
+    const { kb, runner } = setup(BASIC);
+    expect(() => kb.add({ name: "a", properties: { automations: 1 } })).toThrow(/reserved/);
+    const { id } = kb.add({ name: "a" });
+    runner.finish();
+    await kb.settled();
+    expect(kb.get(id).props).toEqual({});
+  });
+});

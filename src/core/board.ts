@@ -1,9 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Document, isSeq, YAMLMap } from "yaml";
-import { columnsFor, CONFIG_FILE, loadConfig, STARTER_CONFIG, type Config } from "./config.js";
+import { Document, isSeq, Scalar, YAMLMap } from "yaml";
+import {
+  matchRule,
+  renderCommand,
+  ticketVars,
+  type AutomationEvent,
+  type AutomationRecord,
+  type AutomationRunner,
+  type RunResult,
+} from "./automation.js";
+import { automationsFor, columnsFor, CONFIG_FILE, loadConfig, STARTER_CONFIG, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
-import { addComment, idScalar, keyOf, readFile, render, updateFile } from "./frontmatter.js";
+import { addComment, commentKey, idScalar, keyOf, readFile, render, updateFile } from "./frontmatter.js";
 import {
   duplicates,
   findById,
@@ -125,6 +134,12 @@ export interface KanbanOptions {
   dir: string;
   /** clock, for comment timestamps */
   now?: () => Date;
+  /** runs automation commands; absent → automations never run */
+  runner?: AutomationRunner;
+  /** set false to disable automations (default true) */
+  automations?: boolean;
+  /** called when an automation run finishes */
+  onAutomation?: (rec: AutomationRecord) => void;
 }
 
 // ---- helpers ----
@@ -218,10 +233,97 @@ function scanWarnings(tickets: Ticket[], diagnostics: Diagnostic[], boards: stri
 export class Kanban {
   readonly dir: string;
   private readonly now: () => Date;
+  private readonly runner?: AutomationRunner;
+  private readonly automationsOn: boolean;
+  private readonly onAutomation?: (rec: AutomationRecord) => void;
+  private readonly inflight = new Set<Promise<void>>();
 
   constructor(opts: KanbanOptions) {
     this.dir = opts.dir;
     this.now = opts.now ?? (() => new Date());
+    this.runner = opts.runner;
+    this.automationsOn = opts.automations !== false;
+    this.onAutomation = opts.onAutomation;
+  }
+
+  /** Resolves when all in-flight automation runs (incl. status writes) are finished. */
+  async settled(): Promise<void> {
+    while (this.inflight.size) await Promise.allSettled([...this.inflight]);
+  }
+
+  private writeAutomationStatus(rel: string, rule: string, entry: Record<string, unknown>): boolean {
+    const abs = path.join(this.dir, rel);
+    if (!fs.existsSync(abs)) return false;
+    try {
+      updateFile(abs, (doc) => {
+        const cur = doc.get("automations", true);
+        if (cur === undefined || cur === null || !(cur instanceof YAMLMap)) doc.set("automations", doc.createNode({}));
+        const at = new Scalar(entry.at);
+        at.type = Scalar.QUOTE_DOUBLE;
+        doc.setIn(["automations", rule], doc.createNode({ ...entry, at }));
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Start matching automations for an event on the ticket at `rel` (state after the write). Never throws. */
+  private dispatch(config: Config, rel: string, event: AutomationEvent): void {
+    const runner = this.runner;
+    if (!runner || !this.automationsOn) return;
+    try {
+      const ticket = scan(this.dir, config).tickets.find((t) => t.path === rel);
+      if (!ticket) return;
+      for (const rule of automationsFor(config, ticket.board)) {
+        if (!matchRule(rule, event, ticket)) continue;
+        const startedAt = commentKey(this.now(), true);
+        this.writeAutomationStatus(rel, rule.name, { status: "running", at: startedAt });
+        const rec = (command: string, result: RunResult): AutomationRecord => ({
+          board: ticket.board,
+          rule: rule.name,
+          ticketId: ticket.id,
+          path: rel,
+          event,
+          command,
+          startedAt,
+          finishedAt: commentKey(this.now(), true),
+          status: result.exitCode === 0 && !result.error ? "done" : "failed",
+          result,
+        });
+        const finish = (r: AutomationRecord) => {
+          const entry: Record<string, unknown> = { status: r.status, at: r.finishedAt, exit: r.result.exitCode };
+          if (r.result.error) entry.error = r.result.error;
+          this.writeAutomationStatus(rel, rule.name, entry);
+          try {
+            this.onAutomation?.(r);
+          } catch {
+            // ignore
+          }
+        };
+        let command: string;
+        try {
+          command = renderCommand(rule.run, ticketVars(ticket, event));
+        } catch (e) {
+          finish(rec(rule.run, { exitCode: null, stdout: "", stderr: "", error: (e as Error).message }));
+          continue;
+        }
+        const p: Promise<void> = (async () => {
+          let result: RunResult;
+          try {
+            result = await runner.run(command, { cwd: this.dir, env: { KB_AUTOMATION: "1" } });
+          } catch (e) {
+            result = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
+          }
+          finish(rec(command, result));
+        })()
+          .catch(() => {})
+          .finally(() => this.inflight.delete(p));
+        this.inflight.add(p);
+      }
+    } catch {
+      // never throw from automations
+    }
   }
 
   /** Write a starter kanban.yaml. */
@@ -341,7 +443,9 @@ export class Kanban {
       if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new KanbanError("exists", `${rel} already exists`);
       throw e;
     }
-    return { id, path: path.relative(this.dir, abs), warnings };
+    const rel2 = path.relative(this.dir, abs);
+    this.dispatch(config, rel2, { type: "created_in", to: status });
+    return { id, path: rel2, warnings };
   }
 
   update(idArg: string, patch: Patch): UpdateResult {
@@ -379,6 +483,9 @@ export class Kanban {
     if (patch.comment !== undefined) addComment(doc, patch.comment, this.now());
     const body = patch.body !== undefined ? bodyText(patch.body) : oldBody;
     fs.writeFileSync(abs, render(doc, body, crlf));
+    if (patch.status !== undefined && patch.status !== t.status) {
+      this.dispatch(config, t.path, { type: "moved_to", from: t.status, to: patch.status });
+    }
     return { id: t.id, warnings };
   }
 
