@@ -41,6 +41,8 @@ glob: "*.md"             # optional, default "*.md", e.g. "**/*.md"; relative to
 boards:                  # optional per-board column override; boards not listed use top-level columns
   another-board:
     columns: [backlog, active, shipped]
+    automations: []      # optional, see Automations
+automations: []          # optional rules for the default board, see Automations
 ```
 
 ## Ticket format
@@ -94,7 +96,9 @@ Rules:
 | `kb comment <id> "text"` | Append a timestamped comment |
 | `kb fix [--dry-run]` | Assign/repair ids |
 | `kb validate` | Check config and tickets |
-| `kb web [--host <addr>] [--port <n>] [--no-open]` | Start the local web UI |
+| `kb web [--host <addr>] [--port <n>] [--no-open] [--no-automation]` | Start the local web UI |
+
+Global flag `--no-automation` (also accepted after `add`, `set`, `mv`, `web`) skips [automations](#automations).
 
 ### init
 
@@ -245,7 +249,7 @@ kb fix
 
 ### validate
 
-Checks: config parse + schema, frontmatter parse errors, missing id, duplicate ids, missing/unknown status, board not declared in `boards:` (warning only), `labels` not a list, `comments` not a map. Exit 0 if no errors, 1 if errors; warnings do not affect the exit code. Duplicate ids produce one error line per file.
+Checks: config parse + schema, automation rules (see [Automations](#validation)), frontmatter parse errors, missing id, duplicate ids, missing/unknown status, board not declared in `boards:` (warning only), automation stuck in `running` for over 5 minutes (warning), `labels` not a list, `comments` not a map. Exit 0 if no errors, 1 if errors; warnings do not affect the exit code. Duplicate ids produce one error line per file.
 
 ```sh
 kb validate
@@ -340,13 +344,110 @@ JSON in and out. Errors: `{ "error": "...", "code": "..." }`.
 | `POST /api/fix` | Body `{ dryRun }`, default `true` |
 | `GET /api/config` | `{ config: {name, columns, glob, boards}, mtime }` |
 | `PUT /api/config` | Body `{ config, renames?, mtime?, dryRun? }` → `{ dryRun, changes, configChanged, mtime }`. `renames` is `{ columns: { "": {old: new}, <board>: {old: new} }, boards: {old: new} }`. `dryRun` (only when exactly `true`) reports ticket edits without writing. Stale `mtime` → 409 `code: "stale"`; invalid config or a column still in use → 400 `invalid` |
+| `POST /api/automation/test` | Render and really run a script with a sample ticket (see [Automations](#automations)) |
+| `GET /api/automation/log` | `{ runs }`: the last 20 automation runs, newest first |
 | `GET /api/events` | SSE stream (`changed` events) |
+
+`/api/automation/test` body: `{ run, event?: "moved_to"|"created_in", board?, sample?: { id, name, body, status, from, to, labels, props } }` → `{ command, result: { exitCode, stdout, stderr, error? } }`. Unknown variable or bad placeholder position → 400 `invalid`; automations disabled → 503 `disabled`; more than 2 test runs in flight → 429 `busy`. Test runs are not logged and touch no ticket.
 
 Status mapping: `not-found` 404; `ambiguous`, `exists`, `stale` 409; `invalid`, `parse` 400; `unsupported` 415; host not allowed 421; `config` 500; body too large (1 MB) 413.
 
 ### Frontend
 
-`src/web/public/`: vanilla ES modules, no build step, no dependencies. `index.html`, `style.css`, `app.js` (wiring), `api.js`, `board.js`, `dialog.js`, `filters.js`, `settings.js`, `dom.js`, and `logic.js` (pure logic, unit-tested).
+`src/web/public/`: vanilla ES modules, no build step, no dependencies. `index.html`, `style.css`, `app.js` (wiring), `api.js`, `board.js`, `dialog.js`, `filters.js`, `settings.js`, `automations.js` (Settings → Automations builder and Last runs), `dom.js`, and `logic.js` (pure logic, unit-tested).
+
+## Automations
+
+A rule runs a shell script when a ticket is moved to a column or created in one. Rules belong to a board: the default board uses top-level `automations`, other boards use `boards.<name>.automations`. Rules are **not inherited**; a board only runs its own.
+
+```yaml
+automations:
+  - name: notify-done
+    when:
+      moved_to: done           # or created_in: <column> (exactly one)
+      labels: [release, "!wip"]  # optional, all must match; ! negates
+      props: { priority: high, team: "!ops" }  # optional, ! negates (also true when absent)
+    run: echo {{ id }} {{ name }} >> done.log
+    enabled: true              # optional, default true; false skips the rule
+boards:
+  another-board:
+    columns: [backlog, active, shipped]
+    automations:
+      - name: ship
+        when: { moved_to: shipped }
+        run: ./deploy.sh {{ id }}
+```
+
+Triggers: `kb mv`, `kb set -s`, `kb add` (created in its status), and the web UI/API (drag, PATCH, create). Editing a file by hand or with `kb edit` triggers nothing.
+
+### Template variables
+
+`{{ id }}`, `{{ name }}`, `{{ body }}`, `{{ board }}`, `{{ status }}`, `{{ from }}` (empty on create), `{{ to }}`, `{{ path }}` (relative to the config dir), `{{ labels }}` (comma-joined), `{{ event }}` (`moved_to` or `created_in`), `{{ props.<key> }}` (empty if absent). Unknown variables are errors.
+
+Every value is shell-quoted automatically (`'…'`). **Write placeholders bare — not inside quotes, backticks or heredocs.** `validate` and saving the config reject placeholders in those positions (`$( … )` is fine).
+
+```sh
+echo {{ name }} >> log.txt             # safe
+git commit -m {{ name }}               # safe
+echo "{{ name }}" >> log.txt           # rejected: inside "…"
+echo `echo {{ name }}`                 # rejected: inside backticks
+cat <<EOF
+{{ body }}                             # rejected: inside heredoc
+EOF
+```
+
+With bare placeholders, hostile ticket text (`'; rm -rf ~`) is passed as one literal argument. Inside quotes it would not be.
+
+### Execution
+
+- The rendered script is piped to `bash -s` stdin, with the config dir as cwd and `KB_AUTOMATION=1` added to the environment.
+- 30 s timeout (the whole process group is killed). stdout/stderr are each capped at 64 KiB.
+- Non-blocking: the move/add succeeds first and rules run in the background. A failing script never fails the command.
+- CLI: the result is printed immediately, then `kb` waits for running scripts before exiting and prints `warning: automation "<name>" failed (…)` to stderr for failures. The web server is fully async; Ctrl-C kills running scripts.
+- Several matching rules on one event all start together.
+
+### Status in the ticket
+
+Each run is recorded in the ticket's frontmatter, keyed by rule name:
+
+```yaml
+automations:
+  notify-done:
+    status: done         # running | done | failed
+    at: "2025-06-01T14:32:05"
+    exit: 0              # null if killed or not started
+    error: "timeout after 30s"   # only on errors
+```
+
+`running` is written at start, then replaced by `done`/`failed` with the finish time.
+
+### Loop guard
+
+Scripts get `KB_AUTOMATION=1`, and `kb` run with that variable set (or with `--no-automation`) never triggers automations. So a script that calls `kb mv` cannot start a loop. There is no depth cap beyond this, and scripts that call the web API (`curl`) are **not** guarded.
+
+### Log
+
+`.kb/automation.log` (gitignored) holds one JSON line per finished run: board, rule, ticket id and path, event, rendered command, start/finish time, status and result (exit code, stdout, stderr, error). The command and each output are clipped to 4 KiB. Above 256 KiB the file is cut to the newest 200 lines. Test runs are not logged.
+
+### Validation
+
+`kb validate` (and saving the config) report as errors: empty or duplicate rule names, empty `run`, unknown template variables, placeholders inside quotes/backticks/heredocs, and a column that is not a column of the rule's board. A ticket whose rule has been `running` for more than 5 minutes (or with an unparseable time) gets a stale-run warning.
+
+Renaming a column in Settings rewrites the rules that use it. Removing a column that a rule uses is blocked (the error names the rule).
+
+### Settings → Automations
+
+Settings has a rule card per board (default board and each override): name, enabled, event (moved to / created in) plus column, required labels, property filters (`!x` = not x), script, and a variable hint. **Test run** asks for confirmation and then *really executes* the script with a sample ticket (`POST /api/automation/test`). **Last automation runs** lists the last 20 runs; click a row for command, stdout and stderr.
+
+### Disabling
+
+`--no-automation` (global flag, or on `add`/`set`/`mv`/`web`) or `KB_AUTOMATION` in the environment turns it off. With `kb web --no-automation` rules never run, test runs return 503 and the UI shows the error.
+
+### Security notes
+
+- There is no auth by design. Anyone who can reach `kb web` can edit the config (Settings, or `PUT /api/config`) and so run commands as your user. Binding to a non-loopback host prints a warning (use `--no-automation` there).
+- Hostile ticket text is safe only with bare placeholders (see above).
+- Scripts that finish later rewrite the ticket's frontmatter, so the web UI may show the stale-edit banner if you had it open.
 
 ## Architecture
 
@@ -356,6 +457,10 @@ Three layers:
 src/core/   UI-agnostic domain/service layer (Kanban API, config, tickets, frontmatter, parse helpers, KanbanError)
 src/cli/    thin adapter: commander wiring, flag parsing, output formatting, stdin, $EDITOR, colour/TTY, exit codes
 src/web/    second adapter over the core: http server, REST API, fs watcher + SSE, vanilla frontend in public/
+src/runner.ts  bash AutomationRunner (timeout, output caps); outside core, which only knows the interface
+src/automationLog.ts  .kb/automation.log writer/reader (rotation)
+src/cli/automation.ts  CLI session: runner + log, waits for scripts, loop guard
+src/web/public/automations.js  Settings → Automations builder
 src/index.ts  public library entry (re-exports core)
 ```
 
@@ -371,6 +476,9 @@ Reading stdin, spawning editors and warnings output are the UI's job (use `pathO
 import { createKanban, KanbanError } from "kb";
 
 const kb = createKanban({ dir: process.cwd() });
+// automations only run when you pass a runner (they never run otherwise):
+// createKanban({ dir, runner, automations: true, onAutomation: (rec) => log(rec) });
+// await kb.settled(); // wait for in-flight automation runs
 const { id, warnings } = kb.add({ name: "Fix login", labels: ["bug"], properties: { priority: "high" } });
 kb.move(id, "doing");
 kb.comment(id, "started");
@@ -414,5 +522,7 @@ Implemented: v1 plus the web UI (`kb web`). All commands working; vitest suite p
 - Rewrites preserve YAML comments, key order and body, but whitespace inside frontmatter is normalised by the yaml library (e.g. `key:   value` → `key: value`).
 - `mv`/`set` to a status not in the board's columns only warns (ticket lands in unsorted).
 - `node_modules` is always excluded from the glob scan.
+- Comments inside the `automations:` list of `kanban.yaml` are not preserved when the list is saved from the UI.
+- The Automations builder was only partly verified in a browser: rules inside board overrides, the failed-run display and the 503 display were not clicked.
 - Web UI is not tested in real browsers beyond a headless Chrome smoke check (synthetic drag events).
 - The create dialog and the Health fix buttons have not been exercised in a browser. The Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner).
