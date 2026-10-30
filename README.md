@@ -97,6 +97,8 @@ Rules:
 | `kb fix [--dry-run]` | Assign/repair ids |
 | `kb validate` | Check config and tickets |
 | `kb web [--host <addr>] [--port <n>] [--no-open] [--no-automation]` | Start the local web UI |
+| `kb completion <bash\|zsh>` | Print a shell completion script (see [Shell completion](#shell-completion)) |
+| `kb help [command]` | Help about any command (same as `kb <command> --help`) |
 
 Global flag `--no-automation` (also accepted after `add`, `set`, `mv`, `web`) skips [automations](#automations).
 
@@ -264,6 +266,45 @@ kb web
 kb web --port 8080 --no-open
 kb web --host 0.0.0.0
 ```
+
+### Help
+
+`kb help <cmd>` and `kb <cmd> --help` show USAGE / ARGUMENTS / FLAGS / NOTES / EXAMPLES sections in a jira-cli-like layout. Color is used only on a TTY (and not with `NO_COLOR`).
+
+### Shell completion
+
+`kb completion <shell>` prints a completion script for `zsh` or `bash`.
+
+**zsh** — add to `~/.zshrc`, after `autoload -U compinit && compinit`:
+
+```sh
+source <(kb completion zsh)
+```
+
+**bash** — either source it from `~/.bashrc`:
+
+```sh
+source <(kb completion bash)
+```
+
+or write it to a file in the bash-completion directory:
+
+```sh
+kb completion bash > /etc/bash_completion.d/kb
+kb completion bash > "$(brew --prefix)/etc/bash_completion.d/kb"   # Homebrew
+```
+
+What is completed:
+
+- Commands (with descriptions in zsh) and each command's options.
+- Ticket ids for `show`, `set`, `mv`, `edit`, `comment` (with ticket names in zsh).
+- Columns: for `kb mv <id> <status>` the columns of that ticket's board; for `-s/--status` the columns of all boards.
+- Boards (`--board`), labels (`--label`, `--unlabel`), property keys (`--property`, `--unset`; inserted as `key:`).
+- `--format` values (`json`, `text`) and the shells for `kb completion`.
+
+The scripts are generated from the commander definition, so commands and options cannot drift from the CLI. Dynamic values come from a hidden helper, `kb __complete <kind>` (`ids`, `columns`, `boards`, `labels`, `propkeys`). It is silent on errors (prints nothing, no stderr output) and never runs automations.
+
+Limitation: the scripts were checked only by generating, sourcing and syntax-checking them. Live TAB behaviour in an interactive shell was not tested by the agents.
 
 ## Matching & sorting
 
@@ -460,6 +501,9 @@ src/web/    second adapter over the core: http server, REST API, fs watcher + SS
 src/runner.ts  bash AutomationRunner (timeout, output caps); outside core, which only knows the interface
 src/automationLog.ts  .kb/automation.log writer/reader (rotation)
 src/cli/automation.ts  CLI session: runner + log, waits for scripts, loop guard
+src/cli/help.ts, help-content.ts  help layout renderer and per-command help text (USAGE/ARGUMENTS/FLAGS/NOTES/EXAMPLES)
+src/cli/completion.ts, completion-model.ts, completion-zsh.ts, completion-bash.ts  completion scripts generated from the commander program
+src/cli/commands/complete.ts  candidates for the hidden `kb __complete` helper
 src/web/public/automations.js  Settings → Automations builder
 src/index.ts  public library entry (re-exports core)
 ```
@@ -524,5 +568,6 @@ Implemented: v1 plus the web UI (`kb web`). All commands working; vitest suite p
 - `node_modules` is always excluded from the glob scan.
 - Comments inside the `automations:` list of `kanban.yaml` are not preserved when the list is saved from the UI.
 - The Automations builder was only partly verified in a browser: rules inside board overrides, the failed-run display and the 503 display were not clicked.
+- Shell completion: live TAB behaviour in an interactive zsh/bash was not tested (only generation, sourcing and syntax).
 - Web UI is not tested in real browsers beyond a headless Chrome smoke check (synthetic drag events).
 - The create dialog and the Health fix buttons have not been exercised in a browser. The Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner).
