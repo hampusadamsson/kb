@@ -2,8 +2,6 @@
 
 A small, local, single-user CLI kanban. Tickets are markdown files with YAML frontmatter.
 
-## Overview
-
 - CLI plus an optional local web UI (`kb web`). No auth (see [security model](#security-model)), no TUI. Plain commands, output to stdout.
 - Stack: TypeScript, Node 22+, ESM.
   - `commander` — CLI
@@ -14,12 +12,27 @@ A small, local, single-user CLI kanban. Tickets are markdown files with YAML fro
   - Web UI: Node built-in `http` and a vanilla JS frontend — no extra dependencies, no build step for the frontend
 - Binary name: `kb`. Installed via `npm link`.
 
+`kb --help` covers everyday use; this README covers configuration and advanced features (columns, boards, [automations](#automations), the [activity log](#activity-log-audit-events), the [REST API](#rest-api)). See [`example/`](example/) for a sample board with automations.
+
 ## Install
 
 Requires Node 22+.
 
 ```sh
 npm install && npm run build && npm link
+```
+
+## Quick start
+
+Same steps as `kb --help` → GETTING STARTED:
+
+```sh
+kb init                         # create kanban.yaml (columns todo, doing, done)
+kb add "Fix login" -l bug       # create a ticket (first column)
+kb ls --format text             # see the board
+kb mv 1 doing                   # move a ticket to another column
+kb show 1                       # read a ticket;  kb edit 1  to edit it in $EDITOR
+kb web                          # open the board in your browser
 ```
 
 ## Development
@@ -30,57 +43,9 @@ npm run build && npm test
 
 `npm run build` runs `tsc` and copies `src/web/public` to `dist/web/public`. The e2e web tests need a built `dist`, so run the build before the tests.
 
-## Config
+## Everyday CLI usage
 
-File: `./kanban.yaml`, read from the current working directory only. If missing, `kb` errors with a hint to run `kb init`.
-
-```yaml
-name: default            # optional, renames default board (default "default")
-columns: [todo, doing, done]   # ordered as listed
-glob: "*.md"             # optional, default "*.md", e.g. "**/*.md"; relative to config dir
-boards:                  # optional per-board column override; boards not listed use top-level columns
-  another-board:
-    columns: [backlog, active, shipped]
-    automations: []      # optional, see Automations
-automations: []          # optional rules for the default board, see Automations
-```
-
-## Ticket format
-
-A ticket is any markdown file matched by `glob` whose YAML frontmatter has `type: ticket`. Other files are ignored silently. Flat directory by default.
-
-Reserved keys: `type`, `id`, `name`, `status`, `board`, `labels`, `comments`.
-
-Example (`001-fix-login-bug.md`):
-
-```markdown
----
-type: ticket
-id: "001"
-name: Fix login bug
-status: todo
-board: another-board       # omitted on the default board
-labels: [bug]
-priority: high             # non-reserved: rendered as key:value label
-comments:
-  2025-06-01T14:32: blocked on X
-  2025-06-01T14:32:05: unblocked, retrying
----
-
-Free-form markdown body.
-```
-
-Rules:
-
-- **id**: frontmatter property; any value (int or string). Filename is irrelevant for identity. New ids are zero-padded strings (`"001"`, padded to 3, grows past 999), written as quoted YAML strings (`id: "001"`) so they stay strings. Ids are displayed exactly as stored (`#001`; legacy `id: 1` shows `#1`; no id shows `#?`). `--id <value>` is stored exactly as given, as a string (`--id 7` stores `"7"`). Error if taken (duplicate rule below). `set` refuses to change id. Numeric id = integer or digit-only string; used for next-id (max numeric + 1, padded) and sorting.
-- **Filename on add**: `./<id>-slug.md` (the id string, i.e. zero-padded `NNN` by default; slug from name). Override with `-f/--file` (relative to config dir). With `--id` the prefix is `<slug(id)>`. Files are never renamed.
-- **name**: title stored as `name:`; body is free markdown.
-- **status**: decides the column. Missing, or not a column of the ticket's board → shown in the "unsorted" group with a warning. Files are never auto-edited (except via fix/write commands).
-- **board**: optional. Absent = default board. Written only when not default. Boards are discovered from tickets.
-- **labels**: list property, rendered as `[x]` tags. All other non-reserved properties are rendered automatically as `key:value` labels.
-- **comments**: map keyed by local time ISO to the minute, e.g. `2025-06-01T14:32: blocked on X`. On collision within the same minute, seconds are used (`2025-06-01T14:32:05`); if that also collides, seconds are added until a free key is found.
-
-## Commands
+### Commands
 
 | Command | Description |
 |---|---|
@@ -102,7 +67,7 @@ Rules:
 
 Global flag `--no-automation` (also accepted after `add`, `set`, `mv`, `web`) skips [automations](#automations).
 
-### init
+#### init
 
 Writes a starter `kanban.yaml`; refuses if one exists.
 
@@ -110,7 +75,7 @@ Writes a starter `kanban.yaml`; refuses if one exists.
 kb init
 ```
 
-### ls
+#### ls
 
 Prints **JSON by default** (one object, easy for scripts and agents); `--format text` gives the board view for humans. Matching tickets are listed flat in board → column → id order (unsorted last).
 
@@ -169,13 +134,13 @@ doing (1)
   #002 Refactor parser
 ```
 
-### boards
+#### boards
 
 ```sh
 kb boards
 ```
 
-### add
+#### add
 
 Flags:
 
@@ -199,12 +164,13 @@ echo "long body" | kb add "From stdin" --body -
 kb add "Custom" -f notes/custom.md --id ABC-1 -c "created by hand"
 ```
 
-### set
+#### set
 
 Same flags as `add` (except `-f` and `--id`), plus:
 
 - `--unset key` (repeatable)
 - `--unlabel x` (repeatable)
+- `--reset-automations` (delete the ticket's automation run history, which resets the [loop guardrail](#loop-guardrail) counter; triggers nothing)
 
 Refuses to change `id` or reserved `type`.
 
@@ -214,19 +180,19 @@ kb set 1 --unset priority --unlabel bug
 kb set 1 -n "Fix login redirect bug"
 ```
 
-### mv
+#### mv
 
 ```sh
 kb mv 1 doing
 ```
 
-### show
+#### show
 
 ```sh
 kb show 1
 ```
 
-### edit
+#### edit
 
 Uses `$EDITOR` only (`VISUAL` is ignored), default `vi`. Run via shell, so `EDITOR="code -w"` works.
 
@@ -234,13 +200,13 @@ Uses `$EDITOR` only (`VISUAL` is ignored), default `vi`. Run via shell, so `EDIT
 kb edit 1
 ```
 
-### comment
+#### comment
 
 ```sh
 kb comment 1 "blocked on X"
 ```
 
-### fix
+#### fix
 
 For `type: ticket` files without an id: assign id from numeric filename prefix (`042-foo.md` → `"042"`, prefix kept as-is) if present and free, else the next padded id. Processing order: mtime, then path. Also repairs duplicate ids: the oldest (mtime, then path) keeps it; others get next free padded ids. New ids are max numeric + 1, skipping ids already used (including ones assigned in the same run). Never renames files. Prints each change.
 
@@ -249,7 +215,7 @@ kb fix --dry-run
 kb fix
 ```
 
-### validate
+#### validate
 
 Checks: config parse + schema, automation rules (see [Automations](#validation)), frontmatter parse errors, missing id, duplicate ids, missing/unknown status, board not declared in `boards:` (warning only), automation stuck in `running` for over 5 minutes (warning), `labels` not a list, `comments` not a map. Exit 0 if no errors, 1 if errors; warnings do not affect the exit code. Duplicate ids produce one error line per file.
 
@@ -257,7 +223,7 @@ Checks: config parse + schema, automation rules (see [Automations](#validation))
 kb validate
 ```
 
-### web
+#### web
 
 Starts the local web UI for the board in the current directory (needs `kanban.yaml`). See [Web UI](#web-ui-kb-web).
 
@@ -267,9 +233,12 @@ kb web --port 8080 --no-open
 kb web --host 0.0.0.0
 ```
 
+
 ### Help
 
-`kb help <cmd>` and `kb <cmd> --help` show USAGE / ARGUMENTS / FLAGS / NOTES / EXAMPLES sections in a jira-cli-like layout. Color is used only on a TTY (and not with `NO_COLOR`).
+`kb --help` shows the basics: GETTING STARTED, TICKETS, MAIN/OTHER COMMANDS, FLAGS, ENVIRONMENT, EXAMPLES. `kb help <cmd>` and `kb <cmd> --help` show USAGE / ARGUMENTS / FLAGS / NOTES / EXAMPLES in a jira-cli-like layout. Color is used only on a TTY (and not with `NO_COLOR`).
+
+The help deliberately covers basic use only. Configuration (columns, boards, automations) is documented here; the help points to this README and to `example/`.
 
 ### Shell completion
 
@@ -306,6 +275,42 @@ The scripts are generated from the commander definition, so commands and options
 
 Limitation: the scripts were checked only by generating, sourcing and syntax-checking them. Live TAB behaviour in an interactive shell was not tested by the agents.
 
+
+## Ticket format
+
+A ticket is any markdown file matched by `glob` whose YAML frontmatter has `type: ticket`. Other files are ignored silently. Flat directory by default.
+
+Reserved keys: `type`, `id`, `name`, `status`, `board`, `labels`, `comments`.
+
+Example (`001-fix-login-bug.md`):
+
+```markdown
+---
+type: ticket
+id: "001"
+name: Fix login bug
+status: todo
+board: another-board       # omitted on the default board
+labels: [bug]
+priority: high             # non-reserved: rendered as key:value label
+comments:
+  2025-06-01T14:32: blocked on X
+  2025-06-01T14:32:05: unblocked, retrying
+---
+
+Free-form markdown body.
+```
+
+Rules:
+
+- **id**: frontmatter property; any value (int or string). Filename is irrelevant for identity. New ids are zero-padded strings (`"001"`, padded to 3, grows past 999), written as quoted YAML strings (`id: "001"`) so they stay strings. Ids are displayed exactly as stored (`#001`; legacy `id: 1` shows `#1`; no id shows `#?`). `--id <value>` is stored exactly as given, as a string (`--id 7` stores `"7"`). Error if taken (duplicate rule below). `set` refuses to change id. Numeric id = integer or digit-only string; used for next-id (max numeric + 1, padded) and sorting.
+- **Filename on add**: `./<id>-slug.md` (the id string, i.e. zero-padded `NNN` by default; slug from name). Override with `-f/--file` (relative to config dir). With `--id` the prefix is `<slug(id)>`. Files are never renamed.
+- **name**: title stored as `name:`; body is free markdown.
+- **status**: decides the column. Missing, or not a column of the ticket's board → shown in the "unsorted" group with a warning. Files are never auto-edited (except via fix/write commands).
+- **board**: optional. Absent = default board. Written only when not default. Boards are discovered from tickets.
+- **labels**: list property, rendered as `[x]` tags. All other non-reserved properties are rendered automatically as `key:value` labels.
+- **comments**: map keyed by local time ISO to the minute, e.g. `2025-06-01T14:32: blocked on X`. On collision within the same minute, seconds are used (`2025-06-01T14:32:05`); if that also collides, seconds are added until a free key is found.
+
 ## Matching & sorting
 
 - CLI id arguments match `String(id)` exactly first; if none match, numeric ids are compared by value (`kb show 1` finds `"001"`, and `001` finds `id: 1`). If the numeric fallback matches several tickets, it is an ambiguity error listing paths.
@@ -320,84 +325,68 @@ Limitation: the scripts were checked only by generating, sourcing and syntax-che
 - Writes never fold long strings (`lineWidth: 0`).
 - CRLF: if the frontmatter starts with `---\r\n`, it is re-rendered with CRLF; the body is never modified.
 
-## Web UI (`kb web`)
+## Configuration (kanban.yaml)
 
-### Launch
+File: `./kanban.yaml`, read from the current working directory only. If missing, `kb` errors with a hint to run `kb init` (which writes `name`, `columns: [todo, doing, done]` and `glob`).
 
-```sh
-kb web [--host <addr>] [--port <n>] [--no-open]
+| Key | Meaning |
+|---|---|
+| `name` | Optional, default `"default"`. Name of the default board (tickets without `board:`). |
+| `columns` | Required, non-empty, ordered as listed. |
+| `glob` | Optional, default `"*.md"`, e.g. `"**/*.md"`; relative to the config dir. `node_modules` is always excluded. |
+| `boards.<name>.columns` | Optional per-board column override. Boards not listed use the top-level `columns`. |
+| `automations` | Optional rules for the default board, see [Automations](#automations). |
+| `boards.<name>.automations` | Optional rules for that board. Not inherited from the default board. |
+
+The sample board in [`example/`](example/) (a `kanban.yaml` plus ~20 tickets) uses all of the above except `boards:`:
+
+```yaml
+name: default
+columns: [todo, doing, review, done]
+glob: "*.md"
+automations:
+  - name: log-review
+    when:
+      moved_to: review
+    run: echo {{ id }} {{ body }} >> test.txt
+  - name: followup-on-done
+    when:
+      moved_to: done
+    run: sleep 15 && kb add "ABC"{{ id }} -s todo
+  - name: pi
+    when:
+      moved_to: done
+    run: pi --role researcher -p "check kb cli for operation. your task is to interact with a board kb. read "{{ body }}" and create a ticket in todo with a summary of this topic from the web."
+    enabled: false
 ```
 
-- Requires `kanban.yaml` in the current directory (errors otherwise).
-- `--host` default `127.0.0.1`.
-- `--port` default `4747`; if busy, the next ports are tried, up to 50 times. With an explicit `--port` the port is strict: it errors if busy.
-- Prints `kb web running at <url>`. For a wildcard host (`0.0.0.0`, `::`) the URL uses `localhost` and a `listening on <host>:<port>` line is added.
-- A non-loopback host prints a no-auth warning to stderr.
-- The browser is opened unless `--no-open`.
-- Ctrl-C / SIGTERM shut down cleanly.
+- The board is called `default`, has four columns (`review` is the extra one) and picks up every `*.md` in the folder.
+- `log-review` and `followup-on-done` are explained in [the example rules](#the-example-rules). `pi` is disabled with `enabled: false` (the rule is kept but skipped). Its prompt closes the quote before `{{ body }}` and reopens it after, so the placeholder is bare and passes validation. `pi` is a local agent CLI, not part of kb.
+- The tickets (`001-dummy123.md` …) are ordinary tickets. Those that have run rules carry an `automations:` block recording each run (see [Status in the ticket](#status-in-the-ticket)); `test.txt` is the file `log-review` appends to.
+- To try it: `cd example && kb ls --format text`, `kb validate`, `kb web`. Moving a ticket to `review` appends to `test.txt`.
 
-### Features
+A board override with its own columns and rules looks like this:
 
-- Board tabs plus an **All** tab. Columns follow the config; the `unsorted` column is shown but is not a drop target.
-- Cards; drag a card to another column of the **same board** to change its `status`. Cross-board drags are ignored.
-- Create: the **+** in each column header opens the create dialog with that board and status preset. There is no global "New" button.
-- Detail dialog: name, status, board, labels, properties, body, comments (add comments there). Comment keys have minute granularity (seconds on collision).
-- **Automation status dots**: tickets with `automations:` run status in frontmatter show one small dot per automation on the card (worst first: failed, running, done, unknown; wraps onto a second line when many) plus the names of running rules (`running: pi, followup`) and an *Automations* section in the detail dialog (rule, status word, relative time, exit code, error). Legend: green = done, yellow (pulsing) = running, red = failed (failed status, non-zero exit or error), grey = unknown. Each dot has a tooltip/aria-label; updates arrive live, and an open dialog only refreshes that section (your edits are kept, no "changed on disk" banner).
-- Filter bar: text, labels, properties, with `!` negation as in `kb ls`. State lives in the URL hash: `#board=..&text=..&l=..&p=..`.
-- **Settings** (header button, badge = issue count) is a dialog with three tabs (arrow keys switch, `Home`/`End` jump): **Config**, **Automations**, **Health**. Config and Automations share one form state (one dirty state, one Save/Revert; a • marks tabs with unsaved changes); Health shows its issue count in the tab title.
-  - **Automations** tab: one section per board (default + overrides) with the rule builder and a *Last runs* list. Automation validation errors are prefixed `Automations:`.
-  - *Config* tab: form for `kanban.yaml`: default board name, `glob`, ordered columns (rename inline, reorder, add, remove), and per-board column overrides (add, rename, remove). Saving keeps your YAML comments and unrelated keys.
-  - Renaming a column rewrites `status` on every ticket using it; renaming a board rewrites an explicit `board:`. Before anything is written the UI shows how many ticket files will change (dry run) and asks to confirm.
-  - Removing a column is **blocked** while tickets still use it (the error lists them). Removing a board override is allowed; its tickets fall back to the default columns. Unsorted tickets never block.
-  - Invalid configs (empty/duplicate columns, empty name or glob) are refused and nothing is written. If `kanban.yaml` changes on disk while the form is open, a banner offers **Reload** (and **Overwrite** after a stale save).
-  - *Health* tab: `validate` results and board warnings; `fix` with a dry-run preview before applying. Parse errors are shown only here.
-- Tickets with duplicate ids or no id are read-only and carry badges (use `fix`).
-- Stale-edit banner: edits send the ticket's mtime; if the file changed on disk the UI offers **Reload** or **Overwrite**.
-- Not available in the UI: `init` and `edit`.
+```yaml
+boards:
+  another-board:
+    columns: [backlog, active, shipped]
+    automations: []
+```
 
-### Live updates
+### Validation rules
 
-- `fs.watch` (recursive) on the board dir, filtered by `glob`; `kanban.yaml` changes count too. `node_modules`, `dist` and `.git` are ignored.
-- Debounced 100 ms, with a 1 s max-wait. Events go out over SSE (`/api/events`); the UI refetches on every event.
-- If the watcher is unavailable there are no live updates (the API still works).
+Config problems are errors (`kb validate`, and the Settings save is refused with nothing written):
 
-### Security model
+- invalid YAML or schema (`columns` missing or empty, wrong types);
+- `columns` empty or duplicate, empty column name, empty board name, empty `name` or `glob` (Settings save);
+- automation rules: see [Automations → Validation](#validation).
 
-There is no auth. Anyone who can reach the server can read and edit tickets. Guards:
+A board that exists only on tickets and not in `boards:` is a warning, not an error; it uses the default columns.
 
-- Same-origin: a request whose `Origin` differs from `Host` gets 403; `Sec-Fetch-Site`, if sent, must be `same-origin` or `none`.
-- Writes (non-GET) require `Content-Type: application/json` (else 415).
-- Loopback bind: the `Host` header is validated (421 on mismatch) against DNS rebinding.
-- Non-loopback bind: the Host check is skipped so LAN access works. Only use this on networks you trust.
-- CSP and frame protections (`frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`).
-- `file` for add must stay inside the board dir and end in `.md`. This also applies to CLI `add -f`.
+### Editing in Settings → Config
 
-### REST API
-
-JSON in and out. Errors: `{ "error": "...", "code": "..." }`.
-
-| Endpoint | Description |
-|---|---|
-| `GET /api/board` | Board view; query `board`, `text`, `label`, `property` (filters as in `ls`) |
-| `GET /api/tickets/:id` | Ticket detail (ids URL-encoded) |
-| `PATCH /api/tickets/:id` | Core patch fields (`name`, `status`, `board`, `addLabels`, `removeLabels`, `setProps`, `unsetProps`, `body`, `comment`) plus optional `mtime`; stale → 409 `code: "stale"` with `currentMtime` |
-| `POST /api/tickets` | Create (201) |
-| `POST /api/tickets/:id/comments` | Add comment, body `{ text, mtime? }` (201) |
-| `GET /api/validate` | Validation result |
-| `POST /api/fix` | Body `{ dryRun }`, default `true` |
-| `GET /api/config` | `{ config: {name, columns, glob, boards}, mtime }` |
-| `PUT /api/config` | Body `{ config, renames?, mtime?, dryRun? }` → `{ dryRun, changes, configChanged, mtime }`. `renames` is `{ columns: { "": {old: new}, <board>: {old: new} }, boards: {old: new} }`. `dryRun` (only when exactly `true`) reports ticket edits without writing. Stale `mtime` → 409 `code: "stale"`; invalid config or a column still in use → 400 `invalid` |
-| `POST /api/automation/test` | Render and really run a script with a sample ticket (see [Automations](#automations)) |
-| `GET /api/automation/log` | `{ runs }`: the last 20 automation runs, newest first |
-| `GET /api/events` | SSE stream (`changed` events) |
-
-`/api/automation/test` body: `{ run, event?: "moved_to"|"created_in", board?, sample?: { id, name, body, status, from, to, labels, props } }` → `{ command, result: { exitCode, stdout, stderr, error? } }`. Unknown variable or bad placeholder position → 400 `invalid`; automations disabled → 503 `disabled`; more than 2 test runs in flight → 429 `busy`. Test runs are not logged and touch no ticket.
-
-Status mapping: `not-found` 404; `ambiguous`, `exists`, `stale` 409; `invalid`, `parse` 400; `unsupported` 415; host not allowed 421; `config` 500; body too large (1 MB) 413.
-
-### Frontend
-
-`src/web/public/`: vanilla ES modules, no build step, no dependencies. `index.html`, `style.css`, `app.js` (wiring), `api.js`, `board.js`, `dialog.js`, `filters.js`, `settings.js`, `automations.js` (Settings → Automations builder and Last runs), `dom.js`, and `logic.js` (pure logic, unit-tested).
+The web UI edits `kanban.yaml` for you (your YAML comments and unrelated keys are kept, except comments inside `automations:`): default board name, `glob`, ordered columns (rename inline, reorder, add, remove) and per-board column overrides. Details under [Web UI → Settings](#settings). Automations are edited in the Automations tab of the same dialog.
 
 ## Automations
 
@@ -412,6 +401,7 @@ automations:
       props: { priority: high, team: "!ops" }  # optional, ! negates (also true when absent)
     run: echo {{ id }} {{ name }} >> done.log
     enabled: true              # optional, default true; false skips the rule
+    guard: true                # optional, default true; false opts out of the loop guardrail
 boards:
   another-board:
     columns: [backlog, active, shipped]
@@ -420,6 +410,14 @@ boards:
         when: { moved_to: shipped }
         run: ./deploy.sh {{ id }}
 ```
+
+| Field | Meaning |
+|---|---|
+| `name` | Required, unique per board. Also the key in the ticket's `automations:` block. |
+| `when` | Exactly one of `moved_to` / `created_in` (a column of the board), plus optional `labels` and `props` filters. |
+| `run` | Shell script, rendered from the [template](#template-variables) and run with `bash -s`. |
+| `enabled` | Default `true`. With `false` the rule never runs; an `automation.skipped` event (`reason: rule-disabled`) is logged. |
+| `guard` | Default `true`. See [Loop guardrail](#loop-guardrail). |
 
 Triggers: `kb mv`, `kb set -s`, `kb add` (created in its status), and the web UI/API (drag, PATCH, create). Editing a file by hand or with `kb edit` triggers nothing.
 
@@ -446,8 +444,9 @@ With bare placeholders, hostile ticket text (`'; rm -rf ~`) is passed as one lit
 - The rendered script is piped to `bash -s` stdin, with the config dir as cwd and `KB_AUTOMATION=1` added to the environment.
 - 30 s timeout (the whole process group is killed). stdout/stderr are each capped at 64 KiB.
 - Non-blocking: the move/add succeeds first and rules run in the background. A failing script never fails the command.
-- CLI: the result is printed immediately, then `kb` waits for running scripts before exiting and prints `warning: automation "<name>" failed (…)` to stderr for failures. The web server is fully async; Ctrl-C kills running scripts.
+- CLI: the result is printed immediately, then `kb` waits for running scripts before exiting (a rule with `sleep 15` keeps the command open for 15 s) and prints `warning: automation "<name>" failed (…)` to stderr for failures. The web server is fully async; Ctrl-C kills running scripts.
 - Several matching rules on one event all start together.
+- Scripts inherit your environment, so anything they call (such as `kb`) must be on `PATH`.
 
 ### Status in the ticket
 
@@ -456,21 +455,36 @@ Each run is recorded in the ticket's frontmatter, keyed by rule name:
 ```yaml
 automations:
   notify-done:
-    status: done         # running | done | failed
+    status: done         # running | done | failed | skipped
     at: "2025-06-01T14:32:05"
     exit: 0              # null if killed or not started
+    runs: 3              # runs of this rule on this ticket (guardrail counter)
     error: "timeout after 30s"   # only on errors
+  ship:
+    status: skipped
+    at: "2025-06-01T14:40:00"
+    reason: "guardrail: 15 automation runs on this ticket"   # only on skipped
+    runs: 2
 ```
 
-`running` is written at start, then replaced by `done`/`failed` with the finish time.
+`running` is written at start (and increments `runs`), then replaced by `done`/`failed` with the finish time; `runs` is carried over. `skipped` (with `reason`) is written only by the guardrail. Entries without `runs` (older tickets) count as 1.
 
-### Loop guard
+### Loop guardrail
 
-Scripts get `KB_AUTOMATION=1`, and `kb` run with that variable set (or with `--no-automation`) never triggers automations. So a script that calls `kb mv` cannot start a loop. There is no depth cap beyond this, and scripts that call the web API (`curl`) are **not** guarded.
+A rule can retrigger itself indirectly (a script that moves a ticket through the web API, or two rules that move a ticket back and forth). To stop runaway loops, a ticket gets at most `AUTOMATION_RUN_LIMIT` = **15** automation runs in total: the sum of `runs` over all entries of its `automations:` map, plus runs started in the same dispatch.
 
-### Log
+- At the limit, further matching rules do not run. Their entry gets `status: skipped` and a `reason`, and an `automation.skipped` event (`reason: guardrail`, with `runs` and `limit`) is logged. The CLI prints no warning for this.
+- Opt out per rule with `guard: false` (or untick *Stop after 15 runs per ticket* in Settings → Automations). The limit itself is not configurable.
+- Reset the counter by deleting the ticket's run history: **Reset automation history** in the ticket dialog, `kb set <id> --reset-automations`, or `PATCH /api/tickets/:id` with `{ "resetAutomations": true }`. A reset emits `ticket.automations-reset` and never triggers automations.
 
-`.kb/automation.log` (gitignored) holds one JSON line per finished run: board, rule, ticket id and path, event, rendered command, start/finish time, status and result (exit code, stdout, stderr, error). The command and each output are clipped to 4 KiB. Above 256 KiB the file is cut to the newest 200 lines. Test runs are not logged.
+### Loop protection
+
+Two layers:
+
+1. Scripts get `KB_AUTOMATION=1`, and `kb` run with that variable set (or with `--no-automation`) never triggers automations. So a script that calls `kb mv` cannot start a loop.
+2. The guardrail above. It also covers what the variable does not: scripts that call the web API (`curl`) are not blocked by `KB_AUTOMATION`, but still hit the run limit.
+
+There is no depth cap beyond this.
 
 ### Validation
 
@@ -478,19 +492,173 @@ Scripts get `KB_AUTOMATION=1`, and `kb` run with that variable set (or with `--n
 
 Renaming a column in Settings rewrites the rules that use it. Removing a column that a rule uses is blocked (the error names the rule).
 
+### The example rules
+
+[`example/kanban.yaml`](example/kanban.yaml) has two live rules and one disabled one:
+
+- **`log-review`**: when a ticket is moved to `review`, appends `<id> <body>` to `test.txt` in the config dir (`echo {{ id }} {{ body }} >> test.txt`). Check with `cat example/test.txt`.
+- **`followup-on-done`**: when a ticket is moved to `done`, waits 15 s, then runs `kb add "ABC"{{ id }} -s todo`, creating a ticket named `ABC<id>` in `todo` (the quotes around `ABC` are outside the placeholder, so the id stays bare). That is why the example has many `ABC0xx` tickets. Because of the `sleep`, `kb mv` stays open for 15 s when run from the CLI; the web UI does not wait. The inner `kb add` runs with `KB_AUTOMATION=1`, so it triggers no rules. `kb` must be on `PATH`.
+- **`pi`**: disabled (`enabled: false`); an example of calling an external agent CLI.
+
 ### Settings → Automations
 
-Settings has a rule card per board (default board and each override): name, enabled, event (moved to / created in) plus column, required labels, property filters (`!x` = not x), script, and a variable hint. **Test run** asks for confirmation and then *really executes* the script with a sample ticket (`POST /api/automation/test`). **Last automation runs** lists the last 20 runs; click a row for command, stdout and stderr.
+Settings has a rule card per board (default board and each override): name, enabled, loop guard checkbox (*Stop after 15 runs per ticket*), event (moved to / created in) plus column, required labels, property filters (`!x` = not x), script, and a variable hint. **Test run** asks for confirmation and then *really executes* the script with a sample ticket (`POST /api/automation/test`); it is not logged and touches no ticket. Run history is in [Settings → Logs](#settings--logs) (filter *Automations*).
 
 ### Disabling
 
-`--no-automation` (global flag, or on `add`/`set`/`mv`/`web`) or `KB_AUTOMATION` in the environment turns it off. With `kb web --no-automation` rules never run, test runs return 503 and the UI shows the error.
+`--no-automation` (global flag, or on `add`/`set`/`mv`/`web`) or `KB_AUTOMATION` in the environment turns it off. With `kb web --no-automation` rules never run, test runs return 503 and the UI shows the error. Matching rules skipped because automations are off are logged as `automation.skipped` (`reason: automations-off`).
 
 ### Security notes
 
 - There is no auth by design. Anyone who can reach `kb web` can edit the config (Settings, or `PUT /api/config`) and so run commands as your user. Binding to a non-loopback host prints a warning (use `--no-automation` there).
-- Hostile ticket text is safe only with bare placeholders (see above).
-- Scripts that finish later rewrite the ticket's frontmatter, so the web UI may show the stale-edit banner if you had it open.
+- Rules run with your user's permissions and environment. Review a `kanban.yaml` from someone else before running `kb` on it, as you would a Makefile.
+
+## Activity log (audit events)
+
+Every real change made through `kb` or `kb web` is appended as one JSON line to `.kb/events.log` (the `.kb/` folder is gitignored). Logging errors are ignored, so they never fail a command.
+
+- **Rotation**: when the file exceeds 5 MB it is renamed to `events.1.log` (replacing the previous one); one old file is kept.
+- **Line size**: a line is at most 8000 characters. Larger events keep their metadata with clipped `summary`/`ticketName`/`path` and `data: { "truncated": true }`. Text in `data` (comments, commands) is clipped to 200 characters.
+- **Reading**: queries read both files whole (up to ~10 MB), skip corrupt lines and sort by event id.
+
+Example line:
+
+```json
+{"id":"0mvv3udks-001fxy","ts":"2026-10-30T16:06:10.108+01:00","type":"ticket.moved","source":"cli","board":"default","ticketId":"001","ticketName":"A","path":"001-a.md","summary":"#001 moved todo → doing","data":{"from":"todo","to":"doing"}}
+```
+
+### Fields
+
+| Field | Meaning |
+|---|---|
+| `id` | Unique and sortable: time (base36) + counter + random suffix. Newest = largest; also the paging cursor. |
+| `ts` | Local time, ISO 8601 with offset and milliseconds. |
+| `type` | See below. |
+| `source` | `cli`, `web`, `automation` (a `kb` run inside an automation script, i.e. `KB_AUTOMATION` set) or `unknown` (library use without a source). |
+| `board`, `ticketId`, `ticketName`, `path` | Present on ticket events. |
+| `summary` | Human one-liner. |
+| `data` | Type-specific, see below. |
+
+### Event types
+
+| Type | When | `data` |
+|---|---|---|
+| `ticket.created` | add | `status`, `board`, `labels`, `props`, `hasBody`, `hasComment` |
+| `ticket.moved` | status changed | `from` (null if none), `to` |
+| `ticket.renamed` | name changed | `from`, `to` |
+| `ticket.labels` | labels added/removed | `added`, `removed` |
+| `ticket.props` | properties set/unset | `set`, `unset`, `old` |
+| `ticket.body` | body changed | `changed`, `fromLength`, `toLength` |
+| `ticket.board` | board changed | `from`, `to` |
+| `ticket.comment` | comment added | `text` (clipped); `key` when added with `kb comment` |
+| `ticket.automations-reset` | run history cleared | `hadHistory` |
+| `ids.fixed` | `kb fix` / Health fix wrote changes | `changes: [{ path, from, to }]` |
+| `config.updated` | a config change was saved | diff of `columns`, `boards`, `automations` (added/removed/renamed/changed), `ticketsMigrated`, `tickets` (first 50 edits) |
+| `automation.started` | a rule started | `rule`, `event` |
+| `automation.finished` | a rule ended | `rule`, `status` (`done`/`failed`), `exit`, `durationMs`, `command` (clipped), `error?` |
+| `automation.skipped` | a matching rule did not run | `rule`, `reason` (`rule-disabled`, `automations-off`, `guardrail`), `event`; guardrail adds `runs`, `limit` |
+
+One `set`/PATCH that changes several things emits one event per kind of change.
+
+**Not logged**: no-op changes (same status/name/labels/props/body), `--dry-run` / `dryRun` previews, config saves that change nothing, automation status writes to the ticket frontmatter, Test runs, and hand edits of files.
+
+### Settings → Logs
+
+The **Logs** tab shows a table, newest first: Time (relative; absolute on hover), Event (coloured pill; orange for skipped), Ticket (click to open; greyed if it no longer exists), Board, Source, Summary. Click a row (or press Enter/Space) to expand id, timestamp, path and all `data`.
+
+- Search box (debounced): case-insensitive substring over summary, type, ticket id and name, board and `data`.
+- Filters: event type (All, Ticket changes, Moves, Labels, Properties, Comments, Config, Automations, Fix ids), source (cli/web/automation), and board (when there is more than one).
+- Pagination: 50 per page; **Load more** fetches older events; **Newest** reloads from the top once more than 50 are loaded.
+- Live: while the tab is open, new events are prepended if you are at the top of the unfiltered list; otherwise a *New events — refresh* pill appears.
+
+The same data is available from `GET /api/events` (see [REST API](#rest-api)).
+
+### Legacy automation log
+
+`.kb/automation.log` and `GET /api/automation/log` (last 20 finished runs, newest first) are still written and served for backward compatibility; the UI no longer uses them. `automation.finished` events carry the same run info (command, exit, duration) but not stdout/stderr.
+
+## Web UI (`kb web`)
+
+### Launch
+
+```sh
+kb web [--host <addr>] [--port <n>] [--no-open]
+```
+
+- Requires `kanban.yaml` in the current directory (errors otherwise).
+- `--host` default `127.0.0.1`.
+- `--port` default `4747`; if busy, the next ports are tried, up to 50 times. With an explicit `--port` the port is strict: it errors if busy.
+- Prints `kb web running at <url>`. For a wildcard host (`0.0.0.0`, `::`) the URL uses `localhost` and a `listening on <host>:<port>` line is added.
+- A non-loopback host prints a no-auth warning to stderr.
+- The browser is opened unless `--no-open`.
+- Ctrl-C / SIGTERM shut down cleanly.
+
+### Features
+
+- Board tabs plus an **All** tab. Columns follow the config; the `unsorted` column is shown but is not a drop target.
+- Cards; drag a card to another column of the **same board** to change its `status`. Cross-board drags are ignored.
+- Create: the **+** in each column header opens the create dialog with that board and status preset. There is no global "New" button.
+- Detail dialog: name, status, board, labels, properties, body, comments (add comments there). Comment keys have minute granularity (seconds on collision).
+- **Automation status dots**: tickets with `automations:` run status in frontmatter show one small dot per automation on the card (worst first: failed, running, skipped, done, unknown; wraps onto a second line when many) plus the names of running rules (`running: pi, followup`). The detail dialog has an *Automations* section (rule, status word, relative time, exit code, error) and a **Reset automation history** button (clears the run history and so the [guardrail](#loop-guardrail) counter; not shown for read-only tickets). Legend: green = done, yellow (pulsing) = running, red = failed (failed status, non-zero exit or error), orange = skipped (guardrail), grey = unknown. Each dot has a tooltip/aria-label; updates arrive live, and an open dialog only refreshes that section (your edits are kept, no "changed on disk" banner).
+- Filter bar: text, labels, properties, with `!` negation as in `kb ls`. State lives in the URL hash: `#board=..&text=..&l=..&p=..`.
+- <a id="settings"></a>**Settings** (header button, badge = issue count) is a dialog with four tabs (arrow keys switch, `Home`/`End` jump): **Config**, **Automations**, **Health**, **Logs**. Config and Automations share one form state (one dirty state, one Save/Revert; a • marks tabs with unsaved changes); Health shows its issue count in the tab title.
+  - **Automations** tab: one section per board (default + overrides) with the rule builder (see [Settings → Automations](#settings--automations)). Automation validation errors are prefixed `Automations:`.
+  - *Config* tab: form for `kanban.yaml`: default board name, `glob`, ordered columns (rename inline, reorder, add, remove), and per-board column overrides (add, rename, remove). Saving keeps your YAML comments and unrelated keys.
+  - Renaming a column rewrites `status` on every ticket using it; renaming a board rewrites an explicit `board:`. Before anything is written the UI shows how many ticket files will change (dry run) and asks to confirm.
+  - Removing a column is **blocked** while tickets still use it (the error lists them). Removing a board override is allowed; its tickets fall back to the default columns. Unsorted tickets never block.
+  - Invalid configs (empty/duplicate columns, empty name or glob) are refused and nothing is written. If `kanban.yaml` changes on disk while the form is open, a banner offers **Reload** (and **Overwrite** after a stale save).
+  - *Health* tab: `validate` results and board warnings; `fix` with a dry-run preview before applying. Parse errors are shown only here.
+  - *Logs* tab: the audit event table, see [Settings → Logs](#settings--logs). Automation run history lives here (filter *Automations*); the old *Last runs* list is gone.
+- Tickets with duplicate ids or no id are read-only and carry badges (use `fix`).
+- Stale-edit banner: edits send the ticket's mtime; if the file changed on disk the UI offers **Reload** or **Overwrite**.
+- Not available in the UI: `init` and `edit`.
+
+### Live updates
+
+- `fs.watch` (recursive) on the board dir, filtered by `glob`; `kanban.yaml` changes count too. `node_modules`, `dist` and `.git` are ignored.
+- Debounced 100 ms, with a 1 s max-wait. Events go out over SSE (`GET /api/stream`); the UI refetches on every event.
+- If the watcher is unavailable there are no live updates (the API still works).
+
+### Security model
+
+There is no auth. Anyone who can reach the server can read and edit tickets. Guards:
+
+- Same-origin: a request whose `Origin` differs from `Host` gets 403; `Sec-Fetch-Site`, if sent, must be `same-origin` or `none`.
+- Writes (non-GET) require `Content-Type: application/json` (else 415).
+- Loopback bind: the `Host` header is validated (421 on mismatch) against DNS rebinding.
+- Non-loopback bind: the Host check is skipped so LAN access works. Only use this on networks you trust.
+- CSP and frame protections (`frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`).
+- `file` for add must stay inside the board dir and end in `.md`. This also applies to CLI `add -f`.
+
+### REST API
+
+JSON in and out. Errors: `{ "error": "...", "code": "..." }`.
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/board` | Board view; query `board`, `text`, `label`, `property` (filters as in `ls`) |
+| `GET /api/tickets/:id` | Ticket detail (ids URL-encoded) |
+| `PATCH /api/tickets/:id` | Core patch fields (`name`, `status`, `board`, `addLabels`, `removeLabels`, `setProps`, `unsetProps`, `body`, `comment`), `resetAutomations: true` (clears the ticket's automation run history), plus optional `mtime`; stale → 409 `code: "stale"` with `currentMtime` |
+| `POST /api/tickets` | Create (201) |
+| `POST /api/tickets/:id/comments` | Add comment, body `{ text, mtime? }` (201) |
+| `GET /api/validate` | Validation result |
+| `POST /api/fix` | Body `{ dryRun }`, default `true` |
+| `GET /api/config` | `{ config: {name, columns, glob, boards}, mtime }` |
+| `PUT /api/config` | Body `{ config, renames?, mtime?, dryRun? }` → `{ dryRun, changes, configChanged, mtime }`. `renames` is `{ columns: { "": {old: new}, <board>: {old: new} }, boards: {old: new} }`. `dryRun` (only when exactly `true`) reports ticket edits without writing. Stale `mtime` → 409 `code: "stale"`; invalid config or a column still in use → 400 `invalid` |
+| `POST /api/automation/test` | Render and really run a script with a sample ticket (see [Automations](#automations)) |
+| `GET /api/automation/log` | Legacy: `{ runs }`, the last 20 automation runs, newest first |
+| `GET /api/events` | Audit events (query below) |
+| `GET /api/stream` | SSE stream (`changed` events; was `/api/events`) |
+
+`GET /api/events` query (all optional): `q` (substring search), `type` (event type; repeat the param or comma-separate; a trailing `.*` matches a prefix, e.g. `ticket.*`), `ticket` (ticket id), `board`, `source` (`cli`/`web`/`automation`), `before` (event id cursor: only older events), `limit` (integer 1..200, default 50; otherwise 400 `invalid`). Returns `{ events, nextCursor? }`, newest first; pass `nextCursor` as `before` for the next page. See [Activity log](#activity-log-audit-events).
+
+`/api/automation/test` body: `{ run, event?: "moved_to"|"created_in", board?, sample?: { id, name, body, status, from, to, labels, props } }` → `{ command, result: { exitCode, stdout, stderr, error? } }`. Unknown variable or bad placeholder position → 400 `invalid`; automations disabled → 503 `disabled`; more than 2 test runs in flight → 429 `busy`. Test runs are not logged and touch no ticket.
+
+Status mapping: `not-found` 404; `ambiguous`, `exists`, `stale` 409; `invalid`, `parse` 400; `unsupported` 415; host not allowed 421; `config` 500; body too large (1 MB) 413.
+
+### Frontend
+
+`src/web/public/`: vanilla ES modules, no build step, no dependencies. `index.html`, `style.css`, `app.js` (wiring), `api.js`, `board.js`, `dialog.js`, `filters.js`, `settings.js`, `settings-tabs.js`, `automations.js`, `logs.js`, `logs-logic.js`, `status.js`, `dom.js`, and `logic.js` (pure logic, unit-tested). See [Architecture](#architecture) for what each does.
 
 ## Architecture
 
@@ -501,12 +669,17 @@ src/core/   UI-agnostic domain/service layer (Kanban API, config, tickets, front
 src/cli/    thin adapter: commander wiring, flag parsing, output formatting, stdin, $EDITOR, colour/TTY, exit codes
 src/web/    second adapter over the core: http server, REST API, fs watcher + SSE, vanilla frontend in public/
 src/runner.ts  bash AutomationRunner (timeout, output caps); outside core, which only knows the interface
-src/automationLog.ts  .kb/automation.log writer/reader (rotation)
-src/cli/automation.ts  CLI session: runner + log, waits for scripts, loop guard
+src/automationLog.ts  legacy .kb/automation.log writer/reader (rotation)
+src/eventLog.ts  .kb/events.log writer/query (rotation, line clipping)
+src/core/events.ts  audit event model, id/timestamp helpers, config diff (core only emits to an injected sink)
+src/cli/automation.ts  CLI session: runner + logs, waits for scripts, KB_AUTOMATION gate, event source (cli/automation)
 src/cli/help.ts, help-content.ts  help layout renderer and per-command help text (USAGE/ARGUMENTS/FLAGS/NOTES/EXAMPLES)
 src/cli/completion.ts, completion-model.ts, completion-zsh.ts, completion-bash.ts  completion scripts generated from the commander program
 src/cli/commands/complete.ts  candidates for the hidden `kb __complete` helper
-src/web/public/automations.js  Settings → Automations builder
+src/web/public/automations.js  Settings → Automations builder (incl. Test run, guard checkbox)
+src/web/public/logs.js, logs-logic.js  Settings → Logs table and its pure helpers
+src/web/public/settings.js, settings-tabs.js  Settings dialog and its accessible tab strip
+src/web/public/status.js  automation status dots, card indicator, ticket-dialog Automations section
 src/index.ts  public library entry (re-exports core)
 ```
 
@@ -557,11 +730,14 @@ or `readline`. Nothing in `src/core` may import `../web` either. Enforced by `te
 - **`add -f` stays inside the board dir** — must be a relative `.md` path under the config dir.
 - **YAML Document API for rewrites** — keeps hand edits (formatting, comments) intact.
 - **Comments as timestamp-keyed map** — ordered, human-editable, no extra schema.
+- **Help = basics, README = advanced** — `kb --help` stays short (getting started, commands); configuration and automations are documented here, and the help links to this README and `example/`.
+- **Audit log in `.kb/events.log`, emitted from core** — core only talks to an injected `EventSink`; the CLI/web adapters pick the sink and `source`. JSON lines, one old file kept, no database.
+- **Loop guardrail counts runs in the ticket** — the counter lives in the ticket's `automations:` map, so it survives restarts and can be reset by deleting it.
 - **Dropped gray-matter** — a single YAML parser for read and write avoids divergent date/type parsing.
 
 ## Status
 
-Implemented: v1 plus the web UI (`kb web`). All commands working; vitest suite passing.
+Implemented: v1, the web UI (`kb web`), automations with the loop guardrail, the activity log and the Logs tab. All commands working; vitest suite passing.
 
 ### Known limitations
 
@@ -569,7 +745,8 @@ Implemented: v1 plus the web UI (`kb web`). All commands working; vitest suite p
 - `mv`/`set` to a status not in the board's columns only warns (ticket lands in unsorted).
 - `node_modules` is always excluded from the glob scan.
 - Comments inside the `automations:` list of `kanban.yaml` are not preserved when the list is saved from the UI.
-- The Automations builder was only partly verified in a browser: rules inside board overrides, the failed-run display and the 503 display were not clicked.
+- The guardrail limit (15) is a constant, not configurable.
+- `GET /api/events` reads the whole log (and `events.1.log`, so up to ~10 MB) per request and filters in memory; fine for a local tool, not for huge logs.
+- Event ids are time-based per machine; clock changes can make ordering odd.
+- Browser verification is limited. Automated: vitest (API, e2e web server tests) and a headless Chrome smoke check (synthetic drag events); the Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner). **Not** verified in a real browser: the Logs tab (rendering, filters, live pill, expand), the guard checkbox and Reset button, the orange skipped dots, rules inside board overrides, the failed-run and 503 displays, the create dialog and the Health fix buttons.
 - Shell completion: live TAB behaviour in an interactive zsh/bash was not tested (only generation, sourcing and syntax).
-- Web UI is not tested in real browsers beyond a headless Chrome smoke check (synthetic drag events).
-- The create dialog and the Health fix buttons have not been exercised in a browser. The Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner).
