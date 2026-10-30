@@ -38,6 +38,7 @@ const enc = encodeURIComponent;
 export const api = {
   config: () => request("GET", "/api/config"),
   putConfig: (body) => request("PUT", "/api/config", body),
+  previewTickets: (tickets) => request("POST", "/api/config/preview-tickets", { tickets }),
   board: (query) => request("GET", "/api/board" + (query ? "?" + query : "")),
   get: (id) => request("GET", `/api/tickets/${enc(id)}`),
   create: (body) => request("POST", "/api/tickets", body),

@@ -6,6 +6,8 @@ import * as logs from "./logs.js";
 import * as live from "./live.js";
 import { liveLabel } from "./live-logic.js";
 import { tabList, tabPanel } from "./settings-tabs.js";
+import { ticketRulesSection } from "./ticket-rules.js";
+import { scopeLines } from "./ticket-rules-logic.js";
 import {
   checkForm,
   configToForm,
@@ -345,6 +347,7 @@ function configPanel() {
         },
       }),
     ),
+    ticketRulesSection({ t: form.tickets, onChange: onDirty, changed: () => formDirty(form, loaded.config), error: () => formError }),
     healthSection(),
   );
   return sec;
@@ -411,11 +414,13 @@ function columnList(rows, onChange) {
 
 function previewBox() {
   const n = preview.changes.length;
+  const scope = scopeLines(preview.scope);
   return h(
     "div",
-    { class: "notice", role: "alertdialog" },
-    h("strong", { text: `This will edit ${n} ticket file${n === 1 ? "" : "s"}:` }),
-    h("ul", { class: "mono" }, preview.changes.slice(0, 50).map((c) => h("li", { text: describeTicketChange(c) }))),
+    { class: "notice", role: "alertdialog", id: "save-confirm" },
+    scope.length ? h("ul", { class: "tr-scope" }, scope.map((s) => h("li", { text: s }))) : null,
+    n ? h("strong", { text: `This will edit ${n} ticket file${n === 1 ? "" : "s"}:` }) : null,
+    n ? h("ul", { class: "mono" }, preview.changes.slice(0, 50).map((c) => h("li", { text: describeTicketChange(c) }))) : null,
     n > 50 ? h("p", { class: "muted", text: `… and ${n - 50} more` }) : null,
     h(
       "div",
@@ -451,8 +456,8 @@ async function save(overwrite, confirmed = false) {
   try {
     if (!confirmed) {
       const dry = await api.putConfig({ ...base, dryRun: true });
-      if (dry.changes.length) {
-        preview = { changes: dry.changes, overwrite };
+      if (dry.changes.length || scopeLines(dry.ticketScope).length) {
+        preview = { changes: dry.changes, scope: dry.ticketScope, overwrite };
         busy = false;
         return rerenderConfig();
       }

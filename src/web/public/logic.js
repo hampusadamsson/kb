@@ -1,4 +1,5 @@
 // Pure logic (no DOM access): hash state, filter queries, scalar conversion, patch building.
+import { checkTickets, ticketsToConfig, ticketsToForm } from "./ticket-rules-logic.js";
 
 /** Parse `#board=x&text=..&l=a&p=k:v` into a filter state. board === null means "default". */
 export function parseHash(hash) {
@@ -164,6 +165,7 @@ export function configToForm(c) {
     name: c.name,
     glob: c.glob,
     columns: colRows(c.columns),
+    tickets: ticketsToForm(c.tickets),
     automations: (c.automations ?? []).map(ruleRow),
     boards: Object.entries(c.boards ?? {}).map(([n, b]) => ({
       orig: n,
@@ -213,6 +215,8 @@ function renamedColumns(rows) {
 /** Form state → PUT /api/config payload parts: { config, renames }. */
 export function formToPayload(f) {
   const config = { name: f.name.trim(), glob: f.glob.trim(), columns: colValues(f.columns), boards: {} };
+  // always sent: the server keeps the current rules when the key is omitted (default object resets them)
+  config.tickets = ticketsToConfig(f.tickets ?? ticketsToForm(undefined));
   if (f.automations?.length) config.automations = rulesToConfig(f.automations, f.columns);
   const renames = { columns: {}, boards: {} };
   const top = renamedColumns(f.columns);
@@ -248,6 +252,8 @@ export function checkForm(f) {
     if (b.columns.length === 0) return `Board "${n}" needs at least one column.`;
     if (dup(b.columns) !== undefined) return `Board "${n}": duplicate column "${dup(b.columns)}".`;
   }
+  const tErr = checkTickets(f.tickets ?? ticketsToForm(undefined));
+  if (tErr) return tErr;
   const targets = [{ board: p.name, rules: f.automations ?? [], cols: f.columns }, ...f.boards.map((b) => ({ board: b.name.trim(), rules: b.automations ?? [], cols: b.columns }))];
   for (const t of targets) {
     const err = checkRules(t.board, t.rules, t.cols);

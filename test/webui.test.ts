@@ -104,7 +104,7 @@ describe("settings form logic", async () => {
   it("round-trips an untouched form with no renames", () => {
     const f = L.configToForm(cfg);
     const p = L.formToPayload(f);
-    expect(p.config).toEqual(cfg);
+    expect(p.config).toEqual({ ...cfg, tickets: { baseline: true, include: [], exclude: [] } });
     expect(p.renames).toEqual({ columns: {}, boards: {} });
     expect(L.formDirty(f, cfg)).toBe(false);
   });
@@ -163,10 +163,10 @@ describe("automation form logic", async () => {
 
   it("round-trips rules (typed props kept) and omits empty automations", () => {
     const f = L.configToForm(cfg());
-    expect(L.formToPayload(f).config).toEqual(cfg());
+    expect(L.formToPayload(f).config).toEqual({ ...cfg(), tickets: { baseline: true, include: [], exclude: [] } });
     expect(L.formDirty(f, cfg())).toBe(false);
     const plain = { name: "default", glob: "*.md", columns: ["todo"], boards: {} };
-    expect(L.formToPayload(L.configToForm(plain)).config).toEqual(plain);
+    expect(L.formToPayload(L.configToForm(plain)).config).toEqual({ ...plain, tickets: { baseline: true, include: [], exclude: [] } });
   });
 
   it("retargets rules on column rename and edits props", () => {
@@ -272,7 +272,7 @@ describe("automation status helpers", () => {
     ] };
     const f = any.configToForm(cfg);
     expect(f.automations.map((r: any) => r.guard)).toEqual([true, false]);
-    expect(any.formToPayload(f).config).toEqual(cfg);
+    expect(any.formToPayload(f).config).toEqual({ ...cfg, tickets: { baseline: true, include: [], exclude: [] } });
     expect(any.newRule(f.columns).guard).toBe(true);
     f.automations[0].guard = false;
     expect(any.formToPayload(f).config.automations[0].guard).toBe(false);
