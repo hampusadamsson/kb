@@ -46,14 +46,14 @@ describe("ls", () => {
       [
         "== default ==",
         "todo (3)",
-        "  #001 Fix login   [bug] [ui] priority:high meta:{\"a\":1}",
-        "  #004 Write docs",
+        "  #1 Fix login   [bug] [ui] priority:high meta:{\"a\":1}",
+        "  #4 Write docs",
         "  #? No id",
         "doing (1)",
-        "  #002 Refactor",
+        "  #2 Refactor",
         "done (0)",
         "unsorted (1)",
-        "  #003 Odd",
+        "  #3 Odd",
       ].join("\n"),
     );
     expect(r.warnings.join("\n")).toMatch(/d\.md: unsorted \(unknown status "nope"\)/);
@@ -62,7 +62,7 @@ describe("ls", () => {
   it("other board uses its columns; all boards listed", () => {
     setup();
     const r = ls(dir);
-    expect(r.out).toContain("== other ==\nbacklog (0)\nactive (1)\n  #005 Other one");
+    expect(r.out).toContain("== other ==\nbacklog (0)\nactive (1)\n  #5 Other one");
     expect(r.out.indexOf("== default ==")).toBeLessThan(r.out.indexOf("== other =="));
     expect(ls(dir, { board: "other" }).out).not.toContain("default");
   });
@@ -101,7 +101,7 @@ describe("show", () => {
     tk("s.md", "id: 7\nname: Shown\nstatus: doing\nlabels: [bug]\npriority: low\ncomments:\n  2025-06-01T14:32: hi", "Body text");
     const o = show(dir, "7");
     expect(o).toBe(
-      "s.md\n#007 Shown\nboard: default\nstatus: doing\nlabels: [bug]\npriority: low\n\nBody text\n\ncomments:\n2025-06-01T14:32  hi",
+      "s.md\n#7 Shown\nboard: default\nstatus: doing\nlabels: [bug]\npriority: low\n\nBody text\n\ncomments:\n2025-06-01T14:32  hi",
     );
   });
   it("errors on missing/duplicate", () => {
@@ -109,6 +109,35 @@ describe("show", () => {
     tk("g.md", "id: 1\nname: dup\nstatus: todo");
     expect(() => show(dir, "99")).toThrow(/no ticket 99/);
     expect(() => show(dir, "1")).toThrow(/duplicate id 1/);
+  });
+});
+
+describe("string ids", () => {
+  it("show/ls display as stored; 1 finds '001'; legacy int sorts numerically", () => {
+    setup();
+    tk("p.md", 'id: "001"\nname: Padded\nstatus: done');
+    tk("q.md", 'id: "002"\nname: Two\nstatus: done');
+    tk("r.md", "id: 10\nname: Ten\nstatus: done");
+    tk("l.md", "id: 2.5\nname: Odd\nstatus: nope");
+    expect(show(dir, "001")).toContain("#001 Padded");
+    expect(show(dir, "10")).toContain("#10 Ten");
+    expect(() => show(dir, "2")).not.toThrow();
+    const out = ls(dir).out;
+    expect(out).toContain("done (3)\n  #001 Padded\n  #002 Two\n  #10 Ten");
+  });
+  it("numeric fallback ambiguity and 001 finding int id", () => {
+    setup();
+    tk("p.md", 'id: "007"\nname: A\nstatus: done');
+    tk("q.md", 'id: "07"\nname: B\nstatus: done');
+    expect(() => show(dir, "7")).toThrow(/p\.md[\s\S]*q\.md/);
+    expect(show(dir, "007")).toContain("#007 A");
+    tk("a.md", "id: 11\nname: Hello\nstatus: doing");
+    expect(show(dir, "011")).toContain("#11 Hello");
+  });
+  it("1 vs '001' is a duplicate in ls", () => {
+    setup();
+    tk("p.md", 'id: "001"\nname: P\nstatus: done');
+    expect(ls(dir).warnings.join("\n")).toMatch(/duplicate id/);
   });
 });
 
@@ -122,8 +151,8 @@ describe("cli e2e", () => {
     expect(run("init").status).toBe(0);
     expect(run("init").status).toBe(1);
     tk("a.md", "id: 1\nname: Hello\nstatus: doing");
-    expect(run("ls").stdout).toContain("doing (1)\n  #001 Hello");
+    expect(run("ls").stdout).toContain("doing (1)\n  #1 Hello");
     expect(run("ls", "--help").stdout).toContain("--board");
-    expect(run("show", "1").stdout).toContain("#001 Hello");
+    expect(run("show", "1").stdout).toContain("#1 Hello");
   });
 });

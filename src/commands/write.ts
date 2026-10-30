@@ -3,10 +3,9 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { Document, isSeq } from "yaml";
 import { columnsFor, loadConfig } from "../config.js";
-import { addComment, readFile, render } from "../frontmatter.js";
-import { findById, isInt, nextId, RESERVED, scan } from "../tickets.js";
-import { fmtId } from "./format.js";
-import { filenameFor, parseProperty, slugify } from "../util.js";
+import { addComment, idScalar, readFile, render } from "../frontmatter.js";
+import { findById, idKey, nextId, RESERVED, scan } from "../tickets.js";
+import { filenameFor, padId, parseProperty, slugify } from "../util.js";
 
 export interface Io {
   warn: (msg: string) => void;
@@ -86,15 +85,15 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
   const { tickets } = scan(cwd, config);
   const extra = props(o.property);
 
-  let id: number | string;
+  let id: string;
   if (o.id !== undefined) {
     if (o.id === "") throw new Error("empty --id");
-    id = /^(0|[1-9]\d*)$/.test(o.id) ? Number(o.id) : o.id;
-    if (tickets.some((t) => t.id !== undefined && String(t.id) === String(id))) {
+    id = o.id;
+    if (tickets.some((t) => t.id !== undefined && t.id !== null && idKey(t.id) === idKey(id))) {
       throw new Error(`id ${id} already in use`);
     }
   } else {
-    id = nextId(tickets);
+    id = padId(nextId(tickets));
   }
 
   const board = o.board ?? config.name;
@@ -104,7 +103,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
     io.warn(`warning: status "${status}" is not a column of board "${board}"; ticket will be unsorted`);
   }
 
-  const data: Record<string, unknown> = { type: "ticket", id, name: nm, status };
+  const data: Record<string, unknown> = { type: "ticket", id: idScalar(id), name: nm, status };
   if (board !== config.name) data.board = board;
   const labels = [...new Set(o.label ?? [])];
   if (labels.length) data.labels = labels;
@@ -115,7 +114,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
 
   const rel =
     o.file ??
-    (isInt(id) ? filenameFor(id, nm) : `${slugify(id)}-${slugify(nm)}.md`);
+    filenameFor(id, nm);
   const abs = path.resolve(cwd, rel);
   const body = o.body !== undefined ? bodyText(o.body, io) : "";
   fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -126,7 +125,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
     throw e;
   }
   if (o.edit) openEditor(abs);
-  return `#${fmtId(id)} ${path.relative(cwd, abs)}`;
+  return `#${id} ${path.relative(cwd, abs)}`;
 }
 
 export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): string {
@@ -170,7 +169,7 @@ export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): st
     fs.writeFileSync(abs, render(doc, body, crlf));
   }
   if (o.edit) openEditor(abs);
-  return `#${fmtId(t.id)} updated`;
+  return `#${String(t.id ?? "?")} updated`;
 }
 
 export function mv(cwd: string, id: string, status: string, io: Io = defaultIo): string {

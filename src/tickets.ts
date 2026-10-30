@@ -111,7 +111,11 @@ export function boardNames(tickets: Ticket[], config: Config): string[] {
 }
 
 export function findById(tickets: Ticket[], arg: string): Ticket {
-  const found = tickets.filter((t) => hasId(t) && String(t.id) === arg);
+  let found = tickets.filter((t) => hasId(t) && String(t.id) === arg);
+  if (found.length === 0) {
+    const n = numericId(arg);
+    if (n !== undefined) found = tickets.filter((t) => hasId(t) && numericId(t.id) === n);
+  }
   if (found.length === 0) throw new Error(`no ticket ${arg}`);
   if (found.length > 1) {
     throw new Error(`duplicate id ${arg}:\n${found.map((t) => `  ${t.path}`).join("\n")}`);
@@ -123,16 +127,30 @@ export function duplicates(tickets: Ticket[]): Ticket[][] {
   const groups = new Map<string, Ticket[]>();
   for (const t of tickets) {
     if (!hasId(t)) continue;
-    const key = String(t.id);
+    const key = idKey(t.id);
     groups.set(key, [...(groups.get(key) ?? []), t]);
   }
   return [...groups.values()].filter((g) => g.length > 1);
 }
 
+/** Number for integers and digit-only strings, else undefined. */
+export function numericId(id: unknown): number | undefined {
+  if (isInt(id)) return id;
+  if (typeof id === "string" && /^\d+$/.test(id)) return Number(id);
+  return undefined;
+}
+
+/** Equal keys = duplicate ids (same string, or both numeric and equal). */
+export function idKey(id: unknown): string {
+  const n = numericId(id);
+  return n !== undefined ? `n:${n}` : `s:${String(id)}`;
+}
+
 export function nextId(tickets: { id: unknown }[]): number {
   let max = 0;
   for (const t of tickets) {
-    if (isInt(t.id) && t.id > max) max = t.id;
+    const n = numericId(t.id);
+    if (n !== undefined && n > max) max = n;
   }
   return max + 1;
 }
@@ -147,10 +165,12 @@ export function orderedBoards(tickets: Ticket[], config: Config): string[] {
 
 export function sortTickets(tickets: Ticket[]): Ticket[] {
   return [...tickets].sort((a, b) => {
-    const ai = isInt(a.id);
-    const bi = isInt(b.id);
-    if (ai && bi) return (a.id as number) - (b.id as number);
-    if (ai !== bi) return ai ? -1 : 1;
+    const an = numericId(a.id);
+    const bn = numericId(b.id);
+    if (an !== undefined && bn !== undefined) {
+      return an - bn || String(a.id).localeCompare(String(b.id)) || a.path.localeCompare(b.path);
+    }
+    if ((an !== undefined) !== (bn !== undefined)) return an !== undefined ? -1 : 1;
     return String(a.id).localeCompare(String(b.id)) || a.path.localeCompare(b.path);
   });
 }

@@ -5,8 +5,8 @@ import { parseDocument } from "yaml";
 import { beforeEach, describe, expect, it } from "vitest";
 import { columnsFor, loadConfig, type Config } from "../src/config.js";
 import { addComment, createFile, readFile, updateFile } from "../src/frontmatter.js";
-import { boardNames, duplicates, findById, nextId, scan, sortTickets } from "../src/tickets.js";
-import { filenameFor, parseProperty, slugify } from "../src/util.js";
+import { boardNames, duplicates, findById, nextId, numericId, scan, sortTickets } from "../src/tickets.js";
+import { filenameFor, padId, parseProperty, slugify } from "../src/util.js";
 
 let dir: string;
 beforeEach(() => {
@@ -99,6 +99,37 @@ describe("ids", () => {
     expect(() => findById(t, "12")).toThrow(/a\.md[\s\S]*b\.md/);
     expect(duplicates(t)).toHaveLength(1);
   });
+  it("numericId", () => {
+    expect(numericId(3)).toBe(3);
+    expect(numericId("007")).toBe(7);
+    expect(numericId("7a")).toBeUndefined();
+    expect(numericId(1.5)).toBeUndefined();
+    expect(numericId(undefined)).toBeUndefined();
+  });
+  it("findById falls back to numeric equality; 1, '1', '001' duplicate", () => {
+    w("a.md", tk('"001"'));
+    w("b.md", tk(2));
+    const t = load();
+    expect(findById(t, "1").path).toBe("a.md");
+    expect(findById(t, "002").path).toBe("b.md");
+    w("c.md", tk(1));
+    w("d.md", tk('"1"'));
+    expect(duplicates(load())).toHaveLength(1);
+    expect(duplicates(load())[0]).toHaveLength(3);
+  });
+  it("nextId across mixed", () => {
+    w("a.md", tk('"009"'));
+    w("b.md", tk(3));
+    w("c.md", tk("X-1"));
+    expect(nextId(load())).toBe(10);
+  });
+  it("legacy int sorts with padded strings numerically", () => {
+    w("a.md", tk('"002"'));
+    w("b.md", tk(1));
+    w("c.md", tk('"010"'));
+    w("d.md", tk("b"));
+    expect(sortTickets(load()).map((t) => String(t.id))).toEqual(["1", "002", "010", "b"]);
+  });
   it("nextId ignores non-integers", () => {
     expect(nextId([])).toBe(1);
     w("a.md", tk(3));
@@ -168,8 +199,8 @@ describe("frontmatter", () => {
 
 describe("util", () => {
   it("filenameFor pads and grows", () => {
-    expect(filenameFor(1, "Fix login bug")).toBe("001-fix-login-bug.md");
-    expect(filenameFor(1234, "x")).toBe("1234-x.md");
+    expect(filenameFor(padId(1), "Fix login bug")).toBe("001-fix-login-bug.md");
+    expect(filenameFor(padId(1234), "x")).toBe("1234-x.md");
     expect(slugify("  Héllo, World!! ")).toBe("hello-world");
   });
   it("parseProperty", () => {

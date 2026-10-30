@@ -10,8 +10,10 @@ export function slugify(name: string): string {
   return slug || "ticket";
 }
 
+export const padId = (n: number): string => String(n).padStart(3, "0");
+
 export function filenameFor(id: number | string, name: string): string {
-  return `${String(id).padStart(3, "0")}-${slugify(name)}.md`;
+  return `${slugify(String(id))}-${slugify(name)}.md`;
 }
 
 /** "key:value" → [key, value]; split on first colon, value parsed as YAML. */

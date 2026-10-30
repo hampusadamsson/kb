@@ -70,22 +70,22 @@ describe("validate", () => {
 describe("fix", () => {
   it("filename prefix", () => {
     put("042-foo.md", tk("status: todo\n"));
-    expect(fix(dir)).toBe("042-foo.md: id (none) -> 42");
-    expect(read("042-foo.md")).toBe(tk("id: 42\nstatus: todo\n").replace("id: 42\nstatus", "id: 42\nstatus"));
+    expect(fix(dir)).toBe("042-foo.md: id (none) -> 042");
+    expect(read("042-foo.md")).toBe(tk("id: \"042\"\nstatus: todo\n"));
   });
   it("prefix taken / no prefix", () => {
     put("a.md", tk("id: 7\nstatus: todo\n"));
     put("07-x.md", tk("status: todo\n"));
     put("y.md", tk("status: todo\n"));
     const out = fix(dir).split("\n");
-    expect(out).toEqual(["07-x.md: id (none) -> 8", "y.md: id (none) -> 9"]);
+    expect(out).toEqual(["07-x.md: id (none) -> 008", "y.md: id (none) -> 009"]);
   });
   it("duplicates keep oldest, 12 vs '12'", () => {
     put("new.md", tk("id: 12\nstatus: todo\n"), 2000);
     put("old.md", tk('id: "12"\nstatus: todo\n'), 1000);
-    expect(fix(dir)).toBe("new.md: id 12 -> 13");
+    expect(fix(dir)).toBe("new.md: id 12 -> 013");
     expect(read("old.md")).toContain('id: "12"');
-    expect(read("new.md")).toContain("id: 13");
+    expect(read("new.md")).toContain('id: "013"');
   });
   it("dry-run writes nothing; idempotent; validate passes", () => {
     put("a.md", tk("status: todo\n"));
@@ -103,7 +103,14 @@ describe("fix", () => {
   it("preserves formatting and body; id after type", () => {
     put("a.md", "---\ntype: ticket\n# note\nstatus: todo\nfoo: 'bar'\n---\n# Body\n\ntext  \n");
     fix(dir);
-    expect(read("a.md")).toBe("---\ntype: ticket\nid: 1\n# note\nstatus: todo\nfoo: 'bar'\n---\n# Body\n\ntext  \n");
+    expect(read("a.md")).toBe("---\ntype: ticket\nid: \"001\"\n# note\nstatus: todo\nfoo: 'bar'\n---\n# Body\n\ntext  \n");
+  });
+  it("1 vs '001' duplicates: validate errors, fix repairs", () => {
+    put("a.md", tk("id: 1\nstatus: todo\n"), 1000);
+    put("b.md", tk('id: "001"\nstatus: todo\n'), 2000);
+    expect(validate(dir).errors).toBe(2);
+    expect(fix(dir)).toBe("b.md: id 001 -> 002");
+    expect(validate(dir).out).toBe("ok");
   });
   it("skips parse errors", () => {
     put("broken.md", "---\ntype: ticket\nid: [\n---\n");

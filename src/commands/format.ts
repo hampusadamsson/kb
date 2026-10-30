@@ -14,7 +14,6 @@ export function makeStyle(color: boolean): Style {
 
 export function fmtId(id: unknown): string {
   if (id === undefined || id === null) return "?";
-  if (typeof id === "number" && Number.isInteger(id)) return String(id).padStart(3, "0");
   return String(id);
 }
 

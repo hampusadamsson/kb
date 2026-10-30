@@ -30,7 +30,7 @@ describe("add", () => {
   it("defaults", () => {
     expect(add(dir, "Fix login bug", {}, io)).toBe("#001 001-fix-login-bug.md");
     expect(read("001-fix-login-bug.md")).toBe(
-      "---\ntype: ticket\nid: 1\nname: Fix login bug\nstatus: todo\n---\n",
+      "---\ntype: ticket\nid: \"001\"\nname: Fix login bug\nstatus: todo\n---\n",
     );
     expect(add(dir, undefined, { name: "Two" }, io)).toBe("#002 002-two.md");
   });
@@ -52,18 +52,24 @@ describe("add", () => {
     expect(splitFrontmatter(read("sub/dir/x.md")).body).toBe("from stdin\n");
     expect(warns[0]).toMatch(/unsorted/);
   });
-  it("board default not written; numeric id stored as number", () => {
-    add(dir, "A", { board: "default", id: "7" }, io);
-    const d = fm("007-a.md");
+  it("--id stored as given, as a string; default board not written", () => {
+    expect(add(dir, "A", { board: "default", id: "7" }, io)).toBe("#7 7-a.md");
+    const d = fm("7-a.md");
     expect(d.board).toBeUndefined();
-    expect(d.id).toBe(7);
-    expect(add(dir, "B", {}, io)).toMatch(/^#008 /);
+    expect(d.id).toBe("7");
+    expect(add(dir, "B", {}, io)).toMatch(/^#008 008-b\.md/);
+    expect(add(dir, "C", { id: "ABC-007" }, io)).toBe("#ABC-007 abc-007-c.md");
+    expect(fm("abc-007-c.md").id).toBe("ABC-007");
   });
-  it("leading-zero id stays a string", () => {
-    expect(add(dir, "A", { id: "007" }, io)).toBe("#007 007-a.md");
-    expect(fm("007-a.md").id).toBe("007");
-    add(dir, "B", { id: "0" }, io);
-    expect(fm("000-b.md").id).toBe(0);
+  it("--id taken by numeric equality", () => {
+    add(dir, "A", {}, io);
+    expect(() => add(dir, "B", { id: "1" }, io)).toThrow(/already in use/);
+    expect(() => add(dir, "B", { id: "001" }, io)).toThrow(/already in use/);
+  });
+  it("id is a quoted string in the file and round-trips", () => {
+    add(dir, "A", {}, io);
+    expect(read("001-a.md")).toContain('id: "001"');
+    expect(fm("001-a.md").id).toBe("001");
   });
   it("long comment is not folded; CRLF preserved on mv", () => {
     const long = "word ".repeat(40).trim();
@@ -100,7 +106,7 @@ describe("set", () => {
     );
   it("labels, props, unset, name; preserves formatting and body", () => {
     seed();
-    expect(set(dir, "1", { label: ["bug", "new"], unlabel: ["ui"], property: ["prio:low", "x:1"], name: "New" }, io)).toBe("#001 updated");
+    expect(set(dir, "1", { label: ["bug", "new"], unlabel: ["ui"], property: ["prio:low", "x:1"], name: "New" }, io)).toBe("#1 updated");
     const text = read("a.md");
     expect(text).toContain("# keep");
     expect(text.endsWith("---\n\nBody here\n")).toBe(true);
@@ -135,7 +141,7 @@ describe("set", () => {
   });
   it("mv", () => {
     seed();
-    expect(mv(dir, "1", "done", io)).toBe("#001 updated");
+    expect(mv(dir, "1", "done", io)).toBe("#1 updated");
     expect(fm("a.md").status).toBe("done");
     expect(warns).toEqual([]);
     mv(dir, "1", "nope", io);

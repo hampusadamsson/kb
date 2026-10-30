@@ -51,7 +51,7 @@ Example (`001-fix-login-bug.md`):
 ```markdown
 ---
 type: ticket
-id: 1
+id: "001"
 name: Fix login bug
 status: todo
 board: another-board       # omitted on the default board
@@ -67,8 +67,8 @@ Free-form markdown body.
 
 Rules:
 
-- **id**: frontmatter property; any value (int or string). Filename is irrelevant for identity. New tickets get highest integer id + 1 (non-integer ids ignored for counting). `--id` overrides; error if taken. `set` refuses to change id. `--id` is stored as an integer only if it is `0` or has no leading zero; otherwise as a string (`007` → `"007"`). Integer ids display zero-padded to 3 everywhere (`#001`); a ticket without an id displays as `#?` in `ls`.
-- **Filename on add**: `./NNN-slug.md` (zero-padded to 3 digits, grows past 999; slug from name). Override with `-f/--file` (relative to config dir). For string ids the filename is `<slug(id)>-<slug(name)>.md`. Files are never renamed.
+- **id**: frontmatter property; any value (int or string). Filename is irrelevant for identity. New ids are zero-padded strings (`"001"`, padded to 3, grows past 999), written as quoted YAML strings (`id: "001"`) so they stay strings. Ids are displayed exactly as stored (`#001`; legacy `id: 1` shows `#1`; no id shows `#?`). `--id <value>` is stored exactly as given, as a string (`--id 7` stores `"7"`). Error if taken (duplicate rule below). `set` refuses to change id. Numeric id = integer or digit-only string; used for next-id (max numeric + 1, padded) and sorting.
+- **Filename on add**: `./<id>-slug.md` (the id string, i.e. zero-padded `NNN` by default; slug from name). Override with `-f/--file` (relative to config dir). With `--id` the prefix is `<slug(id)>`. Files are never renamed.
 - **name**: title stored as `name:`; body is free markdown.
 - **status**: decides the column. Missing, or not a column of the ticket's board → shown in the "unsorted" group with a warning. Files are never auto-edited (except via fix/write commands).
 - **board**: optional. Absent = default board. Written only when not default. Boards are discovered from tickets.
@@ -191,7 +191,7 @@ kb comment 1 "blocked on X"
 
 ### fix
 
-For `type: ticket` files without an id: assign id from numeric filename prefix (`042-foo.md` → `42`) if present and free, else the next free integer. Processing order: mtime, then path. Also repairs duplicate ids: the oldest (mtime, then path) keeps it; others get next free integers. New ids are max integer + 1, skipping ids already used (including ones assigned in the same run). Never renames files. Prints each change.
+For `type: ticket` files without an id: assign id from numeric filename prefix (`042-foo.md` → `"042"`, prefix kept as-is) if present and free, else the next padded id. Processing order: mtime, then path. Also repairs duplicate ids: the oldest (mtime, then path) keeps it; others get next free padded ids. New ids are max numeric + 1, skipping ids already used (including ones assigned in the same run). Never renames files. Prints each change.
 
 ```sh
 kb fix --dry-run
@@ -208,9 +208,9 @@ kb validate
 
 ## Matching & sorting
 
-- CLI id arguments are compared as strings against `String(id)`. Ids equal by string but differing by type count as duplicates.
-- Duplicate ids: `ls` warns; commands targeting that id error, listing all file paths.
-- Sorting within a column: integer ids numeric ascending first, then string ids alphabetical.
+- CLI id arguments match `String(id)` exactly first; if none match, numeric ids are compared by value (`kb show 1` finds `"001"`, and `001` finds `id: 1`). If the numeric fallback matches several tickets, it is an ambiguity error listing paths.
+- Duplicate ids: ids equal by string, or both numeric with equal value (`1`, `"1"`, `"001"`), are duplicates. `ls` warns; commands targeting that id error, listing all file paths.
+- Sorting within a column: numeric ids ascending first (ties by string, then path), then non-numeric ids alphabetical.
 
 ## Validation & fix
 

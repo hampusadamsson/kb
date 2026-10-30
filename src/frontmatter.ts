@@ -41,6 +41,13 @@ export function updateFile(file: string, fn: (doc: Document) => void): void {
   fs.writeFileSync(file, render(doc, body, crlf));
 }
 
+/** Id as a double-quoted string scalar (so "001" is not read back as 1). */
+export function idScalar(id: string): Scalar {
+  const s = new Scalar(id);
+  s.type = Scalar.QUOTE_DOUBLE;
+  return s;
+}
+
 /** Create a new file (parent dirs created); fails if it exists. */
 export function createFile(file: string, data: Record<string, unknown>, body = ""): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
