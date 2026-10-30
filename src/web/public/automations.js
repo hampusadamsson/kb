@@ -1,132 +1,193 @@
-// Settings → Automations: rule builder cards (per board), test run.
+// Settings → Automations: board switcher, toolbar, rule cards, empty state with starters, delete + undo.
 import { api } from "./api.js";
-import { h, clear, chipInput } from "./dom.js";
-import { AUTOMATION_VARS, describeTestRun, effectiveColumn, newRule, testBody } from "./logic.js";
+import { h, clear } from "./dom.js";
+import { newRule } from "./logic.js";
+import { STARTERS, duplicateRule, filterRules, invalidCount, lastRuns, ruleCount, ruleTitle, starterRule } from "./automation-logic.js";
+import { ruleCard } from "./automation-rule.js";
 
-const CONFIRM = "This really runs the script on this machine with a sample ticket.";
-
-/** Distinct, non-blank column values of a board's column rows, with the rule's current column included. */
-function columnOptions(cols, rule) {
-  const vals = cols.map((r) => r.value.trim()).filter(Boolean);
-  const cur = effectiveColumn(cols, rule.column);
-  return vals.includes(cur) || !cur ? vals : [...vals, cur];
-}
+const open = new WeakMap(); // rule → expanded (survives redraws)
+let selected = 0; // selected board index (survives settings re-renders)
+const FILTER_MIN = 6;
 
 /**
- * Automations editor for one board. `rules` = form rules array (mutated), `cols` = the board's
- * column rows (live), `board` = () => board name for test runs, `onChange` = dirty callback.
+ * Automations tab content. boards = [{ name(), rules, cols, test() }] (default board first; rules/cols are
+ * the live form arrays). onChange = dirty callback.
  */
-export function automationList({ rules, cols, board, onChange }) {
-  const box = h("div", { class: "auto-list" });
+export function automationsTab({ boards, onChange }) {
+  if (selected >= boards.length) selected = 0;
+  const root = h("div", { class: "autos" });
   const draw = () => {
-    clear(box);
-    if (!rules.length) box.append(h("p", { class: "muted empty-auto", text: "No automations on this board yet." }));
-    for (const r of rules) box.append(card(r));
-    box.append(
-      h("button", {
-        type: "button",
-        class: "btn small",
-        text: "+ Add automation",
-        onclick: () => {
-          rules.push(newRule(cols));
-          onChange();
-          draw();
-        },
+    clear(root);
+    root.append(intro());
+    if (boards.length > 1) root.append(switcher());
+    root.append(boardView(boards[selected]));
+  };
+
+  const switcher = () =>
+    h(
+      "div",
+      { class: "autos-boards", role: "group", "aria-label": "Board" },
+      boards.map((b, i) => {
+        const bad = invalidCount(b.rules, b.cols);
+        return h(
+          "button",
+          {
+            type: "button",
+            class: "btn autos-board",
+            "aria-pressed": String(i === selected),
+            onclick: () => ((selected = i), draw(), root.querySelector(".autos-board[aria-pressed='true']")?.focus()),
+          },
+          h("span", { text: `${b.name()}${i === 0 ? " (default)" : ""}` }),
+          h("span", { class: "autos-count", text: String(b.rules.length), "aria-label": ruleCount(b.rules.length) }),
+          bad ? h("span", { class: "arule-mark", title: "Has automations that need attention", "aria-label": "needs attention", text: "!" }) : null,
+        );
       }),
     );
-  };
 
-  const card = (r) => {
-    const out = h("pre", { class: "mono auto-out", hidden: true });
-    const colSel = h("select", { "aria-label": "Column", onchange: (e) => ((r.column = e.target.value), onChange()) });
-    const fillCols = () => {
-      clear(colSel);
-      // r.column may point at a renamed column: show its new name, keep the value in sync
-      r.column = effectiveColumn(cols, r.column);
-      for (const c of columnOptions(cols, r)) colSel.append(h("option", { value: c, text: c, selected: c === r.column }));
+  const boardView = (b) => {
+    const view = h("div", { class: "autos-board-view" });
+    const listBox = h("div", { class: "auto-list" });
+    const undoBox = h("div", { class: "autos-undo", role: "status", "aria-live": "polite" });
+    let q = "";
+    let tickets = [];
+    let runs = new Map();
+    let runsKnown = false;
+    let cards = new Map();
+    let undoTimer;
+
+    api
+      .board(`board=${encodeURIComponent(b.test())}`)
+      .then((d) => {
+        const bd = d.boards?.[0];
+        tickets = bd ? [...bd.unsorted, ...bd.columns.flatMap((c) => c.tickets)] : [];
+        runs = lastRuns(tickets);
+        runsKnown = true;
+        if (view.isConnected) drawList();
+      })
+      .catch(() => {});
+
+    const ctx = {
+      rules: b.rules,
+      cols: b.cols,
+      board: b.test,
+      tickets: () => tickets,
+      runOf: (r) => runs.get(r.name.trim()) ?? null,
+      runsKnown: () => runsKnown,
+      isOpen: (r, invalid) => open.get(r) ?? !!invalid,
+      setOpen: (r, on) => open.set(r, on),
+      onChange: () => (onChange(), refreshBar()),
+      onDuplicate: (r) => {
+        const copy = duplicateRule(r, b.rules);
+        b.rules.splice(b.rules.indexOf(r) + 1, 0, copy);
+        add(copy, true);
+      },
+      onDelete: (r) => {
+        const i = b.rules.indexOf(r);
+        b.rules.splice(i, 1);
+        onChange();
+        drawList();
+        showUndo(r, i);
+        (listBox.querySelector(".arule-toggle") ?? view.querySelector(".autos-add"))?.focus();
+      },
     };
-    fillCols();
-    colSel.addEventListener("focus", fillCols);
-    colSel.addEventListener("mousedown", fillCols);
 
-    const propRows = h("div", { class: "auto-props" });
-    const drawProps = () => {
-      clear(propRows);
-      r.props.forEach((p, i) =>
-        propRows.append(
-          h(
-            "div",
-            { class: "row" },
-            h("input", { type: "text", placeholder: "property", "aria-label": "Property key", value: p.key, oninput: (e) => ((p.key = e.target.value), onChange()) }),
-            h("input", { type: "text", placeholder: "value (!x = not x)", "aria-label": "Property value", value: p.value, oninput: (e) => ((p.value = e.target.value), onChange()) }),
-            h("button", { type: "button", class: "btn small danger", text: "×", "aria-label": "Remove property", onclick: () => (r.props.splice(i, 1), onChange(), drawProps()) }),
+    const showUndo = (r, i) => {
+      clear(undoBox);
+      clearTimeout(undoTimer);
+      undoBox.append(
+        h("span", { text: `Deleted “${ruleTitle(r)}”. ` }),
+        h("button", {
+          type: "button",
+          class: "btn small",
+          text: "Undo",
+          onclick: () => {
+            clearTimeout(undoTimer);
+            clear(undoBox);
+            b.rules.splice(Math.min(i, b.rules.length), 0, r);
+            onChange();
+            drawList();
+            cards.get(r)?.focusToggle();
+          },
+        }),
+      );
+      undoTimer = setTimeout(() => clear(undoBox), 12000);
+    };
+
+    const add = (r, focus) => {
+      if (!b.rules.includes(r)) b.rules.push(r);
+      open.set(r, true);
+      q = "";
+      onChange();
+      drawAll();
+      if (focus) cards.get(r)?.focusName();
+    };
+
+    const addBtn = h("button", { type: "button", class: "btn primary autos-add", text: "Add automation", onclick: () => add(newRule(b.cols), true) });
+    const search = h("input", {
+      type: "search", class: "autos-search", placeholder: "Filter automations…", "aria-label": "Filter automations",
+      oninput: (e) => ((q = e.target.value), drawList()),
+    });
+    const bar = h("div", { class: "autos-bar" }, h("div", { class: "autos-bar-info" }), search, addBtn);
+    const refreshBar = () => {
+      const info = bar.firstChild;
+      const bad = invalidCount(b.rules, b.cols);
+      info.textContent = `${b.name()}: ${ruleCount(b.rules.length)}${bad ? ` · ${bad} need${bad === 1 ? "s" : ""} attention` : ""}`;
+      bar.hidden = !b.rules.length;
+      search.hidden = b.rules.length < FILTER_MIN;
+    };
+
+    const empty = () =>
+      h(
+        "div",
+        { class: "autos-empty" },
+        h("h4", { text: `No automations on ${b.name()} yet` }),
+        h("p", { class: "muted", text: "An automation runs a shell script when a ticket is moved to a column or created in one. Start from a template or build your own." }),
+        h(
+          "div",
+          { class: "autos-starters" },
+          STARTERS.map((s) =>
+            h("button", { type: "button", class: "autos-starter", onclick: () => add(starterRule(s, b.cols, b.rules, newRule), true) }, h("strong", { text: s.title }), h("span", { class: "muted", text: s.detail })),
           ),
         ),
+        h("button", { type: "button", class: "btn primary", text: "Add automation", onclick: () => add(newRule(b.cols), true) }),
       );
-      propRows.append(h("button", { type: "button", class: "btn small", text: "+ Add property", onclick: () => (r.props.push({ key: "", value: "" }), onChange(), drawProps()) }));
-    };
-    drawProps();
 
-    const chips = chipInput({ label: "Labels (all required)", placeholder: "label, Enter", values: r.labels, onChange: (v) => ((r.labels = v), onChange()) });
+    function drawList() {
+      clear(listBox);
+      cards = new Map();
+      refreshBar();
+      if (!b.rules.length) return void listBox.append(empty());
+      const shown = filterRules(b.rules, q);
+      if (!shown.length) listBox.append(h("p", { class: "muted", text: `No automations match “${q}”.` }));
+      for (const r of shown) {
+        const c = ruleCard(r, ctx);
+        cards.set(r, c);
+        listBox.append(c.el);
+      }
+    }
+    function drawAll() {
+      drawList();
+    }
 
-    const test = h("button", {
-      type: "button",
-      class: "btn small",
-      text: "Test run",
-      onclick: async (e) => {
-        if (!r.run.trim()) return show(out, "Script is empty.");
-        if (!confirm(CONFIRM)) return;
-        e.target.disabled = true;
-        try {
-          show(out, describeTestRun(await api.testAutomation(testBody(r, board()))));
-        } catch (err) {
-          show(out, err.message);
-        } finally {
-          e.target.disabled = false;
-        }
-      },
-    });
-
-    return h(
-      "div",
-      { class: "auto-card" },
-      h(
-        "div",
-        { class: "row" },
-        h("input", { type: "text", placeholder: "Rule name", "aria-label": "Rule name", value: r.name, oninput: (e) => ((r.name = e.target.value), onChange()) }),
-        h("label", { class: "check" }, h("input", { type: "checkbox", "aria-label": "Enabled", checked: r.enabled, onchange: (e) => ((r.enabled = e.target.checked), onChange()) }), " enabled"),
-        h("button", { type: "button", class: "btn small danger", text: "Remove", onclick: () => (rules.splice(rules.indexOf(r), 1), onChange(), draw()) }),
-      ),
-      h(
-        "div",
-        { class: "row guard-row" },
-        h("label", { class: "check" }, h("input", { type: "checkbox", "aria-label": "Loop guard", checked: r.guard !== false, onchange: (e) => ((r.guard = e.target.checked), onChange()) }), " Stop after 15 runs per ticket (loop guard)"),
-        h("span", { class: "muted hint", text: "Prevents rules from bouncing tickets back and forth forever. Uncheck to opt out." }),
-      ),
-      h(
-        "div",
-        { class: "row" },
-        h(
-          "select",
-          { "aria-label": "Event", onchange: (e) => ((r.event = e.target.value), onChange()) },
-          h("option", { value: "moved_to", text: "when moved to", selected: r.event === "moved_to" }),
-          h("option", { value: "created_in", text: "when created in", selected: r.event === "created_in" }),
-        ),
-        colSel,
-      ),
-      h("div", { class: "field" }, h("span", { class: "lbl", text: "…and has labels" }), chips.el),
-      h("div", { class: "field" }, h("span", { class: "lbl", text: "…and properties" }), propRows),
-      h("textarea", { class: "mono auto-run", rows: 3, placeholder: "echo {{ id }} >> done.txt", "aria-label": "Script", value: r.run, oninput: (e) => ((r.run = e.target.value), onChange()) }),
-      h("p", { class: "muted hint", text: `Variables: ${AUTOMATION_VARS.map((v) => `{{ ${v} }}`).join(" ")}. Values are shell-quoted automatically: write placeholders bare (echo {{ name }}), not in quotes.` }),
-      h("div", { class: "row" }, test, h("span", { class: "muted", text: "Runs the script for real with a sample ticket." })),
-      out,
+    view.append(
+      h("p", { class: "muted hint", text: "Rules apply only to this board; they are not inherited from other boards. Order does not matter: every matching rule runs." }),
+      bar,
+      undoBox,
+      listBox,
     );
+    drawList();
+    return view;
   };
-  draw();
-  return box;
-}
 
-function show(pre, text) {
-  pre.textContent = text;
-  pre.hidden = false;
+  const intro = () =>
+    h(
+      "details",
+      { class: "tr-details autos-help" },
+      h("summary", { text: "How automations work" }),
+      h("p", { class: "muted", text: "When a ticket is moved to (or created in) a column and matches the optional labels and properties, the script runs on this machine in the folder of kanban.yaml. Placeholders such as {{ id }} are replaced by shell-quoted ticket values. The last run is shown on each rule; full history is in the Logs tab." }),
+      h("p", { class: "muted", text: "Changes are saved with Save config below. Test run executes the script for real." }),
+    );
+
+  draw();
+  return root;
 }

@@ -1,7 +1,7 @@
 // Settings dialog: board config form (kanban.yaml), health (validate + warnings), fix ids.
 import { api } from "./api.js";
 import { h, clear, toast } from "./dom.js";
-import { automationList } from "./automations.js";
+import { automationsTab } from "./automations.js";
 import * as logs from "./logs.js";
 import * as live from "./live.js";
 import { liveLabel } from "./live-logic.js";
@@ -357,19 +357,7 @@ function automationsPanel() {
   const boards = [{ name: () => form.name.trim() || "(unnamed)", rules: form.automations, cols: form.columns, test: () => form.name.trim() }].concat(
     form.boards.map((b) => ({ name: () => b.name.trim() || "(unnamed)", rules: b.automations, cols: b.columns, test: () => b.name.trim() })),
   );
-  const sec = h("section", { class: "config", id: "automations-section" }, bannerBox());
-  boards.forEach((b, i) => {
-    const title = b.name();
-    sec.append(
-      h(
-        "div",
-        { class: "board-auto" },
-        h("h4", { text: `Board: ${title}${i === 0 ? " (default)" : ""}` }),
-        automationList({ rules: b.rules, cols: b.cols, board: b.test, onChange: onDirty }),
-      ),
-    );
-  });
-  return sec;
+  return h("section", { class: "config", id: "automations-section" }, bannerBox(), automationsTab({ boards, onChange: onDirty }));
 }
 
 /** Ordered, editable column list: rename inline, reorder, remove, add. */
