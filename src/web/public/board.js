@@ -1,6 +1,6 @@
 // Board rendering: sections, columns, cards, drag and drop.
 import { h, clear } from "./dom.js";
-import { display } from "./logic.js";
+import { display, moveTargets } from "./logic.js";
 import { cardIndicator } from "./status.js";
 
 /**
@@ -15,9 +15,10 @@ export function renderBoards(container, boards, handlers, { showTitles }) {
 }
 
 function renderBoard(board, handlers, showTitle) {
-  const cols = board.columns.map((c) => renderColumn(board, c, handlers, false));
+  const names = board.columns.map((c) => c.name);
+  const cols = board.columns.map((c) => renderColumn(board, c, handlers, false, names));
   if (board.unsorted.length) {
-    cols.push(renderColumn(board, { name: "unsorted", tickets: board.unsorted }, handlers, true));
+    cols.push(renderColumn(board, { name: "unsorted", tickets: board.unsorted }, handlers, true, names));
   }
   return h(
     "section",
@@ -27,10 +28,11 @@ function renderBoard(board, handlers, showTitle) {
   );
 }
 
-function renderColumn(board, col, handlers, unsorted) {
+function renderColumn(board, col, handlers, unsorted, names) {
   const key = `${board.name}\u0000${col.name}`;
   const body = h("div", { class: "cards", "data-scroll": key });
-  for (const t of col.tickets) body.append(renderCard(t, handlers));
+  const targets = moveTargets(names, unsorted ? null : col.name);
+  for (const t of col.tickets) body.append(renderCard(t, handlers, targets));
   if (!col.tickets.length) body.append(h("p", { class: "empty-col", text: "—" }));
   const el = h(
     "div",
@@ -81,7 +83,7 @@ function wireDrop(el, boardName, colName, handlers) {
   });
 }
 
-function renderCard(t, handlers) {
+function renderCard(t, handlers, targets) {
   const idText = t.hasId ? `#${display(t.id)}` : "#?";
   const ind = cardIndicator(t.autos);
   const card = h(
@@ -112,6 +114,7 @@ function renderCard(t, handlers) {
         )
       : null,
     ind ? ind.el : null,
+    t.readOnly || !targets.length ? null : moveSelect(t, targets, handlers),
   );
   card.addEventListener("click", () => handlers.open(t));
   card.addEventListener("keydown", (e) => {
@@ -136,6 +139,24 @@ function renderCard(t, handlers) {
     });
   }
   return card;
+}
+
+/** Touch/keyboard alternative to drag and drop: a native select that calls the same move handler. */
+function moveSelect(t, targets, handlers) {
+  const sel = h(
+    "select",
+    { class: "card-move", "aria-label": `Move #${display(t.id)} to column` },
+    h("option", { value: "", text: "Move to…" }),
+    targets.map((c) => h("option", { value: c, text: c })),
+  );
+  for (const ev of ["click", "keydown", "mousedown", "dragstart"]) sel.addEventListener(ev, (e) => e.stopPropagation());
+  sel.draggable = false;
+  sel.addEventListener("change", () => {
+    const to = sel.value;
+    sel.value = "";
+    if (to) handlers.move(t, to);
+  });
+  return sel;
 }
 
 function captureScroll(container) {

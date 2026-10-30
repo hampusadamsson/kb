@@ -144,7 +144,12 @@ class Session {
     const form = h(
       "form",
       { method: "dialog", class: "ticket-form", onsubmit: (e) => (e.preventDefault(), this.save()) },
-      h("h2", { text: create ? "New ticket" : ro ? "Ticket (read-only)" : "Edit ticket" }),
+      h(
+        "div",
+        { class: "dlg-head" },
+        h("h2", { text: create ? "New ticket" : ro ? "Ticket (read-only)" : "Edit ticket" }),
+        h("button", { type: "button", class: "btn small only-narrow", "aria-label": "Close", title: "Close", text: "×", onclick: closeDialog }),
+      ),
       this.banner,
       head,
       meta,

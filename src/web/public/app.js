@@ -22,6 +22,20 @@ const filters = createFilters($("filters"), (f) => {
   writeHash();
 });
 
+// Filters row is collapsible on narrow screens (CSS hides the toggle on wide ones).
+const toggleFilters = $("filters-toggle");
+const setFiltersOpen = (on) => {
+  document.querySelector(".top").classList.toggle("filters-open", on);
+  toggleFilters.setAttribute("aria-expanded", String(on));
+};
+toggleFilters.addEventListener("click", () => setFiltersOpen(toggleFilters.getAttribute("aria-expanded") !== "true"));
+function renderFilterCount() {
+  const f = state.filters;
+  const n = (f.text ? 1 : 0) + f.labels.length + f.props.length;
+  $("filters-count").textContent = String(n);
+  $("filters-count").hidden = n === 0;
+}
+
 // ---- routing ----
 
 function writeHash() {
@@ -90,6 +104,7 @@ function showFatal(e) {
 
 function render() {
   const { data } = state;
+  renderFilterCount();
   $("title").textContent = data.name || "kb";
   document.title = data.name ? `${data.name} — kb` : "kb";
   renderTabs();
@@ -183,6 +198,13 @@ $("ticket-dialog").addEventListener("mousedown", (e) => {
 });
 $("ticket-dialog").addEventListener("click", (e) => {
   if (e.target === $("ticket-dialog") && $("ticket-dialog").dataset.bd === "1") closeDialog();
+});
+
+// On-screen keyboards: keep the focused field visible inside a dialog.
+document.addEventListener("focusin", (e) => {
+  const el = e.target;
+  if (!matchMedia("(pointer: coarse)").matches || !el.closest?.("dialog") || !el.matches("input,textarea,select")) return;
+  setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
 });
 
 // ---- live updates ----

@@ -305,3 +305,24 @@ describe("web frontend assets", () => {
     }
   });
 });
+
+describe("mobile guards", () => {
+  const pub = (f: string) => fs.readFileSync(path.join(import.meta.dirname, "../src/web/public", f), "utf8");
+  it("index.html has a responsive viewport meta with viewport-fit=cover", () => {
+    expect(pub("index.html")).toMatch(/<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
+  });
+  it("style.css keeps the mobile breakpoints and touch rules", () => {
+    const css = pub("style.css");
+    expect(css).toContain("@media (max-width: 640px)");
+    expect(css).toContain("(pointer: coarse)");
+    expect(css).toContain("scroll-snap-type: x mandatory");
+    expect(css).toContain("env(safe-area-inset-bottom)");
+    expect(css).toContain("100dvh");
+    expect(css).toContain("prefers-reduced-motion");
+  });
+  it("board.js offers a Move-to select that reuses the move handler", () => {
+    const js = pub("board.js");
+    expect(js).toContain("card-move");
+    expect(js).toContain("handlers.move(t, to)");
+  });
+});

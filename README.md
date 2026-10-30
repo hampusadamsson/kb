@@ -656,6 +656,16 @@ kb web [--host <addr>] [--port <n>] [--no-open]
 - Stale-edit banner: edits send the ticket's mtime; if the file changed on disk the UI offers **Reload** or **Overwrite**.
 - Not available in the UI: `init` and `edit`.
 
+### Mobile / touch
+
+The UI works on phones (360–430 px), landscape and small tablets; desktop layout is unchanged.
+
+- **Breakpoints**: `max-width: 640px` (phone layout), `max-width: 640px` or `max-height: 500px` (full-screen dialogs, also phone landscape), and `pointer: coarse` (bigger touch targets on any touch device, e.g. tablets).
+- **Board**: columns form a horizontal scroll-snap strip (~85 vw each). Header tabs scroll sideways; the filter bar collapses behind a **Filters** button (badge = active filters). The header is not sticky on phones.
+- **Move control**: on touch devices each card has a native **Move to…** select that moves the card with the same code path as drag and drop (same board only; hidden for read-only cards). On desktop it is hidden but reachable with the keyboard (Tab to the card, then the select). Drag and drop is unchanged on desktop; HTML5 drag does not work on touch, hence the select.
+- **Dialogs** (ticket, create, Settings) are full-screen sheets on narrow screens: sticky header with a large close button, sticky footer with safe-area padding, scrollable body, no page scroll behind. Settings tabs scroll horizontally; the Logs table becomes stacked rows (time + event, then ticket, then summary; tap to expand).
+- Inputs are 16 px (no iOS zoom on focus), interactive targets are at least 44 px, long paths/commands wrap, animations respect `prefers-reduced-motion`, `viewport-fit=cover` + `env(safe-area-inset-*)` handle notches.
+
 ### Live updates
 
 - `fs.watch` (recursive) on the board dir, filtered by `glob`; `kanban.yaml` changes count too. `node_modules`, `dist` and `.git` are ignored.
@@ -794,6 +804,6 @@ Implemented: v1, the web UI (`kb web`), automations with the loop guardrail, the
 - The guardrail limit (15) is a constant, not configurable.
 - `GET /api/events` reads the whole log (and `events.1.log`, so up to ~10 MB) per request and filters in memory; fine for a local tool, not for huge logs.
 - Event ids are time-based per machine; clock changes can make ordering odd.
-- Browser verification is limited. Automated: vitest (API, e2e web server tests) and a headless Chrome smoke check (synthetic drag events); the Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner). **Not** verified in a real browser: rules inside board overrides, the failed-run and 503 displays, the create dialog and the Health fix buttons.
+- Browser verification is limited. Automated: vitest (API, e2e web server tests) and a headless Chrome smoke check (synthetic drag events); the Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner). Mobile layout was verified with Chrome device emulation (390x844, 360x640, 844x390, 768x1024, touch events) but **not** on real phones. **Not** verified in a real browser: rules inside board overrides, the failed-run and 503 displays, the create dialog and the Health fix buttons.
 - Logs tab, guard checkbox, skipped dots and Reset were exercised in headless Chrome (synthetic CDP input), not in a real desktop browser.
 - Shell completion: live TAB behaviour in an interactive zsh/bash was not tested (only generation, sourcing and syntax).

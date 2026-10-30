@@ -117,7 +117,7 @@ export async function live() {
 const cell = (cls, ...c) => h("td", { class: cls }, ...c);
 
 function ticketCell(e, s) {
-  if (!e.ticketId) return cell("");
+  if (!e.ticketId) return cell("logs-ticket");
   const label = `#${e.ticketId}${e.ticketName ? " " + e.ticketName : ""}`;
   if (s.missing.has(e.ticketId)) return cell("logs-ticket", h("span", { class: "muted", title: "Ticket no longer exists", text: label }));
   return cell(
@@ -175,10 +175,10 @@ function row(e, s, tbody) {
       },
     },
     cell("logs-time", h("span", { title: absoluteTime(e.ts), text: relativeTime(e.ts) || e.ts })),
-    cell("", h("span", { class: `pill ev-${pillClass(e)}`, text: e.type })),
+    cell("logs-event", h("span", { class: `pill ev-${pillClass(e)}`, text: e.type })),
     ticketCell(e, s),
-    cell("", e.board ?? ""),
-    cell("", e.source ?? ""),
+    cell("logs-board", e.board ?? ""),
+    cell("logs-source", e.source ?? ""),
     cell("logs-summary", e.summary ?? ""),
   );
   tbody.append(tr);

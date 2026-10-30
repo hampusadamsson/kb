@@ -123,6 +123,11 @@ export function statusOptions(columns, current) {
   return opts;
 }
 
+/** Columns a card can be moved to from `current` (the column it sits in; unsorted cards may go anywhere). */
+export function moveTargets(columns, current) {
+  return columns.filter((c) => c !== current);
+}
+
 /** Fix change line: `path: id from → to`. */
 export function describeChange(c) {
   const from = c.from === undefined || c.from === null || c.from === "" ? "(none)" : String(c.from);

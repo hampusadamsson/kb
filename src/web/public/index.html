@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <title>kb</title>
   <link rel="icon" href="data:,">
@@ -15,6 +15,7 @@
       <h1 id="title">kb</h1>
       <div id="tabs" class="tabs" role="tablist" aria-label="Boards"></div>
       <span class="spacer"></span>
+      <button id="filters-toggle" type="button" class="btn only-narrow" aria-expanded="false" aria-controls="filters">Filters <span id="filters-count" class="badge-count" hidden>0</span></button>
       <span id="live" class="live" role="status"><span class="dot" aria-hidden="true"></span><span class="live-text">connecting…</span></span>
       <button id="settings-btn" type="button" class="btn">Settings <span id="settings-run" class="sdot running" title="Automations running" hidden></span> <span id="settings-badge" class="badge-count" hidden>0</span></button>
     </div>
