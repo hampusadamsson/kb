@@ -5,7 +5,7 @@ import { parseDocument } from "yaml";
 import { beforeEach, describe, expect, it } from "vitest";
 import { columnsFor, loadConfig, type Config } from "../src/core/config.js";
 import { addComment, createFile, readFile, updateFile } from "../src/core/frontmatter.js";
-import { boardNames, duplicates, findById, nextId, numericId, scan, sortTickets } from "../src/core/tickets.js";
+import { matchesTicketGlob, boardNames, duplicates, findById, nextId, numericId, scan, sortTickets } from "../src/core/tickets.js";
 import { filenameFor, padId, slugify } from "../src/core/util.js";
 import { parseProperty } from "../src/core/parse.js";
 
@@ -214,5 +214,13 @@ describe("util", () => {
     expect(parseProperty("a:[1, 2]")).toEqual(["a", "[1, 2]"]);
     expect(parseProperty("a:{b: 1}")).toEqual(["a", "{b: 1}"]);
     expect(() => parseProperty("nocolon")).toThrow();
+  });
+});
+
+describe("matchesTicketGlob", () => {
+  it("matches config glob", () => {
+    expect(matchesTicketGlob({ name: "d", columns: ["a"], glob: "*.md" }, "a.md")).toBe(true);
+    expect(matchesTicketGlob({ name: "d", columns: ["a"], glob: "*.md" }, "sub/a.md")).toBe(false);
+    expect(matchesTicketGlob({ name: "d", columns: ["a"], glob: "**/*.md" }, "sub/a.md")).toBe(true);
   });
 });

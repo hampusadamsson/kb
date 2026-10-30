@@ -71,6 +71,11 @@ export function scan(cwd: string, config: Config): ScanResult {
   return { tickets, diagnostics };
 }
 
+/** Does a path (relative to the config dir) match the config's ticket glob? */
+export function matchesTicketGlob(config: Config, rel: string): boolean {
+  return path.matchesGlob(rel.split(path.sep).join("/"), config.glob);
+}
+
 function toTicket(
   rel: string,
   data: Record<string, unknown>,

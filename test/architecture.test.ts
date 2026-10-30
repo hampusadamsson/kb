@@ -7,6 +7,7 @@ const coreDir = path.resolve(import.meta.dirname, "../src/core");
 const forbidden: [string, RegExp][] = [
   ["commander import", /from\s+["']commander["']|require\(["']commander["']\)/],
   ["cli import", /from\s+["'](?:\.\.?\/)+cli(?:\/|\.js|["'])/],
+  ["web import", /from\s+["'](?:\.\.?\/)+web(?:\/|\.js|["'])/],
   ["process.stdout", /process\.stdout/],
   ["process.stderr", /process\.stderr/],
   ["process.exit", /process\.exit/],
