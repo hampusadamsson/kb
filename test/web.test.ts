@@ -296,7 +296,7 @@ describe("web frontend assets", () => {
     const types: Record<string, string> = {
       "/app.js": "text/javascript", "/api.js": "text/javascript", "/logic.js": "text/javascript",
       "/board.js": "text/javascript", "/dialog.js": "text/javascript", "/dom.js": "text/javascript",
-      "/filters.js": "text/javascript", "/settings.js": "text/javascript", "/settings-tabs.js": "text/javascript", "/style.css": "text/css",
+      "/filters.js": "text/javascript", "/settings.js": "text/javascript", "/settings-tabs.js": "text/javascript", "/logs.js": "text/javascript", "/logs-logic.js": "text/javascript", "/style.css": "text/css",
     };
     for (const [p, t] of Object.entries(types)) {
       const r = await fetch(srv.url + p);

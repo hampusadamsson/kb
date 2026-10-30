@@ -10,6 +10,7 @@ export const MAX_LIMIT = 200;
 export interface EventQuery {
   /** case-insensitive substring over summary, type, ticketId, ticketName, board and JSON of data */
   q?: string;
+  /** exact type(s); a trailing ".*" matches a prefix, e.g. "ticket.*" */
   type?: string | string[];
   ticketId?: string;
   board?: string;
@@ -75,7 +76,7 @@ export function createEventLog(dir: string): EventLog {
       const needle = f.q?.toLowerCase();
       const wants = (e: KbEvent): boolean => {
         if (f.before !== undefined && !(e.id < f.before)) return false;
-        if (types && !types.includes(e.type)) return false;
+        if (types && !types.some((t) => (t.endsWith(".*") ? e.type.startsWith(t.slice(0, -1)) : t === e.type))) return false;
         if (f.ticketId !== undefined && e.ticketId !== f.ticketId) return false;
         if (f.board !== undefined && e.board !== f.board) return false;
         if (f.source !== undefined && e.source !== f.source) return false;

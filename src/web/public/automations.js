@@ -1,8 +1,7 @@
-// Settings → Automations: rule builder cards (per board), test run, last-runs list.
+// Settings → Automations: rule builder cards (per board), test run.
 import { api } from "./api.js";
 import { h, clear, chipInput } from "./dom.js";
-import { dot } from "./status.js";
-import { AUTOMATION_VARS, absoluteTime, automationState, relativeTime, describeTestRun, effectiveColumn, newRule, testBody } from "./logic.js";
+import { AUTOMATION_VARS, describeTestRun, effectiveColumn, newRule, testBody } from "./logic.js";
 
 const CONFIRM = "This really runs the script on this machine with a sample ticket.";
 
@@ -124,53 +123,4 @@ export function automationList({ rules, cols, board, onChange }) {
 function show(pre, text) {
   pre.textContent = text;
   pre.hidden = false;
-}
-
-/** "Last runs" section; expands stdout/stderr on click. */
-export async function lastRuns() {
-  const sec = h("section", { class: "issues last-runs" });
-  let runs;
-  try {
-    runs = (await api.automationLog()).runs;
-  } catch (e) {
-    return sec.append(h("h4", { text: "Last automation runs" }), h("p", { class: "form-error", text: e.message })), sec;
-  }
-  sec.append(h("h4", { text: `Last automation runs (${runs.length})` }));
-  if (!runs.length) return sec.append(h("p", { class: "muted", text: "None." })), sec;
-  sec.append(
-    h(
-      "ul",
-      { class: "runs" },
-      runs.map((r) => {
-        const detail = h("pre", { class: "mono auto-out", hidden: true, text: runText(r) });
-        return h(
-          "li",
-          {},
-          h(
-            "button",
-            { type: "button", class: "run-row", "aria-expanded": "false", onclick: (e) => ((detail.hidden = !detail.hidden), e.currentTarget.setAttribute("aria-expanded", String(!detail.hidden))) },
-            h("span", { class: "muted", title: absoluteTime(r.finishedAt ?? r.startedAt), text: relativeTime(r.finishedAt ?? r.startedAt) || String(r.finishedAt ?? r.startedAt ?? "") }),
-            h("span", { class: "mono", text: `${r.board}/${r.rule}` }),
-            h("span", { class: "mono", text: `#${r.ticketId}` }),
-            (() => {
-              const st = automationState({ status: r.status, exit: r.result?.exitCode, error: r.result?.error });
-              return h("span", { class: "run-status" }, dot(st, `${r.board}/${r.rule}: ${st} ${relativeTime(r.finishedAt ?? r.startedAt)}`.trim()), h("span", { text: r.status }));
-            })(),
-            h("span", { class: "muted", text: `exit ${r.result?.exitCode ?? "–"}` }),
-          ),
-          detail,
-        );
-      }),
-    ),
-  );
-  return sec;
-}
-
-function runText(r) {
-  const res = r.result ?? {};
-  const parts = [`$ ${r.command}`];
-  if (res.error) parts.push(`error: ${res.error}`);
-  if (res.stdout) parts.push("--- stdout ---", res.stdout);
-  if (res.stderr) parts.push("--- stderr ---", res.stderr);
-  return parts.join("\n");
 }

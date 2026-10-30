@@ -35,6 +35,17 @@ describe("event log", () => {
     expect(log.query().events.map((e) => e.id)).toEqual([b.id, a.id]);
   });
 
+  it("supports trailing .* prefix wildcard in type", () => {
+    const log = createEventLog(dir);
+    const a = ev({ type: "ticket.moved" });
+    const b = ev({ type: "config.updated" });
+    const c = ev({ type: "ticket.labels" });
+    for (const e of [a, b, c]) log.emit(e);
+    expect(log.query({ type: "ticket.*" }).events.map((e) => e.id)).toEqual([c.id, a.id]);
+    expect(log.query({ type: ["config.*", "ticket.moved"] }).events.map((e) => e.id)).toEqual([b.id, a.id]);
+    expect(log.query({ type: "ticket" }).events).toEqual([]);
+  });
+
   it("paginates with cursor across many events", () => {
     const log = createEventLog(dir);
     const all = Array.from({ length: 130 }, () => ev());

@@ -169,7 +169,13 @@ const handlers = {
 
 $("settings-btn").addEventListener("click", () => settings.open());
 $("settings-close").addEventListener("click", () => $("settings-dialog").close());
-settings.init(() => load());
+settings.init(() => load(), {
+  boardNames: () => state.data?.boardNames ?? [],
+  async openTicket(id) {
+    await api.get(String(id)); // throws when the ticket is gone
+    openDetail(dialogCtx(), { id });
+  },
+});
 
 // Click on the backdrop closes a dialog only if the click started and ended there.
 $("ticket-dialog").addEventListener("mousedown", (e) => {

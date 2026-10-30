@@ -1,7 +1,8 @@
 // Settings dialog: board config form (kanban.yaml), health (validate + warnings), fix ids.
 import { api } from "./api.js";
 import { h, clear, toast } from "./dom.js";
-import { automationList, lastRuns } from "./automations.js";
+import { automationList } from "./automations.js";
+import * as logs from "./logs.js";
 import { tabList, tabPanel } from "./settings-tabs.js";
 import {
   checkForm,
@@ -29,8 +30,9 @@ let busy = false;
 
 export const isOpen = () => dlg().open;
 
-export function init(applied) {
+export function init(applied, logsCtx) {
   onApplied = applied;
+  if (logsCtx) logs.configure(logsCtx);
   dlg().addEventListener("mousedown", (e) => {
     dlg().dataset.bd = e.target === dlg() ? "1" : "";
   });
@@ -56,6 +58,7 @@ export async function open() {
 /** Called on live updates while open: refresh health; handle config changes on disk. */
 export async function refresh() {
   if (!dlg().open || busy) return;
+  if (activeTab === "logs") logs.live();
   let changed = false;
   try {
     const c = await api.config();
@@ -110,6 +113,7 @@ function tabItems() {
     { id: "config", label: "Config", dirty: d.config, error: bad === "config" },
     { id: "automations", label: "Automations", dirty: d.automations, error: bad === "automations" },
     { id: "health", label: n ? `Health (${n})` : "Health" },
+    { id: "logs", label: "Logs" },
   ];
 }
 
@@ -144,19 +148,16 @@ async function renderPanel() {
   const panel = tabPanel(activeTab);
   slot.replaceChildren(panel);
   if (activeTab === "health") return void panel.append(...(await healthPanel()));
+  if (activeTab === "logs") return void logs.mount(panel);
   if (!form) return void panel.append(h("p", { class: "form-error", text: formError || "Cannot load the config." }));
   if (activeTab === "config") panel.append(configPanel());
-  else {
-    panel.append(automationsPanel());
-    const runs = await lastRuns();
-    if (document.getElementById(panel.id) === panel) panel.querySelector(".runs-slot")?.replaceWith(runs);
-  }
+  else panel.append(automationsPanel());
 }
 
 const rerenderConfig = () => {
   refreshTabs();
   const panel = document.querySelector(".set-panel");
-  if (!panel || activeTab === "health") return;
+  if (!panel || activeTab === "health" || activeTab === "logs") return;
   const keep = panel.scrollTop;
   renderPanel().then(() => {
     const p = document.querySelector(".set-panel");
@@ -269,7 +270,7 @@ function automationsPanel() {
       ),
     );
   });
-  sec.append(h("div", { class: "runs-slot" }), formFooter());
+  sec.append(formFooter());
   return sec;
 }
 
