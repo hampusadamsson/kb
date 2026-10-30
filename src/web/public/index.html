@@ -1,1 +1,49 @@
-<!doctype html><meta charset="utf-8"><title>kb web</title><p>kb web — UI coming</p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>kb</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="top-row">
+      <h1 id="title">kb</h1>
+      <div id="tabs" class="tabs" role="tablist" aria-label="Boards"></div>
+      <span class="spacer"></span>
+      <span id="live" class="live" role="status"><span class="dot" aria-hidden="true"></span><span class="live-text">connecting…</span></span>
+      <button id="maint-btn" type="button" class="btn">Maintenance <span id="maint-badge" class="badge-count" hidden>0</span></button>
+      <button id="new-btn" type="button" class="btn primary">New</button>
+    </div>
+    <div id="filters" class="filters">
+      <label class="f"><span>Text</span><input id="f-text" type="search" placeholder="search"></label>
+      <div class="f"><span>Labels</span><div id="f-labels"></div></div>
+      <div class="f"><span>Properties</span><div id="f-props"></div></div>
+      <button id="f-clear" type="button" class="btn small" hidden>Clear</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="fatal" class="fatal" role="alert" hidden></div>
+    <div id="app" hidden>
+      <p id="empty" class="empty" hidden></p>
+      <div id="boards" class="boards"></div>
+    </div>
+  </main>
+
+  <dialog id="ticket-dialog" aria-label="Ticket"></dialog>
+
+  <dialog id="maint-dialog" aria-labelledby="maint-title">
+    <div class="ticket-form">
+      <h2 id="maint-title">Maintenance</h2>
+      <div id="maint-body"></div>
+      <div class="actions"><button id="maint-close" type="button" class="btn">Close</button></div>
+    </div>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite" role="status"></div>
+</body>
+</html>

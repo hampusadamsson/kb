@@ -176,7 +176,7 @@ describe("static files", () => {
     const r = await fetch(srv.url + "/");
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toContain("text/html");
-    expect(await r.text()).toContain("kb web");
+    expect(await r.text()).toContain("/app.js");
     expect((await fetch(srv.url + "/index.html")).status).toBe(200);
     expect((await fetch(srv.url + "/missing.js")).status).toBe(404);
   });
@@ -278,5 +278,30 @@ describe("listening", () => {
     const s = await startServer({ dir, port: 0 });
     await s.close();
     await expect(fetch(s.url + "/api/board")).rejects.toThrow();
+  });
+});
+
+describe("web frontend assets", () => {
+  it("serves index.html referencing app.js and style.css, with CSP", async () => {
+    const r = await fetch(srv.url + "/");
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toContain("text/html");
+    expect(r.headers.get("content-security-policy")).toContain("default-src 'self'");
+    const html = await r.text();
+    expect(html).toContain("/app.js");
+    expect(html).toContain("/style.css");
+    expect(html).not.toMatch(/\son\w+=|<style|<script(?![^>]*src=)/i);
+  });
+  it("serves modules and css with correct content types", async () => {
+    const types: Record<string, string> = {
+      "/app.js": "text/javascript", "/api.js": "text/javascript", "/logic.js": "text/javascript",
+      "/board.js": "text/javascript", "/dialog.js": "text/javascript", "/dom.js": "text/javascript",
+      "/filters.js": "text/javascript", "/maintenance.js": "text/javascript", "/style.css": "text/css",
+    };
+    for (const [p, t] of Object.entries(types)) {
+      const r = await fetch(srv.url + p);
+      expect(r.status, p).toBe(200);
+      expect(r.headers.get("content-type"), p).toContain(t);
+    }
   });
 });

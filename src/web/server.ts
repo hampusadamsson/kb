@@ -37,6 +37,8 @@ const TYPES: Record<string, string> = {
   ".png": "image/png",
 };
 
+const CSP = "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'";
+
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
     super(message);
@@ -110,6 +112,8 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathna
     res.writeHead(200, {
       "Content-Type": TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
       "Cache-Control": "no-store",
+      "Content-Security-Policy": CSP,
+      "X-Content-Type-Options": "nosniff",
       "Content-Length": data.length,
     });
     res.end(req.method === "HEAD" ? undefined : data);
