@@ -57,6 +57,18 @@ describe("validate automations", () => {
   });
 });
 
+describe("validate placeholder context", () => {
+  it.each([`echo "{{ name }}"`, "echo '{{ name }}'", "echo `{{ name }}`", "cat <<EOF\n{{ name }}\nEOF"])("rejects %s", (run) => {
+    const m = msgs(check(rules(`{ name: a, when: { moved_to: done }, run: ${JSON.stringify(run)} }`)));
+    expect(m).toHaveLength(1);
+    expect(m[0]).toContain('board "default" automation "a"');
+    expect(m[0]).toContain("must not be inside");
+  });
+  it("accepts bare", () => {
+    expect(check(rules("{ name: a, when: { moved_to: done }, run: 'echo $(x {{ name }})' }")).errors).toEqual([]);
+  });
+});
+
 describe("stale running", () => {
   const tk = (status: string, at: Date) =>
     w("1.md", `---\ntype: ticket\nid: "001"\nname: T\nstatus: todo\nautomations:\n  r:\n    status: ${status}\n    at: "${stamp(at)}"\n---\n`);

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isMap, isSeq, parseDocument, Scalar, type Document, type YAMLSeq } from "yaml";
 import { z } from "zod";
+import { automationProblems } from "./automation.js";
 import { automationSchema, columnsFor, CONFIG_FILE, loadConfig, type Automation, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
 import { updateFile } from "./frontmatter.js";
@@ -299,6 +300,8 @@ export function updateConfigFile(dir: string, raw: unknown, opts: UpdateConfigOp
   const boardRen = boardRenames(old, next, renames);
   rewriteRenamedColumns(old, next, renames, boardRen);
   const changes = planTicketChanges(old, next, tickets, renames, boardRen, automationBlocks(old, next, boardRen));
+  const autoProblems = automationProblems(next);
+  if (autoProblems.length) throw new KanbanError("invalid", autoProblems.join("; "));
   const doc = parseDocument(fs.readFileSync(file, "utf8"));
   const configChanged = applyConfigToDoc(doc, old, next, boardRen);
 

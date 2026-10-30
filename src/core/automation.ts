@@ -55,7 +55,139 @@ export function unknownVars(template: string): string[] {
 }
 
 export function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
+  return `'${s.replace(/\0/g, "").replace(/'/g, `'\\''`)}'`;
+}
+
+export type PlaceholderContext = "double-quote" | "single-quote" | "backtick" | "heredoc";
+export interface PlaceholderProblem {
+  variable: string;
+  context: PlaceholderContext;
+}
+
+const PLACEHOLDER_AT = /\{\{\s*([^{}\s]+)\s*\}\}/y;
+const HEREDOC_RE = /^<<(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([A-Za-z_][\w]*))/;
+
+/**
+ * Placeholders located inside quotes, backticks or heredoc bodies of a shell template. Values are
+ * shell-quoted ('…') automatically, which is only safe in unquoted code position (incl. `$( … )`).
+ */
+export function placeholderContextProblems(template: string): PlaceholderProblem[] {
+  const out: PlaceholderProblem[] = [];
+  const add = (variable: string, context: PlaceholderContext) => {
+    if (!out.some((p) => p.variable === variable && p.context === context)) out.push({ variable, context });
+  };
+  type Frame = { kind: "code" | "dq" | "sq" | "bt"; depth: number; paren: boolean };
+  const stack: Frame[] = [{ kind: "code", depth: 0, paren: false }];
+  const heredocs: { word: string; strip: boolean }[] = [];
+  const t = template;
+  let i = 0;
+  const ctxOf = (k: Frame["kind"]): PlaceholderContext | undefined =>
+    k === "dq" ? "double-quote" : k === "sq" ? "single-quote" : k === "bt" ? "backtick" : undefined;
+
+  while (i < t.length) {
+    const top = stack[stack.length - 1];
+    const c = t[i];
+    if (c === "{" && t[i + 1] === "{") {
+      PLACEHOLDER_AT.lastIndex = i;
+      const m = PLACEHOLDER_AT.exec(t);
+      if (m) {
+        const ctx = ctxOf(top.kind);
+        if (ctx) add(m[1], ctx);
+        i += m[0].length;
+        continue;
+      }
+    }
+    if (top.kind === "sq") {
+      if (c === "'") stack.pop();
+      i++;
+      continue;
+    }
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (top.kind === "dq") {
+      if (c === '"') stack.pop();
+      else if (c === "`") stack.push({ kind: "bt", depth: 0, paren: false });
+      else if (c === "$" && t[i + 1] === "(") (stack.push({ kind: "code", depth: 0, paren: true }), i++);
+      i++;
+      continue;
+    }
+    if (top.kind === "bt") {
+      if (c === "`") stack.pop();
+      i++;
+      continue;
+    }
+    // code
+    if (c === "'") stack.push({ kind: "sq", depth: 0, paren: false });
+    else if (c === '"') stack.push({ kind: "dq", depth: 0, paren: false });
+    else if (c === "`") stack.push({ kind: "bt", depth: 0, paren: false });
+    else if (c === "$" && t[i + 1] === "(") (stack.push({ kind: "code", depth: 0, paren: true }), i++);
+    else if (c === "(") top.depth++;
+    else if (c === ")") {
+      if (top.depth > 0) top.depth--;
+      else if (top.paren) stack.pop();
+    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(t[i - 1]))) {
+      while (i < t.length && t[i] !== "\n") i++;
+      continue;
+    } else if (c === "<" && t[i + 1] === "<" && t[i + 2] !== "<" && t[i - 1] !== "<") {
+      const m = HEREDOC_RE.exec(t.slice(i));
+      if (m) {
+        heredocs.push({ word: m[2] ?? m[3] ?? m[4], strip: m[1] === "-" });
+        i += m[0].length;
+        continue;
+      }
+    } else if (c === "\n" && heredocs.length) {
+      i++;
+      for (const h of heredocs.splice(0)) {
+        while (i < t.length) {
+          let end = t.indexOf("\n", i);
+          if (end < 0) end = t.length;
+          const line = t.slice(i, end);
+          i = Math.min(end + 1, t.length);
+          if ((h.strip ? line.replace(/^\t+/, "") : line) === h.word) break;
+          for (const m of line.matchAll(VAR_RE)) add(m[1], "heredoc");
+        }
+      }
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
+function contextMessage(p: PlaceholderProblem): string {
+  return `{{ ${p.variable} }} must not be inside "…"/'…'/backticks/heredoc (${p.context}) — values are shell-quoted automatically, write it bare, e.g. echo {{ name }}`;
+}
+
+/** All problems of the automations in a config (shared by validate and settings). */
+export function automationProblems(config: {
+  name: string;
+  columns: string[];
+  boards?: Record<string, { columns: string[]; automations?: Automation[] }>;
+  automations?: Automation[];
+}): string[] {
+  const out: string[] = [];
+  const boards = [config.name, ...Object.keys(config.boards ?? {})];
+  for (const board of boards) {
+    const cols = config.boards?.[board]?.columns ?? config.columns;
+    const rules = (board === config.name ? config.automations : config.boards?.[board]?.automations) ?? [];
+    const seen = new Set<string>();
+    for (const rule of rules) {
+      const where = `board "${board}" automation "${rule.name}"`;
+      if (!rule.name.trim()) out.push(`board "${board}": automation has an empty name`);
+      else if (seen.has(rule.name)) out.push(`${where}: duplicate name`);
+      seen.add(rule.name);
+      if (!rule.run.trim()) out.push(`${where}: empty run command`);
+      for (const v of unknownVars(rule.run)) out.push(`${where}: unknown template variable "${v}"`);
+      for (const p of placeholderContextProblems(rule.run)) out.push(`${where}: ${contextMessage(p)}`);
+      const col = rule.when.moved_to ?? rule.when.created_in;
+      if (col !== undefined && !cols.includes(col)) {
+        out.push(`${where}: column "${col}" is not a column of board "${board}"`);
+      }
+    }
+  }
+  return out;
 }
 
 function str(v: unknown): string {
@@ -67,13 +199,19 @@ function str(v: unknown): string {
 export function renderCommand(template: string, vars: Record<string, unknown>): string {
   const bad = unknownVars(template);
   if (bad.length) throw new KanbanError("invalid", `unknown template variable: ${bad.join(", ")}`);
+  const ctx = placeholderContextProblems(template);
+  if (ctx.length) throw new KanbanError("invalid", ctx.map(contextMessage).join("; "));
   return template.replace(VAR_RE, (_m, name: string) => {
     if (name.startsWith("props.")) {
       const props = vars.props;
-      const v = props && typeof props === "object" ? (props as Record<string, unknown>)[name.slice(6)] : undefined;
+      const key = name.slice(6);
+      const v =
+        props && typeof props === "object" && Object.hasOwn(props, key)
+          ? (props as Record<string, unknown>)[key]
+          : undefined;
       return shellQuote(str(v));
     }
-    const v = vars[name];
+    const v = Object.hasOwn(vars, name) ? vars[name] : undefined;
     return shellQuote(Array.isArray(v) ? v.join(",") : str(v));
   });
 }
@@ -98,9 +236,14 @@ export function ticketVars(ticket: Ticket, event: AutomationEvent): Record<strin
 export function matchRule(rule: Automation, event: AutomationEvent, ticket: Ticket): boolean {
   if (rule.enabled === false) return false;
   if (rule.when[event.type] !== event.to) return false;
-  const props = Object.entries(rule.when.props ?? {}).map(([k, v]) => {
+  if (!matches(ticket, { labels: rule.when.labels })) return false;
+  for (const [k, v] of Object.entries(rule.when.props ?? {})) {
     const s = String(v);
-    return s.startsWith("!") ? `!${k}:${s.slice(1)}` : `${k}:${s}`;
-  });
-  return matches(ticket, { labels: rule.when.labels, props });
+    const neg = s.startsWith("!");
+    const want = neg ? s.slice(1) : s;
+    const val = Object.hasOwn(ticket.data, k) ? ticket.data[k] : undefined;
+    const ok = Array.isArray(val) ? val.some((e) => String(e) === want) : val != null && String(val) === want;
+    if (ok === neg) return false;
+  }
+  return true;
 }

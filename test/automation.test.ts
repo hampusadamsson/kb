@@ -4,6 +4,8 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   matchRule,
+  placeholderContextProblems,
+  shellQuote,
   renderCommand,
   templateVars,
   unknownVars,
@@ -264,5 +266,82 @@ describe("dispatch", () => {
     runner.finish();
     await kb.settled();
     expect(kb.get(id).props).toEqual({});
+  });
+});
+
+describe("placeholder contexts", () => {
+  const ctx = (t: string) => placeholderContextProblems(t).map((p) => `${p.variable}:${p.context}`);
+  it("flags quotes, backticks, heredocs", () => {
+    expect(ctx('echo "{{ name }}"')).toEqual(["name:double-quote"]);
+    expect(ctx("echo '{{ name }}'")).toEqual(["name:single-quote"]);
+    expect(ctx("echo `{{ name }}`")).toEqual(["name:backtick"]);
+    expect(ctx("cat <<EOF\nhi {{ body }}\nEOF\necho {{ id }}")).toEqual(["body:heredoc"]);
+    expect(ctx("cat <<-'EOF'\n\t{{ body }}\n\tEOF")).toEqual(["body:heredoc"]);
+    expect(ctx('echo "a $(echo {{ name }}) b"')).toEqual([]);
+    expect(ctx('echo "a \\" {{ name }}"')).toEqual(["name:double-quote"]);
+  });
+  it("allows bare and nested bare", () => {
+    expect(ctx("echo {{ name }} && x {{id}}")).toEqual([]);
+    expect(ctx("echo $(foo {{ name }})")).toEqual([]);
+    expect(ctx("echo $(foo (a) {{ name }}) \"x\" {{ id }}")).toEqual([]);
+    expect(ctx("# c {{ id }}\necho {{ id }}")).toEqual([]);
+    expect(ctx("echo \"x\" {{ id }} 'y' {{ name }}")).toEqual([]);
+  });
+  it("renderCommand throws invalid", () => {
+    expect(() => renderCommand('echo "{{ name }}"', { name: "$(touch X)" })).toThrow(/must not be inside/);
+  });
+  it("strips NUL", () => {
+    expect(shellQuote("a\0b")).toBe("'ab'");
+  });
+  it("props lookup ignores prototype keys", () => {
+    const vars = { props: { a: 1 } };
+    for (const k of ["constructor", "toString", "__proto__"]) {
+      expect(renderCommand(`echo {{ props.${k} }}`, vars)).toBe("echo ''");
+    }
+  });
+  it("props keys containing ':'", () => {
+    const r = rule({ when: { moved_to: "done", props: { "a:b": "x" } } });
+    expect(matchRule(r, mv, tk({ data: { "a:b": "x" } }))).toBe(true);
+    expect(matchRule(r, mv, tk({ data: { "a:b": "y" } }))).toBe(false);
+    const l = rule({ when: { moved_to: "done", props: { k: "x" } } });
+    expect(matchRule(l, mv, tk({ data: { k: ["w", "x"] } }))).toBe(true);
+  });
+  it("does not match inherited props", () => {
+    const r = rule({ when: { moved_to: "done", props: { constructor: "!x" } } });
+    expect(matchRule(r, mv, tk())).toBe(true);
+  });
+});
+
+describe("status writes follow the ticket", () => {
+  const Y = "columns: [todo, done]\nautomations:\n  - { name: n, when: { moved_to: done }, run: ls }\n";
+  const T = (id: string) => `---\ntype: ticket\nid: "${id}"\nname: T\nstatus: todo\n---\n`;
+  it("rename mid-run writes to the new path", async () => {
+    w("1.md", T("001"));
+    const { kb, runner } = setup(Y);
+    kb.move("001", "done");
+    fs.renameSync(path.join(dir, "1.md"), path.join(dir, "2.md"));
+    runner.finish();
+    await kb.settled();
+    expect(fm("2.md").automations.n.status).toBe("done");
+    expect(fs.existsSync(path.join(dir, "1.md"))).toBe(false);
+  });
+  it("never writes to a file with another id", async () => {
+    w("1.md", T("001"));
+    const { kb, runner } = setup(Y);
+    kb.move("001", "done");
+    fs.rmSync(path.join(dir, "1.md"));
+    w("1.md", T("009"));
+    runner.finish();
+    await kb.settled();
+    expect(fm("1.md").automations).toBeUndefined();
+  });
+  it("skips when the ticket is gone", async () => {
+    w("1.md", T("001"));
+    const { kb, runner } = setup(Y);
+    kb.move("001", "done");
+    fs.rmSync(path.join(dir, "1.md"));
+    runner.finish();
+    await kb.settled();
+    expect(fs.existsSync(path.join(dir, "1.md"))).toBe(false);
   });
 });

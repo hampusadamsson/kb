@@ -227,6 +227,28 @@ describe("automations in config", () => {
     expect(cfg().boards.other.automations?.[0].when.created_in).toBe("live");
   });
 
+  describe("rejects invalid automations", () => {
+    const bad: [string, object[]][] = [
+      ["duplicate", [rule(), rule()]],
+      ["empty name", [rule({ name: " " })]],
+      ["empty run", [rule({ run: " " })]],
+      ["unknown template", [rule({ run: "echo {{ bogus }}" })]],
+      ["bad column", [rule({ when: { moved_to: "nope" } })]],
+      ["in quotes", [rule({ run: 'echo "{{ name }}"' })]],
+    ];
+    it.each(bad)("%s", (_n, rules) => {
+      const next = { ...cfg(), automations: rules } as never;
+      const before = read("kanban.yaml");
+      expect(code(() => kb.updateConfig(next))).toBe("invalid");
+      expect(code(() => kb.updateConfig(next, { dryRun: true }))).toBe("invalid");
+      expect(read("kanban.yaml")).toBe(before);
+    });
+    it("column must belong to its own board", () => {
+      const next = { ...cfg(), boards: { other: { columns: ["backlog"], automations: [rule()] } } };
+      expect(msg(() => kb.updateConfig(next))).toContain('board "other"');
+    });
+  });
+
   it("blocks removing a column used by a rule", () => {
     withAuto();
     const m = msg(() => kb.updateConfig({ ...cfg(), columns: ["todo", "done"] }));

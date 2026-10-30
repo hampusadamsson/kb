@@ -5,7 +5,7 @@ import {
   matchRule,
   renderCommand,
   ticketVars,
-  unknownVars,
+  automationProblems,
   type AutomationEvent,
   type AutomationRecord,
   type AutomationRunner,
@@ -252,10 +252,21 @@ export class Kanban {
     while (this.inflight.size) await Promise.allSettled([...this.inflight]);
   }
 
-  private writeAutomationStatus(rel: string, rule: string, entry: Record<string, unknown>): boolean {
-    const abs = path.join(this.dir, rel);
-    if (!fs.existsSync(abs)) return false;
+  private writeAutomationStatus(rel: string, id: unknown, rule: string, entry: Record<string, unknown>): boolean {
     try {
+      const idOf = (file: string): unknown => readFile(file).doc.get("id");
+      let abs = path.join(this.dir, rel);
+      let ok = false;
+      try {
+        ok = fs.existsSync(abs) && idKey(idOf(abs)) === idKey(id);
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        const found = scan(this.dir, loadConfig(this.dir)).tickets.find((t) => hasId(t) && idKey(t.id) === idKey(id));
+        if (!found) return false;
+        abs = path.join(this.dir, found.path);
+      }
       updateFile(abs, (doc) => {
         const cur = doc.get("automations", true);
         if (cur === undefined || cur === null || !(cur instanceof YAMLMap)) doc.set("automations", doc.createNode({}));
@@ -279,7 +290,7 @@ export class Kanban {
       for (const rule of automationsFor(config, ticket.board)) {
         if (!matchRule(rule, event, ticket)) continue;
         const startedAt = commentKey(this.now(), true);
-        this.writeAutomationStatus(rel, rule.name, { status: "running", at: startedAt });
+        this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "running", at: startedAt });
         const rec = (command: string, result: RunResult): AutomationRecord => ({
           board: ticket.board,
           rule: rule.name,
@@ -295,7 +306,7 @@ export class Kanban {
         const finish = (r: AutomationRecord) => {
           const entry: Record<string, unknown> = { status: r.status, at: r.finishedAt, exit: r.result.exitCode };
           if (r.result.error) entry.error = r.result.error;
-          this.writeAutomationStatus(rel, rule.name, entry);
+          this.writeAutomationStatus(rel, ticket.id, rule.name, entry);
           try {
             this.onAutomation?.(r);
           } catch {
@@ -547,23 +558,7 @@ export class Kanban {
       for (const t of g) err(t.path, `duplicate id ${String(t.id)} (${paths})`);
     }
 
-    const boardNames = [config.name, ...Object.keys(config.boards ?? {})];
-    for (const board of boardNames) {
-      const cols = columnsFor(config, board);
-      const seen = new Set<string>();
-      for (const rule of automationsFor(config, board)) {
-        const where = `automation "${rule.name}" on board "${board}"`;
-        if (!rule.name.trim()) err(CONFIG_FILE, `automation on board "${board}" has an empty name`);
-        else if (seen.has(rule.name)) err(CONFIG_FILE, `duplicate ${where}`);
-        seen.add(rule.name);
-        if (!rule.run.trim()) err(CONFIG_FILE, `${where} has an empty run command`);
-        for (const v of unknownVars(rule.run)) err(CONFIG_FILE, `${where}: unknown template variable "${v}"`);
-        const col = rule.when.moved_to ?? rule.when.created_in;
-        if (col !== undefined && !cols.includes(col)) {
-          err(CONFIG_FILE, `${where}: column "${col}" is not a column of board "${board}"`);
-        }
-      }
-    }
+    for (const p of automationProblems(config)) err(CONFIG_FILE, p);
     const nowMs = this.now().getTime();
     for (const t of tickets) {
       const autos = t.data.automations;
