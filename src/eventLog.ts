@@ -34,6 +34,18 @@ export interface EventLog extends EventSink {
 const isEvent = (v: unknown): v is KbEvent =>
   !!v && typeof v === "object" && typeof (v as KbEvent).id === "string" && typeof (v as KbEvent).type === "string";
 
+/** Max bytes of one log line, so appends stay small (single write) and queries cheap. */
+export const MAX_LINE_CHARS = 8000;
+
+/** JSON line for an event; oversized events get clipped text and their data replaced. */
+export function boundedLine(e: KbEvent): string {
+  const s = JSON.stringify(e);
+  if (s.length <= MAX_LINE_CHARS) return s;
+  const clip = (v: string | undefined, n: number) => (v !== undefined && v.length > n ? v.slice(0, n) + "…" : v);
+  const small: KbEvent = { ...e, summary: clip(e.summary, 300) ?? "", ticketName: clip(e.ticketName, 200), path: clip(e.path, 300), data: { truncated: true } };
+  return JSON.stringify(small);
+}
+
 /**
  * Append-only JSON-lines log at `<dir>/.kb/events.log`.
  * v1 reads: whole file(s) are read per query (max ~2 x 5 MB thanks to rotation) and parsed lazily
@@ -65,7 +77,7 @@ export function createEventLog(dir: string): EventLog {
       try {
         fs.mkdirSync(folder, { recursive: true });
         rotateIfNeeded();
-        fs.appendFileSync(file, JSON.stringify(e) + "\n");
+        fs.appendFileSync(file, boundedLine(e) + "\n");
       } catch {
         // logging must never break a command
       }
@@ -86,28 +98,24 @@ export function createEventLog(dir: string): EventLog {
         }
         return true;
       };
-      const events: KbEvent[] = [];
-      let more = false;
-      for (const f2 of [file, old]) {
-        const lines = linesOf(f2);
-        for (let i = lines.length - 1; i >= 0; i--) {
-          if (!lines[i]) continue;
+      // File order can differ slightly from id order (concurrent processes), so collect all matches
+      // and sort by id; otherwise the id cursor could skip or repeat events.
+      const all: KbEvent[] = [];
+      for (const f2 of [old, file]) {
+        for (const line of linesOf(f2)) {
+          if (!line) continue;
           let v: unknown;
           try {
-            v = JSON.parse(lines[i]);
+            v = JSON.parse(line);
           } catch {
             continue;
           }
-          if (!isEvent(v) || !wants(v)) continue;
-          if (events.length >= limit) {
-            more = true;
-            break;
-          }
-          events.push(v);
+          if (isEvent(v) && wants(v)) all.push(v);
         }
-        if (more) break;
       }
-      return { events, nextCursor: more ? events[events.length - 1].id : undefined };
+      all.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+      const events = all.slice(0, limit);
+      return { events, nextCursor: all.length > limit ? events[events.length - 1].id : undefined };
     },
   };
 }

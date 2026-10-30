@@ -98,9 +98,9 @@ describe("event log", () => {
 
   it("rotates at 5 MB and reads across both files", () => {
     const log = createEventLog(dir);
-    const big = "z".repeat(100_000);
+    const big = "z".repeat(7000);
     const all: KbEvent[] = [];
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 800; i++) {
       const e = ev({ data: { pad: big } });
       all.push(e);
       log.emit(e);
@@ -108,8 +108,15 @@ describe("event log", () => {
     const folder = path.join(dir, ".kb");
     expect(fs.existsSync(path.join(folder, "events.1.log"))).toBe(true);
     expect(fs.statSync(path.join(folder, "events.log")).size).toBeGreaterThan(0);
-    const r = log.query({ limit: 200 });
-    expect(r.events.map((e) => e.id)).toEqual(all.map((e) => e.id).reverse());
+    const seen: string[] = [];
+    let before: string | undefined;
+    for (;;) {
+      const r = log.query({ limit: 200, before });
+      seen.push(...r.events.map((e) => e.id));
+      if (!r.nextCursor) break;
+      before = r.nextCursor;
+    }
+    expect(seen).toEqual(all.map((e) => e.id).reverse());
   });
 
   it("tolerates corrupt lines", () => {
@@ -120,5 +127,30 @@ describe("event log", () => {
     const b = ev();
     log.emit(b);
     expect(log.query().events.map((e) => e.id)).toEqual([b.id, a.id]);
+  });
+});
+
+describe("event log robustness", () => {
+  it("cursor pagination is correct when file order differs from id order", () => {
+    const log = createEventLog(dir);
+    const ids = ["b", "a", "d", "c", "f", "e"].map((s) => s.padStart(8, "0"));
+    for (const id of ids) log.emit(ev({ id }));
+    const seen: string[] = [];
+    let before: string | undefined;
+    for (;;) {
+      const r = log.query({ before, limit: 2 });
+      seen.push(...r.events.map((e) => e.id));
+      if (!r.nextCursor) break;
+      before = r.nextCursor;
+    }
+    expect(seen).toEqual([...ids].sort().reverse());
+  });
+
+  it("clips oversized events to a bounded line", () => {
+    const log = createEventLog(dir);
+    log.emit(ev({ summary: "x".repeat(50_000), data: { big: "y".repeat(50_000) } }));
+    const line = fs.readFileSync(path.join(dir, ".kb", "events.log"), "utf8");
+    expect(line.length).toBeLessThan(2000);
+    expect(log.query().events[0].data).toEqual({ truncated: true });
   });
 });
