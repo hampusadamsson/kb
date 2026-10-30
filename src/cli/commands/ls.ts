@@ -40,3 +40,61 @@ export function ls(cwd: string, opts: LsOpts = {}): Result {
   while (out.length && out[out.length - 1] === "") out.pop();
   return { out: out.join("\n"), warnings: r.warnings.map(fmtWarning) };
 }
+
+export const DEFAULT_LIMIT = 50;
+
+export interface LsJsonOpts extends Filters {
+  board?: string;
+  /** include body and comments */
+  full?: boolean;
+  /** max tickets; 0 = unlimited (default 50) */
+  limit?: number;
+}
+
+export function parseLimit(v: string | undefined): number {
+  if (v === undefined) return DEFAULT_LIMIT;
+  if (!/^\d+$/.test(v)) throw new Error(`--limit must be a non-negative integer (0 = no limit), got "${v}"`);
+  return Number(v);
+}
+
+function jsonTicket(t: Ticket, full: boolean): Record<string, unknown> {
+  const o: Record<string, unknown> = {
+    id: t.id ?? null,
+    name: t.name,
+    board: t.board,
+    status: t.status ?? null,
+    column: t.column,
+    labels: t.labels,
+    props: t.props,
+    path: t.path,
+  };
+  if (full) {
+    o.body = t.body;
+    o.comments = t.comments;
+  }
+  return o;
+}
+
+/**
+ * JSON listing: { total, shown, limit, truncated, tickets: [...] }.
+ * Tickets are flat, in board → column → id order. A warning is emitted when the limit cuts the list.
+ */
+export function lsJson(cwd: string, opts: LsJsonOpts = {}): Result {
+  const { full = false, limit = DEFAULT_LIMIT, ...filters } = opts;
+  const r = createKanban({ dir: cwd }).list(filters);
+  const all = r.boards.flatMap((b) => [...b.columns.flatMap((c) => c.tickets), ...b.unsorted]);
+  const shown = limit > 0 ? all.slice(0, limit) : all;
+  const truncated = shown.length < all.length;
+  const warnings = r.warnings.map(fmtWarning);
+  if (truncated) {
+    warnings.push(
+      `warning: showing ${shown.length} of ${all.length} tickets (limit ${limit}); use --limit <n>, or --limit 0 for all, or add filters`,
+    );
+  }
+  const out = JSON.stringify(
+    { total: all.length, shown: shown.length, limit, truncated, tickets: shown.map((t) => jsonTicket(t, full)) },
+    null,
+    2,
+  );
+  return { out, warnings };
+}

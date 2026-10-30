@@ -106,10 +106,14 @@ kb init
 
 ### ls
 
-All boards in sequence (or one with `-b`), grouped board → columns in config order with counts → "unsorted". Plain text; color only when stdout is a TTY.
+Prints **JSON by default** (one object, easy for scripts and agents); `--format text` gives the board view for humans. Matching tickets are listed flat in board → column → id order (unsorted last).
 
 ```sh
-kb ls
+kb ls                       # JSON, first 50 tickets
+kb ls --full -l bug         # include body and comments
+kb ls --limit 200           # raise the limit
+kb ls --limit 0             # no limit
+kb ls --format text         # human board view
 kb ls -b another-board
 kb ls -l bug -p priority:high
 kb ls -p '!status:done'
@@ -126,7 +130,29 @@ Filters:
 | `-p, --property <key>` | Property `key` exists |
 | `-b, --board <board>` | Only this board |
 
-All filters AND together. Prefix a value with `!` to negate it: `-l '!bug'`, `-p '!priority:low'` (also true when absent), `-p '!priority'` (absent), `'!wip'` (text not present). Use single quotes so the shell doesn't expand `!`. Boards with no matching tickets are omitted; counts reflect the filtered tickets; warnings are still computed from all tickets. No matches prints nothing (exit 0).
+Output options:
+
+| Flag | Meaning |
+|---|---|
+| `--format <json\|text>` | `json` (default) or `text` |
+| `--full` | JSON: add `body` and `comments` to each ticket |
+| `--limit <n>` | JSON: max tickets, default **50**, `0` = unlimited. Non-integers are an error |
+
+JSON shape (`total` = matches before the limit):
+
+```json
+{
+  "total": 120, "shown": 50, "limit": 50, "truncated": true,
+  "tickets": [
+    { "id": "001", "name": "Fix login bug", "board": "default", "status": "todo", "column": "todo",
+      "labels": ["bug"], "props": { "priority": "high" }, "path": "001-fix-login-bug.md" }
+  ]
+}
+```
+
+`id` and `status` are `null` when missing; `column` is `"unsorted"` for a missing or unknown status. With `--full` each ticket also has `body` (string) and `comments` (`{ "<time>": "<text>" }`). When the limit cuts the list, a warning goes to **stderr** (`warning: showing 50 of 120 tickets (limit 50); use --limit <n>, or --limit 0 for all, or add filters`) so stdout stays valid JSON; `truncated` is also `true`. Other warnings (unsorted, duplicate ids, parse errors) go to stderr too. Filters apply before the limit.
+
+All filters AND together. Prefix a value with `!` to negate it: `-l '!bug'`, `-p '!priority:low'` (also true when absent), `-p '!priority'` (absent), `'!wip'` (text not present). Use single quotes so the shell doesn't expand `!`. Boards with no matching tickets are omitted; counts reflect the filtered tickets; warnings are still computed from all tickets. No matches: JSON gives an empty `tickets` list, text prints nothing (exit 0). `--format text` ignores `--full` and `--limit`:
 
 ```
 == default ==

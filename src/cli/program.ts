@@ -3,7 +3,7 @@ import { boards } from "./commands/boards.js";
 import { useColor } from "./format.js";
 import { fix } from "./commands/fix.js";
 import { init } from "./commands/init.js";
-import { ls } from "./commands/ls.js";
+import { ls, lsJson, parseLimit } from "./commands/ls.js";
 import { show } from "./commands/show.js";
 import { defaultOpener, runWeb } from "./commands/web.js";
 import { validate } from "./commands/validate.js";
@@ -32,20 +32,28 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
 
   const collect = (v: string, prev: string[] = []) => [...prev, v];
 
-  program.command("ls").description("List tickets by board and column")
+  program.command("ls").description("List tickets (JSON by default; --format text for a board view)")
     .argument("[text]", "case-insensitive substring match on the whole file; leading ! negates")
     .option("-b, --board <board>", "only this board")
     .option("-l, --label <label>", "has label (repeatable)", collect)
     .option("-p, --property <key[:value]>", "property equals value, or exists (repeatable)", collect)
+    .option("--format <format>", "json (default) or text", "json")
+    .option("--full", "json: include body and comments")
+    .option("--limit <n>", "json: max tickets, 0 = no limit (default 50; warns when cut)")
     .addHelpText("after", `
 Filters are ANDed. Prefix a value with ! to negate it (quote with single
 quotes in the shell): -l '!bug'  -p '!priority:low'  -p '!priority'  '!wip'
 Examples:
   kb ls -l bug -p priority:high
   kb ls -p '!status:done'
-  kb ls login`)
-    .action((text: string | undefined, o: { board?: string; label?: string[]; property?: string[] }) => run(() => {
-      const r = ls(cwd(), { board: o.board, color: useColor(), text, labels: o.label, props: o.property });
+  kb ls login
+  kb ls --full -l bug          include bodies and comments
+  kb ls --limit 0              all tickets
+  kb ls --format text          board view for humans`)
+    .action((text: string | undefined, o: { board?: string; label?: string[]; property?: string[]; format: string; full?: boolean; limit?: string }) => run(() => {
+      if (o.format !== "json" && o.format !== "text") throw new Error(`--format must be json or text, got "${o.format}"`);
+      const f = { board: o.board, text, labels: o.label, props: o.property };
+      const r = o.format === "text" ? ls(cwd(), { ...f, color: useColor() }) : lsJson(cwd(), { ...f, full: o.full, limit: parseLimit(o.limit) });
       for (const w of r.warnings) console.error(w);
       if (r.out) console.log(r.out);
     }));

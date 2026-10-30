@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { init } from "../src/cli/commands/init.js";
-import { ls } from "../src/cli/commands/ls.js";
+import { ls, lsJson, parseLimit } from "../src/cli/commands/ls.js";
 import { boards } from "../src/cli/commands/boards.js";
 import { show } from "../src/cli/commands/show.js";
 
@@ -151,7 +151,13 @@ describe("cli e2e", () => {
     expect(run("init").status).toBe(0);
     expect(run("init").status).toBe(1);
     tk("a.md", "id: 1\nname: Hello\nstatus: doing");
-    expect(run("ls").stdout).toContain("doing (1)\n  #1 Hello");
+    expect(run("ls", "--format", "text").stdout).toContain("doing (1)\n  #1 Hello");
+    const j = JSON.parse(run("ls").stdout);
+    expect(j).toMatchObject({ total: 1, shown: 1, limit: 50, truncated: false });
+    expect(j.tickets[0]).toMatchObject({ id: 1, name: "Hello", status: "doing", column: "doing", board: "default", path: "a.md" });
+    expect(j.tickets[0].body).toBeUndefined();
+    expect(run("ls", "--format", "xml").status).toBe(1);
+    expect(run("ls", "--limit", "-1").status).toBe(1);
     expect(run("ls", "--help").stdout).toContain("--board");
     expect(run("show", "1").stdout).toContain("#1 Hello");
   });
@@ -201,5 +207,68 @@ describe("ls filters", () => {
     expect(ls(dir, { text: "zzzz" }).out).toBe("");
     expect(ls(dir, {}).out).toBe(ls(dir).out);
     expect(ls(dir).out).toContain("== other ==");
+  });
+});
+
+describe("ls json", () => {
+  beforeEach(() => fs.writeFileSync(path.join(dir, "kanban.yaml"), CONFIG));
+  const mk = (n: number) => {
+    for (let i = 1; i <= n; i++) tk(`t${i}.md`, `id: ${i}\nname: T${i}\nstatus: todo\nlabels: [x]\npriority: p${i % 2}`, `body ${i}`);
+  };
+
+  it("is a flat list with metadata, no body by default", () => {
+    mk(3);
+    const r = lsJson(dir);
+    const j = JSON.parse(r.out);
+    expect(j).toMatchObject({ total: 3, shown: 3, limit: 50, truncated: false });
+    expect(j.tickets.map((t: any) => t.id)).toEqual([1, 2, 3]);
+    expect(j.tickets[0]).toEqual({ id: 1, name: "T1", board: "default", status: "todo", column: "todo", labels: ["x"], props: { priority: "p1" }, path: "t1.md" });
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("--full adds body and comments", () => {
+    mk(1);
+    const t = JSON.parse(lsJson(dir, { full: true }).out).tickets[0];
+    expect(t.body).toBe("body 1\n");
+    expect(t.comments).toEqual({});
+  });
+
+  it("limits to 50 by default and warns", () => {
+    mk(52);
+    const r = lsJson(dir);
+    const j = JSON.parse(r.out);
+    expect(j).toMatchObject({ total: 52, shown: 50, limit: 50, truncated: true });
+    expect(j.tickets).toHaveLength(50);
+    expect(r.warnings.join("\n")).toMatch(/showing 50 of 52 tickets \(limit 50\).*--limit/);
+  });
+
+  it("limit can be overridden; 0 = unlimited; exactly at the limit does not warn", () => {
+    mk(52);
+    expect(JSON.parse(lsJson(dir, { limit: 10 }).out).tickets).toHaveLength(10);
+    expect(lsJson(dir, { limit: 10 }).warnings.join()).toMatch(/showing 10 of 52/);
+    const all = lsJson(dir, { limit: 0 });
+    expect(JSON.parse(all.out)).toMatchObject({ shown: 52, truncated: false });
+    expect(all.warnings).toEqual([]);
+    expect(lsJson(dir, { limit: 52 }).warnings).toEqual([]);
+  });
+
+  it("applies filters before the limit; includes unsorted and id-less tickets with null", () => {
+    mk(3);
+    tk("odd.md", "name: NoId\nstatus: nope");
+    expect(JSON.parse(lsJson(dir, { labels: ["x"], limit: 2 }).out)).toMatchObject({ total: 3, shown: 2 });
+    const odd = JSON.parse(lsJson(dir, { text: "NoId" }).out).tickets[0];
+    expect(odd).toMatchObject({ id: null, column: "unsorted", status: "nope" });
+  });
+
+  it("empty result is valid JSON", () => {
+    expect(JSON.parse(lsJson(dir, { text: "zzzz" }).out)).toEqual({ total: 0, shown: 0, limit: 50, truncated: false, tickets: [] });
+  });
+
+  it("parseLimit", () => {
+    expect(parseLimit(undefined)).toBe(50);
+    expect(parseLimit("0")).toBe(0);
+    expect(parseLimit("7")).toBe(7);
+    expect(() => parseLimit("x")).toThrow(/--limit/);
+    expect(() => parseLimit("-1")).toThrow(/--limit/);
   });
 });
