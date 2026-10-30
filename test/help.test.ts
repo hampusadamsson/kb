@@ -16,6 +16,23 @@ describe("root help", () => {
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
     expect(out).toContain("kb <command> [flags]");
   });
+  it("has getting started and tickets before main commands", () => {
+    const g = out.indexOf("\nGETTING STARTED\n");
+    const t = out.indexOf("\nTICKETS\n");
+    const m = out.indexOf("\nMAIN COMMANDS\n");
+    expect(g).toBeGreaterThan(0);
+    expect(t).toBeGreaterThan(g);
+    expect(m).toBeGreaterThan(t);
+    const steps = ["kb init", "kb add \"Fix login\" -l bug", "kb ls --format text", "kb mv 1 doing", "kb show 1", "kb web"];
+    const pos = steps.map((s, i) => out.indexOf(`  ${i + 1}. ${s}`));
+    expect(pos.every((p) => p > g && p < t)).toBe(true);
+    expect([...pos].sort((a, b) => a - b)).toEqual(pos);
+  });
+  it("learn more points to README and example/", () => {
+    const lm = out.split("\nLEARN MORE\n")[1]!;
+    expect(lm).toContain("README");
+    expect(lm).toContain("example/");
+  });
   it("lists each public command once, no __complete", () => {
     for (const c of commandNames) expect(out.match(new RegExp(`^  ${c} `, "gm"))?.length).toBe(1);
     expect(out).not.toContain("__complete");
@@ -71,12 +88,26 @@ describe("help content", () => {
   it("command-specific sections", () => {
     expect(helpOf(sub("ls"))).toMatch(/\nFILTERS\n[^]*\nOUTPUT\n/);
     expect(helpOf(sub("web"))).toContain("\nNOTES\n");
+    expect(plain(root)).toContain("\nTICKETS\n");
     expect(sub("web").description()).toBe("Start the local web UI");
     expect(helpOf(sub("completion"))).toContain("source <(kb completion zsh)");
     expect(helpOf(sub("completion"))).toContain("source <(kb completion bash)");
     expect(plain(root)).toContain("\nENVIRONMENT\n");
     expect(plain(root)).toContain("KB_AUTOMATION");
     expect(plain(root)).toMatch(/^ {2}help +Help about any command$/m);
+  });
+  it("no automation internals in help", () => {
+    for (const c of all) {
+      const out = helpOf(c);
+      expect(out, c.name()).not.toContain("{{");
+      expect(out, c.name()).not.toContain("created_in");
+      expect(out, c.name()).not.toContain("moved_to");
+    }
+    expect(plain(root).match(/KB_AUTOMATION/g)?.length).toBe(1);
+    for (const n of ["add", "mv", "set", "web"]) {
+      const notes = helpOf(sub(n)).split("\nNOTES\n")[1]!.split("\n\n")[0]!;
+      expect(notes.split("\n").filter((l) => /automation/i.test(l)).length, n).toBeLessThanOrEqual(1);
+    }
   });
   it("help flag descriptions", () => {
     expect(plain(root)).toMatch(/-h, --help +help for kb$/m);

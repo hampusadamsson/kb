@@ -8,10 +8,12 @@ export interface HelpSection {
   title: string;
   body?: string;
   lines?: string[];
+  /** Render right after the description, before USAGE. */
+  intro?: boolean;
 }
 
 /** Extension properties stored on commander commands. */
-export type HelpCommand = Command & { helpSections?: HelpSection[]; examples?: string[] };
+export type HelpCommand = Command & { helpSections?: HelpSection[]; examples?: string[]; learnMore?: string[] };
 
 export function addExamples(cmd: Command, examples: string[]): Command {
   const c = cmd as HelpCommand;
@@ -19,9 +21,10 @@ export function addExamples(cmd: Command, examples: string[]): Command {
   return cmd;
 }
 
-export function addSection(cmd: Command, title: string, text: string | string[]): Command {
+export function addSection(cmd: Command, title: string, text: string | string[], intro = false): Command {
   const c = cmd as HelpCommand;
   const s: HelpSection = Array.isArray(text) ? { title, lines: text } : { title, body: text };
+  if (intro) s.intro = true;
   c.helpSections = [...(c.helpSections ?? []), s];
   return cmd;
 }
@@ -101,6 +104,10 @@ function mkFormat(style: () => Style) {
     };
     const desc = cmd.description();
     if (desc) blocks.push(wrapParagraphs(desc, WIDTH, ""));
+    const renderSection = (s: HelpSection): void =>
+      section(s.title.toUpperCase(), s.lines ? s.lines.map((l) => (l ? `  ${l}` : l)) : wrapParagraphs(s.body ?? "", WIDTH, "  "));
+    const sections = (cmd as HelpCommand).helpSections ?? [];
+    sections.filter((s) => s.intro).forEach(renderSection);
     section("USAGE", [`  ${usage(cmd, help)}`]);
 
     const cmds = help.visibleCommands(cmd);
@@ -129,12 +136,10 @@ function mkFormat(style: () => Style) {
     if (own.length) section("FLAGS", table(flagRows(own)));
     if (inherited.length) section("INHERITED FLAGS", table(flagRows(inherited)));
 
-    for (const s of (cmd as HelpCommand).helpSections ?? []) {
-      section(s.title.toUpperCase(), s.lines ? s.lines.map((l) => (l ? `  ${l}` : l)) : wrapParagraphs(s.body ?? "", WIDTH, "  "));
-    }
+    sections.filter((s) => !s.intro).forEach(renderSection);
     const ex = (cmd as HelpCommand).examples;
     if (ex?.length) section("EXAMPLES", ex.map((e) => `  $ ${e}`));
-    section("LEARN MORE", [
+    section("LEARN MORE", (cmd as HelpCommand).learnMore ?? [
       cmd.parent ? "  Use 'kb help' to list all commands." : "  Use 'kb <command> --help' for more information about a command.",
     ]);
     return blocks.map((b) => b.join("\n")).join("\n\n") + "\n";
