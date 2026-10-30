@@ -198,3 +198,67 @@ describe("automation form logic", async () => {
     expect(L.describeAutomations(undefined)).toEqual([]);
   });
 });
+
+describe("automation status helpers", () => {
+  const now = new Date(2026, 9, 30, 15, 20, 0);
+  it("automationState", () => {
+    const s = any.automationState;
+    expect(s({ status: "done", exit: 0 })).toBe("done");
+    expect(s({ status: "done" })).toBe("done");
+    expect(s({ status: "done", exit: 2 })).toBe("failed");
+    expect(s({ status: "done", error: "x" })).toBe("failed");
+    expect(s({ status: "failed" })).toBe("failed");
+    expect(s({ status: "running" })).toBe("running");
+    expect(s({ status: "weird" })).toBe("unknown");
+    expect(s({})).toBe("unknown");
+    expect(s(null)).toBe("unknown");
+    expect(s("done")).toBe("unknown");
+    expect(s([])).toBe("unknown");
+  });
+  it("relativeTime", () => {
+    const r = (iso: any) => any.relativeTime(iso, now);
+    expect(r("2026-10-30T15:19:40")).toBe("just now");
+    expect(r("2026-10-30T15:18:00")).toBe("2 min ago");
+    expect(r("2026-10-30T12:20:00")).toBe("3 h ago");
+    expect(r("2026-10-29T23:59:00")).toBe("yesterday");
+    expect(r("2026-10-29T15:00:00")).toBe("yesterday");
+    expect(r("2026-10-28T15:00:00")).toBe("2026-10-28");
+    expect(r("2026-10-31T15:00:00")).toBe("2026-10-31"); // future
+    expect(r("2026-10-30T15:20:30")).toBe("just now"); // slight clock skew
+    expect(r(undefined)).toBe("");
+    expect(r("garbage")).toBe("");
+    expect(any.relativeTime("2026-10-30T00:05:00", new Date(2026, 9, 30, 0, 10))).toBe("5 min ago");
+    // 23h ago but previous calendar day → yesterday
+    expect(any.relativeTime("2026-10-29T23:30:00", new Date(2026, 9, 30, 0, 10))).toBe("40 min ago");
+    expect(any.relativeTime("2026-10-29T10:00:00", new Date(2026, 9, 30, 0, 10))).toBe("yesterday");
+  });
+  it("parses timezone-less strings as local time", () => {
+    const d = any.parseLocal("2026-10-30T15:16:55");
+    expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()]).toEqual([2026, 9, 30, 15, 16, 55]);
+    expect(any.absoluteTime("2026-10-30T15:16:55")).toBe("2026-10-30 15:16:55");
+  });
+  it("summarizeAutomations", () => {
+    const m = {
+      a: { status: "done", at: "2026-10-30T10:00:00", exit: 0 },
+      b: { status: "done", at: "2026-10-30T11:00:00", exit: 0 },
+      c: { status: "failed", at: "2026-10-30T09:00:00", exit: 1, error: "boom" },
+      d: { status: "running", at: "2026-10-30T12:00:00" },
+      e: { status: "nope" },
+      f: { status: "done" },
+    };
+    const s = any.summarizeAutomations(m);
+    expect(s.total).toBe(6);
+    expect(s.counts).toEqual({ failed: 1, running: 1, done: 3, unknown: 1 });
+    expect(s.worst).toBe("failed");
+    expect(s.list.map((i: any) => i.name)).toEqual(["d", "c", "b", "a", "f", "e"]);
+    expect(s.worstFirst.map((i: any) => i.name)).toEqual(["c", "d", "b", "a", "f", "e"]);
+    expect(any.automationsText(s)).toBe("6 automations: 1 failed, 1 running, 3 done, 1 unknown");
+    expect(any.summarizeAutomations(undefined)).toMatchObject({ total: 0, worst: null });
+    expect(any.automationsText(any.summarizeAutomations({ a: { status: "done" } }))).toBe("1 automation: 1 done");
+    expect(any.summarizeAutomations([{ name: "x", status: "failed" }]).worst).toBe("failed");
+  });
+  it("automationLabel", () => {
+    const i = any.summarizeAutomations({ "log-review": { status: "done", at: "2026-10-30T15:18:00", exit: 0 } }).list[0];
+    expect(any.automationLabel(i, now)).toBe("log-review: done 2 min ago (exit 0)");
+  });
+});

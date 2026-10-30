@@ -134,5 +134,23 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .runs { list-style: none; margin: 0; padding: 0; }
 .run-row { display: flex; gap: 10px; width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 4px 2px; cursor: pointer; font: inherit; }
 .run-row:hover { background: rgba(255, 255, 255, 0.05); }
-.run-status.done { color: var(--ok); }
-.run-status.failed { color: var(--err); }
+.run-status { display: inline-flex; align-items: center; gap: 5px; }
+
+/* automation status dots (color is never the only signal: title/aria-label + status word) */
+:root { --run: #facc15; --unk: #8b93a1; }
+.sdot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--unk); vertical-align: middle; }
+.sdot.done { background: var(--ok); }
+.sdot.running { background: var(--run); animation: sdot-pulse 1.6s ease-in-out infinite; }
+.sdot.failed { background: var(--err); }
+.sdot.unknown { background: var(--unk); }
+@keyframes sdot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .sdot.running { animation: none; } }
+.card-autos { display: flex; align-items: center; gap: 4px; margin-top: 6px; height: 10px; }
+.card-autos .more { font-size: 10px; line-height: 10px; color: var(--muted); }
+.auto-wrap { display: contents; }
+.auto-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.auto-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.auto-word { font-size: 12px; }
+.auto-row.failed .auto-word { color: var(--err); }
+.auto-error { flex-basis: 100%; color: #fca5a5; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 17px; }
+.run-row .sdot { align-self: center; }

@@ -317,3 +317,89 @@ export function describeAutomations(a) {
     return `${name}: ${x.status ?? "?"}${x.at ? ` at ${x.at}` : ""}`;
   });
 }
+
+/** One automation entry → "running" | "done" | "failed" | "unknown". */
+export function automationState(e) {
+  if (!e || typeof e !== "object" || Array.isArray(e)) return "unknown";
+  if (e.error) return "failed";
+  const s = typeof e.status === "string" ? e.status.trim().toLowerCase() : "";
+  if (s === "failed") return "failed";
+  if (s === "running") return "running";
+  if (s === "done") {
+    const x = e.exit;
+    return x !== undefined && x !== null && x !== "" && Number.isFinite(Number(x)) && Number(x) !== 0 ? "failed" : "done";
+  }
+  return "unknown";
+}
+
+/** Local ISO string without timezone ("2026-10-30T15:16:55") → Date (local time); null if invalid. */
+export function parseLocal(iso) {
+  if (iso instanceof Date) return Number.isNaN(+iso) ? null : iso;
+  if (typeof iso !== "string") return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?$/.exec(iso.trim());
+  if (m) {
+    const d = new Date(+m[1], +m[2] - 1, +m[3], +(m[4] ?? 0), +(m[5] ?? 0), +(m[6] ?? 0));
+    return Number.isNaN(+d) ? null : d;
+  }
+  const d = new Date(iso); // has an explicit zone (Z / +02:00)
+  return Number.isNaN(+d) ? null : d;
+}
+
+const pad = (n) => String(n).padStart(2, "0");
+const dayStart = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+/** Absolute local time "YYYY-MM-DD HH:MM:SS" (or "" if unparsable). */
+export function absoluteTime(iso) {
+  const d = parseLocal(iso);
+  return d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` : "";
+}
+
+/** "just now" | "N min ago" | "N h ago" | "yesterday" | "YYYY-MM-DD"; "" when unparsable. */
+export function relativeTime(iso, now = new Date()) {
+  const d = parseLocal(iso);
+  if (!d) return "";
+  const diff = +now - +d;
+  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (diff < -60000) return date; // clearly in the future
+  if (diff < 60000) return "just now";
+  const sameDay = dayStart(now).getTime() === dayStart(d).getTime();
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
+  if (diff < 86400000 && sameDay) return `${Math.floor(diff / 3600000)} h ago`;
+  const days = Math.round((dayStart(now) - dayStart(d)) / 86400000);
+  return days === 1 ? "yesterday" : date;
+}
+
+const DETAIL_ORDER = { running: 0, failed: 1, done: 2, unknown: 3 };
+const WORST_ORDER = { failed: 0, running: 1, done: 2, unknown: 3 };
+
+/**
+ * Map {name: entry} (or array of {name, ...entry}) → {total, counts, worst, list, worstFirst}.
+ * list: running, failed, done, unknown; newest first within a group. worstFirst: failed, running, done, unknown.
+ */
+export function summarizeAutomations(src) {
+  const pairs = Array.isArray(src) ? src.map((e) => [e?.name, e]) : Object.entries(src && typeof src === "object" ? src : {});
+  const items = pairs.map(([name, e]) => {
+    const x = e && typeof e === "object" ? e : {};
+    return { name: String(name), state: automationState(e), status: typeof x.status === "string" ? x.status : "", at: x.at ?? null, exit: x.exit ?? null, error: x.error ? String(x.error) : "" };
+  });
+  const time = (i) => +(parseLocal(i.at) ?? -Infinity);
+  const sortBy = (order) => [...items].sort((a, b) => order[a.state] - order[b.state] || time(b) - time(a) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const counts = { failed: 0, running: 0, done: 0, unknown: 0 };
+  for (const i of items) counts[i.state]++;
+  const worstFirst = sortBy(WORST_ORDER);
+  return { total: items.length, counts, worst: worstFirst[0]?.state ?? null, list: sortBy(DETAIL_ORDER), worstFirst };
+}
+
+/** "2 automations: 1 failed, 1 done" ("" when none). */
+export function automationsText(sum) {
+  if (!sum.total) return "";
+  const parts = ["failed", "running", "done", "unknown"].filter((k) => sum.counts[k]).map((k) => `${sum.counts[k]} ${k}`);
+  return `${sum.total} automation${sum.total === 1 ? "" : "s"}: ${parts.join(", ")}`;
+}
+
+/** "log-review: done 2 min ago (exit 0)" for a summarized item. */
+export function automationLabel(i, now = new Date()) {
+  const rel = relativeTime(i.at, now);
+  const exit = i.exit !== null && i.exit !== undefined && i.exit !== "" ? ` (exit ${i.exit})` : "";
+  return `${i.name}: ${i.state === "unknown" ? `unknown status${i.status ? ` "${i.status}"` : ""}` : i.state}${rel ? ` ${rel}` : ""}${exit}${i.error ? ` – ${i.error}` : ""}`;
+}

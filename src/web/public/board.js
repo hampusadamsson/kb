@@ -1,6 +1,7 @@
 // Board rendering: sections, columns, cards, drag and drop.
 import { h, clear } from "./dom.js";
 import { display } from "./logic.js";
+import { cardIndicator } from "./status.js";
 
 /**
  * handlers: { open(view), add(board, status), move(view, status), dragState(bool) }
@@ -82,6 +83,7 @@ function wireDrop(el, boardName, colName, handlers) {
 
 function renderCard(t, handlers) {
   const idText = t.hasId ? `#${display(t.id)}` : "#?";
+  const ind = cardIndicator(t.autos);
   const card = h(
     "article",
     {
@@ -90,7 +92,8 @@ function renderCard(t, handlers) {
       role: "button",
       "data-key": t.path,
       draggable: !t.readOnly,
-      "aria-label": `${idText} ${t.name}`,
+      "aria-label": ind ? `${idText} ${t.name}, ${ind.text}` : `${idText} ${t.name}`,
+      title: ind ? ind.text : null,
     },
     h(
       "div",
@@ -108,6 +111,7 @@ function renderCard(t, handlers) {
           Object.entries(t.props).map(([k, v]) => h("span", { class: "chip prop", text: `${k}:${display(v)}` })),
         )
       : null,
+    ind ? ind.el : null,
   );
   card.addEventListener("click", () => handlers.open(t));
   card.addEventListener("keydown", (e) => {

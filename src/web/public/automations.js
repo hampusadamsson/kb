@@ -1,7 +1,8 @@
 // Settings → Automations: rule builder cards (per board), test run, last-runs list.
 import { api } from "./api.js";
 import { h, clear, chipInput } from "./dom.js";
-import { AUTOMATION_VARS, describeTestRun, effectiveColumn, newRule, testBody } from "./logic.js";
+import { dot } from "./status.js";
+import { AUTOMATION_VARS, absoluteTime, automationState, relativeTime, describeTestRun, effectiveColumn, newRule, testBody } from "./logic.js";
 
 const CONFIRM = "This really runs the script on this machine with a sample ticket.";
 
@@ -147,10 +148,13 @@ export async function lastRuns() {
           h(
             "button",
             { type: "button", class: "run-row", "aria-expanded": "false", onclick: (e) => ((detail.hidden = !detail.hidden), e.currentTarget.setAttribute("aria-expanded", String(!detail.hidden))) },
-            h("span", { class: "muted", text: new Date(r.finishedAt ?? r.startedAt).toLocaleString() }),
+            h("span", { class: "muted", title: absoluteTime(r.finishedAt ?? r.startedAt), text: relativeTime(r.finishedAt ?? r.startedAt) || String(r.finishedAt ?? r.startedAt ?? "") }),
             h("span", { class: "mono", text: `${r.board}/${r.rule}` }),
             h("span", { class: "mono", text: `#${r.ticketId}` }),
-            h("span", { class: `run-status ${r.status}`, text: r.status }),
+            (() => {
+              const st = automationState({ status: r.status, exit: r.result?.exitCode, error: r.result?.error });
+              return h("span", { class: "run-status" }, dot(st, `${r.board}/${r.rule}: ${st} ${relativeTime(r.finishedAt ?? r.startedAt)}`.trim()), h("span", { text: r.status }));
+            })(),
             h("span", { class: "muted", text: `exit ${r.result?.exitCode ?? "–"}` }),
           ),
           detail,

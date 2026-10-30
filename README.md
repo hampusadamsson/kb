@@ -342,6 +342,7 @@ kb web [--host <addr>] [--port <n>] [--no-open]
 - Cards; drag a card to another column of the **same board** to change its `status`. Cross-board drags are ignored.
 - Create: the **+** in each column header opens the create dialog with that board and status preset. There is no global "New" button.
 - Detail dialog: name, status, board, labels, properties, body, comments (add comments there). Comment keys have minute granularity (seconds on collision).
+- **Automation status dots**: tickets with `automations:` run status in frontmatter show small dots on the card (up to 3, worst first, `+N` for more) and an *Automations* section in the detail dialog (rule, status word, relative time, exit code, error). Legend: green = done, yellow (pulsing) = running, red = failed (failed status, non-zero exit or error), grey = unknown. Each dot has a tooltip/aria-label; updates arrive live, and an open dialog only refreshes that section (your edits are kept, no "changed on disk" banner).
 - Filter bar: text, labels, properties, with `!` negation as in `kb ls`. State lives in the URL hash: `#board=..&text=..&l=..&p=..`.
 - **Settings** (header button, badge = issue count):
   - *Board config* form for `kanban.yaml`: default board name, `glob`, ordered columns (rename inline, reorder, add, remove), and per-board column overrides (add, rename, remove). Saving keeps your YAML comments and unrelated keys.

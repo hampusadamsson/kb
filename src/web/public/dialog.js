@@ -1,10 +1,10 @@
 // Ticket dialog: create + detail/edit (shared form).
 import { api, ApiError } from "./api.js";
 import { h, clear, chipInput, toast } from "./dom.js";
+import { automationsWrap, fillAutomations } from "./status.js";
 import {
   buildCreate,
   buildPatch,
-  describeAutomations,
   display,
   hasPatch,
   rowsToProps,
@@ -12,11 +12,6 @@ import {
   sortedComments,
   statusOptions,
 } from "./logic.js";
-
-const autoLines = (a) => {
-  const lines = describeAutomations(a);
-  return lines.length ? [h("dt", { text: "Automations" }), h("dd", { class: "mono" }, lines.map((l) => h("div", { text: l })))] : [];
-};
 
 const dlg = () => document.getElementById("ticket-dialog");
 let current = null; // the open session, if any
@@ -117,7 +112,7 @@ class Session {
           h("dd", { class: "mono", text: this.detail.hasId ? display(this.detail.id) : "(none)" }),
           h("dt", { text: "Type" }),
           h("dd", { class: "mono", text: display(this.detail.data?.type ?? "ticket") }),
-          ...autoLines(this.detail.automations),
+          (this.autoWrap = automationsWrap(this.detail.automations)),
         );
 
     this.commentList = h("ul", { class: "comments" });
@@ -322,12 +317,30 @@ class Session {
       return;
     }
     if (this.disposed || d.mtime === this.mtime) return;
+    if (this.onlyAutomationsChanged(d)) {
+      // runner status update: refresh just the section and the stored mtime, keep the form and any edits
+      this.detail = { ...this.detail, mtime: d.mtime, automations: d.automations, data: d.data };
+      this.mtime = d.mtime;
+      fillAutomations(this.autoWrap, d.automations);
+      return;
+    }
     if (this.dirty()) return this.showBanner("This ticket changed on disk");
     this.detail = d;
     this.mtime = d.mtime;
     this.orig = snapshot(d);
     this.fill(this.orig);
     this.hideBanner();
+  }
+
+  /** True when the only on-disk difference from what the form loaded is the `automations` key. */
+  onlyAutomationsChanged(d) {
+    if (this.gone || !this.autoWrap) return false;
+    const strip = (x) => JSON.stringify([snapshot(x), x.comments ?? {}, x.hasId, x.readOnly]);
+    const rest = (x) => {
+      const { automations, ...r } = x.data ?? {};
+      return JSON.stringify(r);
+    };
+    return strip(d) === strip(this.detail) && rest(d) === rest(this.detail) && d.path === this.detail.path;
   }
 
   async addComment() {
