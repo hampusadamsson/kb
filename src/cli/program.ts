@@ -4,6 +4,7 @@ import { boards } from "./commands/boards.js";
 import { complete } from "./commands/complete.js";
 import { generate, SHELLS } from "./completion.js";
 import { useColor } from "./format.js";
+import { configureHelp } from "./help.js";
 import { fix } from "./commands/fix.js";
 import { init } from "./commands/init.js";
 import { ls, lsJson, parseLimit } from "./commands/ls.js";
@@ -162,5 +163,6 @@ Install:
       const out = complete(cwd(), kind, arg);
       if (out.length) process.stdout.write(out.join("\n") + "\n");
     });
+  configureHelp(program);
   return program;
 }
