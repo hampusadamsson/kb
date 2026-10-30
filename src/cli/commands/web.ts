@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
 import { createKanban } from "../../core/index.js";
+import { createAutomationLog } from "../../automationLog.js";
+import { createShellRunner } from "../../runner.js";
 import { startServer, type RunningServer } from "../../web/server.js";
 
 export interface WebOpts {
   host?: string;
   port?: string | number;
   open?: boolean; // false for --no-open
+  automation?: boolean; // false for --no-automation
 }
 
 export interface WebIO {
@@ -45,7 +48,14 @@ export async function runWeb(cwd: string, opts: WebOpts, io: WebIO): Promise<Run
   const port = explicit ? parsePort(opts.port as string | number) : 4747;
   createKanban({ dir: cwd }).load(); // throws if config missing/invalid
 
-  const server = await startServer({ dir: cwd, host, port, strictPort: explicit });
+  const server = await startServer({
+    dir: cwd,
+    host,
+    port,
+    strictPort: explicit,
+    runner: opts.automation === false ? undefined : createShellRunner(),
+    log: createAutomationLog(cwd),
+  });
   const wildcard = host === "0.0.0.0" || host === "::";
   const url = wildcard ? `http://localhost:${server.port}` : server.url;
   io.out(`kb web running at ${url}`);

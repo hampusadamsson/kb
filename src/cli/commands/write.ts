@@ -1,12 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { createKanban, hasChanges, KanbanError, parseProperty, type Patch, type Warning } from "../../core/index.js";
+import { createKanban, hasChanges, KanbanError, parseProperty, type Kanban, type Patch, type Warning } from "../../core/index.js";
 import { fmtWarning } from "../format.js";
 
 export interface Io {
   warn: (msg: string) => void;
   readStdin: () => string;
+  /** kanban factory (e.g. with automations wired); default plain createKanban */
+  kanban?: (cwd: string) => Kanban;
 }
 
 export const defaultIo: Io = {
@@ -54,7 +56,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
   if (name !== undefined && o.name !== undefined && name !== o.name) {
     throw new KanbanError("invalid", "name given twice with different values");
   }
-  const kb = createKanban({ dir: cwd });
+  const kb = (io.kanban ?? ((d) => createKanban({ dir: d })))(cwd);
   const r = kb.add({
     name: (o.name ?? name) as string,
     status: o.status,
@@ -72,7 +74,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
 }
 
 export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): string {
-  const kb = createKanban({ dir: cwd });
+  const kb = (io.kanban ?? ((d) => createKanban({ dir: d })))(cwd);
   const t = kb.get(id);
   const patch: Patch = {
     name: o.name,

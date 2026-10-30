@@ -3,7 +3,7 @@ import path from "node:path";
 import type { ServerResponse } from "node:http";
 import { CONFIG_FILE, loadConfig, matchesTicketGlob, type Config } from "../core/index.js";
 
-const IGNORED = new Set(["node_modules", "dist", ".git"]);
+const IGNORED = new Set(["node_modules", "dist", ".git", ".kb"]);
 const KEEPALIVE_MS = 25_000;
 const DEBOUNCE_MS = 100;
 const MAX_WAIT_MS = 1000;

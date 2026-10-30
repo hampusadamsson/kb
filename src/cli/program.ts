@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { automationEnabled, automationSession } from "./automation.js";
 import { boards } from "./commands/boards.js";
 import { useColor } from "./format.js";
 import { fix } from "./commands/fix.js";
@@ -7,7 +8,7 @@ import { ls, lsJson, parseLimit } from "./commands/ls.js";
 import { show } from "./commands/show.js";
 import { defaultOpener, runWeb } from "./commands/web.js";
 import { validate } from "./commands/validate.js";
-import { add, comment, edit, mv, set, type AddOpts, type SetOpts } from "./commands/write.js";
+import { add, comment, defaultIo, edit, mv, set, type AddOpts, type SetOpts, type Io } from "./commands/write.js";
 
 export const commandNames = [
   "init", "ls", "boards", "show", "add", "set", "mv",
@@ -24,8 +25,22 @@ function run(fn: () => void): void {
   }
 }
 
+/** Like run(), but waits for automations after the result was printed. */
+async function runAuto(flagOff: boolean, fn: (io: Io) => string): Promise<void> {
+  const s = automationSession(automationEnabled(flagOff));
+  try {
+    console.log(fn({ ...defaultIo, kanban: s.kanban }));
+  } catch (e) {
+    console.error(`error: ${(e as Error).message}`);
+    process.exitCode = 1;
+  }
+  await s.finish((m) => console.error(m));
+}
+
 export function buildProgram(cwd: () => string = () => process.cwd()): Command {
-  const program = new Command("kb").description("Local markdown kanban CLI");
+  const program = new Command("kb").description("Local markdown kanban CLI")
+    .option("--no-automation", "do not run board automations");
+  const off = (o: { automation?: boolean }): boolean => o.automation === false || program.opts().automation === false;
 
   program.command("init").description("Write starter kanban.yaml")
     .action(() => run(() => console.log(init(cwd()))));
@@ -73,20 +88,22 @@ Examples:
       .option("-p, --property <key:value>", "property (repeatable)", collect)
       .option("--body <text>", "body text (- = stdin)")
       .option("-c, --comment <text>", "add comment")
-      .option("-e, --edit", "open $EDITOR afterwards");
+      .option("-e, --edit", "open $EDITOR afterwards")
+      .option("--no-automation", "do not run board automations");
 
   common(program.command("add").description("Create a ticket").argument("[name]"))
     .option("-f, --file <path>", "file path")
     .option("--id <value>", "explicit id")
-    .action((name: string | undefined, o: AddOpts) => run(() => console.log(add(cwd(), name, o))));
+    .action((name: string | undefined, o: AddOpts & { automation?: boolean }) => runAuto(off(o), (io) => add(cwd(), name, o, io)));
 
   common(program.command("set").description("Change ticket fields").argument("<id>"))
     .option("--unset <key>", "remove property (repeatable)", collect)
     .option("--unlabel <label>", "remove label (repeatable)", collect)
-    .action((id: string, o: SetOpts) => run(() => console.log(set(cwd(), id, o))));
+    .action((id: string, o: SetOpts & { automation?: boolean }) => runAuto(off(o), (io) => set(cwd(), id, o, io)));
 
   program.command("mv").description("Change ticket status").argument("<id>").argument("<status>")
-    .action((id: string, status: string) => run(() => console.log(mv(cwd(), id, status))));
+    .option("--no-automation", "do not run board automations")
+    .action((id: string, status: string, o: { automation?: boolean }) => runAuto(off(o), (io) => mv(cwd(), id, status, io)));
 
   program.command("edit").description("Open ticket in $EDITOR").argument("<id>")
     .action((id: string) => run(() => edit(cwd(), id)));
@@ -109,9 +126,10 @@ Examples:
     .option("--host <addr>", "address to bind", "127.0.0.1")
     .option("--port <n>", "port (default 4747, auto-increments if busy)")
     .option("--no-open", "do not open the browser")
-    .action(async (o: { host: string; port?: string; open: boolean }) => {
+    .option("--no-automation", "do not run board automations")
+    .action(async (o: { host: string; port?: string; open: boolean; automation?: boolean }) => {
       try {
-        const server = await runWeb(cwd(), o, {
+        const server = await runWeb(cwd(), { ...o, automation: automationEnabled(off(o)) }, {
           out: (s) => console.log(s),
           err: (s) => console.error(s),
           opener: defaultOpener,

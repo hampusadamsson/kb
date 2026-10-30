@@ -3,6 +3,8 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createKanban } from "../core/index.js";
+import type { AutomationLog } from "../automationLog.js";
+import type { AutomationRunner } from "../core/automation.js";
 import { errorResponse, handleApi } from "./api.js";
 import { EventHub } from "./watch.js";
 
@@ -12,6 +14,9 @@ export interface ServerOptions {
   port?: number;
   strictPort?: boolean;
   now?: () => Date;
+  /** runs automations; absent → none run */
+  runner?: AutomationRunner;
+  log?: AutomationLog;
 }
 
 export interface RunningServer {
@@ -181,8 +186,13 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       return hub.add(res);
     }
     const body = method === "GET" || method === "HEAD" ? {} : await readBody(req);
-    const kb = createKanban({ dir, now: opts.now }); // fresh view per request
-    const r = handleApi(kb, { method, path: url.pathname, query: url.searchParams, body });
+    const kb = createKanban({
+      dir,
+      now: opts.now,
+      runner: opts.runner,
+      onAutomation: opts.log ? (rec) => opts.log!.append(rec) : undefined,
+    }); // fresh view per request
+    const r = handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log });
     sendJson(res, r.status, r.body);
   };
 

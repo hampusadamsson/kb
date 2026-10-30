@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { AutomationLog } from "../automationLog.js";
+import type { AutomationRunner } from "../core/automation.js";
 import { KanbanError, type Kanban, type Patch } from "../core/index.js";
 import { duplicateKeys, toDetail, toView } from "./view.js";
 
@@ -34,7 +36,12 @@ export function errorResponse(e: unknown): ApiResponse {
 const fail = (status: number, code: string, error: string): ApiResponse => ({ status, body: { error, code } });
 const ok = (body: unknown, status = 200): ApiResponse => ({ status, body });
 
-type Handler = (kb: Kanban, req: ApiRequest, params: string[]) => ApiResponse;
+export interface ApiContext {
+  runner?: AutomationRunner;
+  log?: AutomationLog;
+}
+
+type Handler = (kb: Kanban, req: ApiRequest, params: string[], ctx: ApiContext) => ApiResponse;
 
 /** Throws if the client's mtime is stale; returns the current ticket otherwise. */
 function checkFresh(kb: Kanban, id: string, mtime: unknown): ApiResponse | undefined {
@@ -161,6 +168,8 @@ const putConfig: Handler = (kb, req) => {
   return ok({ dryRun: b.dryRun === true, ...r });
 };
 
+const automationLog: Handler = (_kb, _req, _p, ctx) => ok({ runs: ctx.log?.recent(20) ?? [] });
+
 interface Route {
   method: string;
   re: RegExp;
@@ -182,10 +191,11 @@ const routes: Route[] = [
   route("POST", "/api/fix", fix),
   route("GET", "/api/config", getConfig),
   route("PUT", "/api/config", putConfig),
+  route("GET", "/api/automation/log", automationLog),
 ];
 
 /** Pure request handler: no HTTP, just the Kanban core. */
-export function handleApi(kb: Kanban, req: ApiRequest): ApiResponse {
+export function handleApi(kb: Kanban, req: ApiRequest, ctx: ApiContext = {}): ApiResponse {
   const path = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
   const hits = routes.filter((r) => r.re.test(path));
   if (hits.length === 0) return fail(404, "not-found", `unknown route ${path}`);
@@ -199,7 +209,7 @@ export function handleApi(kb: Kanban, req: ApiRequest): ApiResponse {
     } catch {
       return fail(400, "invalid", "malformed percent-encoding in path");
     }
-    return r.handler(kb, req, params);
+    return r.handler(kb, req, params, ctx);
   } catch (e) {
     return errorResponse(e);
   }
