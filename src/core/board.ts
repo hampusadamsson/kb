@@ -327,6 +327,7 @@ export class Kanban {
       const ticket = scan(this.dir, config).tickets.find((t) => t.path === rel);
       if (!ticket) return;
       const ref = { board: ticket.board, ticketId: String(ticket.id), ticketName: ticket.name, path: rel };
+      let started = 0; // runs started in this dispatch (the scanned ticket snapshot does not include them)
       for (const rule of automationsFor(config, ticket.board)) {
         if (!matchRule({ ...rule, enabled: true }, event, ticket)) continue;
         if (off || rule.enabled === false) {
@@ -337,7 +338,7 @@ export class Kanban {
         // Loop guard (default on). KB_AUTOMATION=1 already stops CLI loops from scripts; this mainly
         // protects against scripts calling the web API and other paths that re-trigger rules.
         if (rule.guard !== false) {
-          const runs = totalRuns(ticket.data.automations);
+          const runs = totalRuns(ticket.data.automations) + started;
           if (runs >= AUTOMATION_RUN_LIMIT) {
             const reason = `guardrail: ${AUTOMATION_RUN_LIMIT} automation runs on this ticket`;
             this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "skipped", at: commentKey(this.now(), true), reason });
@@ -345,6 +346,7 @@ export class Kanban {
             continue;
           }
         }
+        started++;
         const startMs = this.now().getTime();
         const startedAt = commentKey(this.now(), true);
         this.emit("automation.started", `automation "${rule.name}" started on #${String(ticket.id)}`, { rule: rule.name, event }, ref);

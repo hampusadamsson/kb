@@ -127,3 +127,27 @@ describe("loop guardrail", () => {
     expect(autos("1.md")).toBeUndefined();
   });
 });
+
+describe("loop guardrail: two rules on one ticket", () => {
+  it("counts every run of rules firing together (no lost increments)", async () => {
+    fs.writeFileSync(
+      path.join(dir, "kanban.yaml"),
+      `columns: [todo, done]\nautomations:\n  - name: r1\n    when: { moved_to: done }\n    run: "true"\n  - name: r2\n    when: { moved_to: done }\n    run: "true"\n`,
+    );
+    const k = mk();
+    const { id } = k.add({ name: "A" });
+    await bounce(k, id, 4);
+    const a = autos(file());
+    expect(a.r1.runs).toBe(4);
+    expect(a.r2.runs).toBe(4);
+  });
+
+  it("never exceeds the limit when several rules fire in one dispatch", async () => {
+    const rules = [1, 2, 3, 4].map((i) => `  - name: r${i}\n    when: { moved_to: done }\n    run: "true"\n`).join("");
+    fs.writeFileSync(path.join(dir, "kanban.yaml"), `columns: [todo, done]\nautomations:\n${rules}`);
+    const k = mk();
+    const { id } = k.add({ name: "A" });
+    await bounce(k, id, 6);
+    expect(totalRuns(autos(file()))).toBe(AUTOMATION_RUN_LIMIT);
+  });
+});
