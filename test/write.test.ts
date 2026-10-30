@@ -28,11 +28,11 @@ const fm = (f: string) => parse(splitFrontmatter(read(f)).yaml!) as Record<strin
 
 describe("add", () => {
   it("defaults", () => {
-    expect(add(dir, "Fix login bug", {}, io)).toBe("#1 001-fix-login-bug.md");
+    expect(add(dir, "Fix login bug", {}, io)).toBe("#001 001-fix-login-bug.md");
     expect(read("001-fix-login-bug.md")).toBe(
       "---\ntype: ticket\nid: 1\nname: Fix login bug\nstatus: todo\n---\n",
     );
-    expect(add(dir, undefined, { name: "Two" }, io)).toBe("#2 002-two.md");
+    expect(add(dir, undefined, { name: "Two" }, io)).toBe("#002 002-two.md");
   });
   it("name errors", () => {
     expect(() => add(dir, undefined, {}, io)).toThrow(/name required/);
@@ -57,7 +57,28 @@ describe("add", () => {
     const d = fm("007-a.md");
     expect(d.board).toBeUndefined();
     expect(d.id).toBe(7);
-    expect(add(dir, "B", {}, io)).toMatch(/^#8 /);
+    expect(add(dir, "B", {}, io)).toMatch(/^#008 /);
+  });
+  it("leading-zero id stays a string", () => {
+    expect(add(dir, "A", { id: "007" }, io)).toBe("#007 007-a.md");
+    expect(fm("007-a.md").id).toBe("007");
+    add(dir, "B", { id: "0" }, io);
+    expect(fm("000-b.md").id).toBe(0);
+  });
+  it("long comment is not folded; CRLF preserved on mv", () => {
+    const long = "word ".repeat(40).trim();
+    add(dir, "A", { comment: long }, io);
+    expect(read("001-a.md").split("\n").some((l) => l.includes(long))).toBe(true);
+    fs.writeFileSync(
+      path.join(dir, "c.md"),
+      "---\r\ntype: ticket\r\nid: 9\r\nname: C\r\nstatus: todo\r\n---\r\nbody\r\nmore\r\n",
+    );
+    mv(dir, "9", "done", io);
+    const t = read("c.md");
+    const fmText = t.slice(0, t.indexOf("---\r\nbody") + 5);
+    expect(fmText.replace(/\r\n/g, "")).not.toContain("\n");
+    expect(t).toContain("status: done\r\n");
+    expect(t.endsWith("body\r\nmore\r\n")).toBe(true);
   });
   it("string id filename, dup id, reserved prop", () => {
     expect(add(dir, "A", { id: "ABC-1" }, io)).toBe("#ABC-1 abc-1-a.md");
@@ -136,7 +157,7 @@ describe("comment & edit", () => {
     const script = path.join(dir, "ed.sh");
     fs.writeFileSync(script, '#!/bin/sh\necho edited >> "$1"\n', { mode: 0o755 });
     const old = { v: process.env.VISUAL, e: process.env.EDITOR };
-    delete process.env.VISUAL;
+    process.env.VISUAL = "false"; // must be ignored
     process.env.EDITOR = script;
     try {
       edit(dir, "1");

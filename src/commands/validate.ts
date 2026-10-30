@@ -1,5 +1,5 @@
 import { loadConfig, columnsFor } from "../config.js";
-import { duplicates, scan } from "../tickets.js";
+import { duplicates, hasId, scan } from "../tickets.js";
 
 export interface ValidateResult {
   out: string;
@@ -28,7 +28,7 @@ export function validate(cwd: string): ValidateResult {
   for (const d of diagnostics) err(d.path, d.message);
 
   for (const t of tickets) {
-    if (t.id === undefined || t.id === null) err(t.path, "missing id");
+    if (!hasId(t)) err(t.path, "missing id");
     if (t.status === undefined) err(t.path, "missing status");
     else if (!columnsFor(config, t.board).includes(t.status)) {
       err(t.path, `status "${t.status}" is not a column of board "${t.board}"`);

@@ -178,6 +178,9 @@ describe("util", () => {
     expect(parseProperty("p:high")).toEqual(["p", "high"]);
     expect(parseProperty("url:http://x")).toEqual(["url", "http://x"]);
     expect(parseProperty("e:")).toEqual(["e", ""]);
+    expect(parseProperty("c:x: y")).toEqual(["c", "x: y"]);
+    expect(parseProperty("a:[1, 2]")).toEqual(["a", "[1, 2]"]);
+    expect(parseProperty("a:{b: 1}")).toEqual(["a", "{b: 1}"]);
     expect(() => parseProperty("nocolon")).toThrow();
   });
 });

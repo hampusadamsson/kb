@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { Document } from "yaml";
+import { Document, isSeq } from "yaml";
 import { columnsFor, loadConfig } from "../config.js";
 import { addComment, readFile, render } from "../frontmatter.js";
-import { findById, nextId, RESERVED, scan } from "../tickets.js";
+import { findById, isInt, nextId, RESERVED, scan } from "../tickets.js";
+import { fmtId } from "./format.js";
 import { filenameFor, parseProperty, slugify } from "../util.js";
 
 export interface Io {
@@ -52,10 +53,26 @@ function bodyText(opt: string, io: Io): string {
 }
 
 export function openEditor(file: string): void {
-  const editor = process.env.VISUAL || process.env.EDITOR || "vi";
+  const editor = process.env.EDITOR || "vi";
   const r = spawnSync(`${editor} "${file.replace(/"/g, '\\"')}"`, { stdio: "inherit", shell: true });
   if (r.error) throw r.error;
   if (r.status) throw new Error(`editor exited with status ${r.status}`);
+}
+
+export function applyLabels(doc: Document, add: string[], remove: string[]): void {
+  const seq = doc.get("labels", true);
+  const have = isSeq(seq) ? seq.items.map((n) => String((n as { value?: unknown }).value ?? n)) : [];
+  const toAdd = [...new Set(add)].filter((l) => !have.includes(l));
+  if (toAdd.length) {
+    if (isSeq(seq)) for (const l of toAdd) seq.add(doc.createNode(l));
+    else doc.set("labels", [...have, ...toAdd]);
+  }
+  if (remove.length && isSeq(seq)) {
+    const rm = new Set(remove);
+    const kept = seq.items.filter((n) => !rm.has(String((n as { value?: unknown }).value ?? n)));
+    if (kept.length === 0) doc.delete("labels");
+    else seq.items = kept;
+  }
 }
 
 export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = defaultIo): string {
@@ -72,7 +89,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
   let id: number | string;
   if (o.id !== undefined) {
     if (o.id === "") throw new Error("empty --id");
-    id = /^\d+$/.test(o.id) ? Number(o.id) : o.id;
+    id = /^(0|[1-9]\d*)$/.test(o.id) ? Number(o.id) : o.id;
     if (tickets.some((t) => t.id !== undefined && String(t.id) === String(id))) {
       throw new Error(`id ${id} already in use`);
     }
@@ -98,7 +115,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
 
   const rel =
     o.file ??
-    (typeof id === "number" ? filenameFor(id, nm) : `${slugify(id)}-${slugify(nm)}.md`);
+    (isInt(id) ? filenameFor(id, nm) : `${slugify(id)}-${slugify(nm)}.md`);
   const abs = path.resolve(cwd, rel);
   const body = o.body !== undefined ? bodyText(o.body, io) : "";
   fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -109,7 +126,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
     throw e;
   }
   if (o.edit) openEditor(abs);
-  return `#${id} ${path.relative(cwd, abs)}`;
+  return `#${fmtId(id)} ${path.relative(cwd, abs)}`;
 }
 
 export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): string {
@@ -130,7 +147,7 @@ export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): st
   if (!changed && !o.edit) throw new Error("no changes requested");
 
   if (changed) {
-    const { doc, body: oldBody } = readFile(abs);
+    const { doc, body: oldBody, crlf } = readFile(abs);
     if (doc.errors.length) throw new Error(`${t.path}: ${doc.errors[0].message}`);
     if (o.name !== undefined) doc.set("name", o.name);
     if (o.board !== undefined) {
@@ -145,35 +162,12 @@ export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): st
       }
       if (o.status !== undefined) doc.set("status", o.status);
     }
-    if (o.label?.length) {
-      const have = new Set(t.labels);
-      const add = [...new Set(o.label)].filter((l) => !have.has(l));
-      if (add.length) {
-        const cur = doc.get("labels", true);
-        if (cur && typeof (cur as { add?: unknown }).add === "function" && Array.isArray((cur as { items?: unknown }).items)) {
-          for (const l of add) doc.addIn(["labels"], l);
-        } else {
-          doc.set("labels", [...t.labels, ...add]);
-        }
-      }
-    }
-    if (o.unlabel?.length) {
-      const items = (doc.get("labels", true) as { items?: unknown[] } | undefined)?.items;
-      if (Array.isArray(items)) {
-        const rm = new Set(o.unlabel);
-        const kept = t.labels.filter((l) => !rm.has(l));
-        if (kept.length === 0) doc.delete("labels");
-        else if (kept.length !== t.labels.length) {
-          const seq = doc.get("labels", true) as { items: { value?: unknown }[] };
-          seq.items = seq.items.filter((n) => !rm.has(String(n.value ?? n)));
-        }
-      }
-    }
+    applyLabels(doc, o.label ?? [], o.unlabel ?? []);
     for (const [k, v] of extra) doc.set(k, v);
     for (const k of unset) doc.delete(k);
     if (o.comment !== undefined) addComment(doc, o.comment);
     const body = o.body !== undefined ? bodyText(o.body, io) : oldBody;
-    fs.writeFileSync(abs, render(doc, body));
+    fs.writeFileSync(abs, render(doc, body, crlf));
   }
   if (o.edit) openEditor(abs);
   return `#${t.id} updated`;
@@ -187,10 +181,10 @@ export function comment(cwd: string, id: string, text: string, now = new Date())
   const config = loadConfig(cwd);
   const t = findById(scan(cwd, config).tickets, id);
   const abs = path.join(cwd, t.path);
-  const { doc, body } = readFile(abs);
+  const { doc, body, crlf } = readFile(abs);
   if (doc.errors.length) throw new Error(`${t.path}: ${doc.errors[0].message}`);
   const key = addComment(doc, text, now);
-  fs.writeFileSync(abs, render(doc, body));
+  fs.writeFileSync(abs, render(doc, body, crlf));
   return key;
 }
 

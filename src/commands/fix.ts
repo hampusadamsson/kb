@@ -1,8 +1,8 @@
 import path from "node:path";
 import { YAMLMap } from "yaml";
 import { loadConfig } from "../config.js";
-import { updateFile } from "../frontmatter.js";
-import { duplicates, scan, type Ticket } from "../tickets.js";
+import { keyOf, updateFile } from "../frontmatter.js";
+import { duplicates, hasId, isInt, nextId, scan, type Ticket } from "../tickets.js";
 
 function setId(file: string, id: number): void {
   updateFile(file, (doc) => {
@@ -11,7 +11,7 @@ function setId(file: string, id: number): void {
       return;
     }
     const items = doc.contents.items;
-    const i = items.findIndex((p) => String((p.key as { value?: unknown }).value ?? p.key) === "type");
+    const i = items.findIndex((p) => keyOf(p) === "type");
     items.splice(i + 1, 0, doc.createPair("id", id));
   });
 }
@@ -21,17 +21,18 @@ const byAge = (a: Ticket, b: Ticket) => a.mtime - b.mtime || a.path.localeCompar
 export function fix(cwd: string, dryRun = false): string {
   const config = loadConfig(cwd);
   const { tickets } = scan(cwd, config);
-  const has = (t: Ticket) => t.id !== undefined && t.id !== null;
+  const has = hasId;
 
   const used = new Set(tickets.filter(has).map((t) => String(t.id)));
-  let max = 0;
-  for (const t of tickets) {
-    if (typeof t.id === "number" && Number.isInteger(t.id) && t.id > max) max = t.id;
-  }
+  // ids known so far, including ones assigned in this run
+  const pool: { id: unknown }[] = [...tickets];
   const next = (): number => {
-    do max++;
-    while (used.has(String(max)));
-    return max;
+    let n = nextId(pool);
+    while (used.has(String(n))) {
+      pool.push({ id: n });
+      n = nextId(pool);
+    }
+    return n;
   };
 
   const losers = new Set<Ticket>();
@@ -47,7 +48,7 @@ export function fix(cwd: string, dryRun = false): string {
     }
     id ??= next();
     used.add(String(id));
-    if (id > max) max = id;
+    pool.push({ id });
     if (!dryRun) setId(path.join(cwd, t.path), id);
     out.push(`${dryRun ? "(dry-run) " : ""}${t.path}: id ${has(t) ? String(t.id) : "(none)"} -> ${id}`);
   }

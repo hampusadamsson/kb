@@ -27,6 +27,6 @@ export function parseProperty(arg: string): [string, unknown] {
   } catch {
     value = raw;
   }
-  if (value === undefined || value === null) value = raw;
+  if (value === undefined || value === null || typeof value === "object") value = raw;
   return [key, value];
 }

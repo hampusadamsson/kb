@@ -111,7 +111,7 @@ export function boardNames(tickets: Ticket[], config: Config): string[] {
 }
 
 export function findById(tickets: Ticket[], arg: string): Ticket {
-  const found = tickets.filter((t) => t.id !== undefined && String(t.id) === arg);
+  const found = tickets.filter((t) => hasId(t) && String(t.id) === arg);
   if (found.length === 0) throw new Error(`no ticket ${arg}`);
   if (found.length > 1) {
     throw new Error(`duplicate id ${arg}:\n${found.map((t) => `  ${t.path}`).join("\n")}`);
@@ -122,22 +122,28 @@ export function findById(tickets: Ticket[], arg: string): Ticket {
 export function duplicates(tickets: Ticket[]): Ticket[][] {
   const groups = new Map<string, Ticket[]>();
   for (const t of tickets) {
-    if (t.id === undefined || t.id === null) continue;
+    if (!hasId(t)) continue;
     const key = String(t.id);
     groups.set(key, [...(groups.get(key) ?? []), t]);
   }
   return [...groups.values()].filter((g) => g.length > 1);
 }
 
-export function nextId(tickets: Ticket[]): number {
+export function nextId(tickets: { id: unknown }[]): number {
   let max = 0;
   for (const t of tickets) {
-    if (typeof t.id === "number" && Number.isInteger(t.id) && t.id > max) max = t.id;
+    if (isInt(t.id) && t.id > max) max = t.id;
   }
   return max + 1;
 }
 
-const isInt = (id: unknown): id is number => typeof id === "number" && Number.isInteger(id);
+export const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
+export const hasId = (t: { id: unknown }): boolean => t.id !== undefined && t.id !== null;
+
+/** Default board first, then the rest sorted. */
+export function orderedBoards(tickets: Ticket[], config: Config): string[] {
+  return [config.name, ...boardNames(tickets, config).filter((b) => b !== config.name).sort()];
+}
 
 export function sortTickets(tickets: Ticket[]): Ticket[] {
   return [...tickets].sort((a, b) => {

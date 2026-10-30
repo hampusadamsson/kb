@@ -1,6 +1,5 @@
 import { columnsFor, loadConfig } from "../config.js";
-import { duplicates, scan, sortTickets, UNSORTED, type Ticket } from "../tickets.js";
-import { orderedBoards } from "./boards.js";
+import { duplicates, hasId, orderedBoards, scan, sortTickets, UNSORTED, type Ticket } from "../tickets.js";
 import { fmtId, fmtValue, makeStyle, type Result } from "./format.js";
 
 export interface LsOpts {
@@ -31,7 +30,7 @@ export function ls(cwd: string, opts: LsOpts = {}): Result {
 
   for (const d of diagnostics) warnings.push(`warning: ${d.path}: ${d.message}`);
   for (const t of tickets) {
-    if (t.id === undefined || t.id === null) warnings.push(`warning: ${t.path}: ticket has no id`);
+    if (!hasId(t)) warnings.push(`warning: ${t.path}: ticket has no id`);
   }
   for (const g of duplicates(tickets)) {
     warnings.push(`warning: duplicate id ${String(g[0].id)}: ${g.map((t) => t.path).join(", ")}`);

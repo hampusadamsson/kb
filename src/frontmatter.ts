@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Document, parseDocument, Scalar, YAMLMap } from "yaml";
+import { Document, parseDocument, Scalar, YAMLMap, type Pair } from "yaml";
 
 const FM_RE = /^---\r?\n(?:([\s\S]*?\r?\n)?)---[ \t]*(?:\r?\n|$)/;
 
@@ -16,21 +16,29 @@ export function splitFrontmatter(text: string): Split {
   return { yaml: m[1] ?? "", body: text.slice(m[0].length) };
 }
 
-export function readFile(file: string): { doc: Document; body: string } {
-  const { yaml, body } = splitFrontmatter(fs.readFileSync(file, "utf8"));
-  return { doc: parseDocument(yaml ?? ""), body };
+/** Key of a YAML map pair as a string. */
+export function keyOf(p: Pair): string {
+  return String((p.key as Scalar | null)?.value ?? p.key);
 }
 
-export function render(doc: Document, body: string): string {
-  return `---\n${doc.toString()}---\n${body}`;
+export function readFile(file: string): { doc: Document; body: string; crlf: boolean } {
+  const text = fs.readFileSync(file, "utf8");
+  const { yaml, body } = splitFrontmatter(text);
+  return { doc: parseDocument(yaml ?? ""), body, crlf: text.startsWith("---\r\n") };
+}
+
+/** Render frontmatter + body. With crlf, frontmatter uses CRLF; body is untouched. */
+export function render(doc: Document, body: string, crlf = false): string {
+  const fm = `---\n${doc.toString({ lineWidth: 0 })}---\n`;
+  return (crlf ? fm.replace(/\n/g, "\r\n") : fm) + body;
 }
 
 /** Read, mutate the YAML document, write back. Body is untouched. */
 export function updateFile(file: string, fn: (doc: Document) => void): void {
-  const { doc, body } = readFile(file);
+  const { doc, body, crlf } = readFile(file);
   if (doc.errors.length) throw new Error(`${file}: ${doc.errors[0].message}`);
   fn(doc);
-  fs.writeFileSync(file, render(doc, body));
+  fs.writeFileSync(file, render(doc, body, crlf));
 }
 
 /** Create a new file (parent dirs created); fails if it exists. */
@@ -58,7 +66,7 @@ export function addComment(doc: Document, text: string, now = new Date()): strin
     doc.set("comments", comments);
   }
   const map = comments as YAMLMap;
-  const taken = (k: string) => map.items.some((p) => String((p.key as Scalar).value ?? p.key) === k);
+  const taken = (k: string) => map.items.some((p) => keyOf(p) === k);
 
   let key = commentKey(now);
   let t = now;
