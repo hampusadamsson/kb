@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { AutomationLog } from "../automationLog.js";
+import type { EventLog } from "../eventLog.js";
 import type { AutomationRunner } from "../core/automation.js";
 import { renderCommand } from "../core/automation.js";
 import { KanbanError, type Kanban, type Patch } from "../core/index.js";
@@ -40,6 +41,7 @@ const ok = (body: unknown, status = 200): ApiResponse => ({ status, body });
 export interface ApiContext {
   runner?: AutomationRunner;
   log?: AutomationLog;
+  events?: EventLog;
 }
 
 type Handler = (kb: Kanban, req: ApiRequest, params: string[], ctx: ApiContext) => ApiResponse | Promise<ApiResponse>;
@@ -169,6 +171,29 @@ const putConfig: Handler = (kb, req) => {
   return ok({ dryRun: b.dryRun === true, ...r });
 };
 
+/** GET /api/events?q=&type=&ticket=&board=&source=&before=&limit= (type repeatable / comma-separated) */
+const events: Handler = (_kb, req, _p, ctx) => {
+  const q = req.query;
+  let limit: number | undefined;
+  const l = q.get("limit");
+  if (l !== null) {
+    if (!/^\d+$/.test(l) || Number(l) < 1 || Number(l) > 200) throw new KanbanError("invalid", "limit must be an integer 1..200");
+    limit = Number(l);
+  }
+  const types = q.getAll("type").flatMap((t) => t.split(",")).filter(Boolean);
+  const r = ctx.events?.query({
+    q: q.get("q") || undefined,
+    type: types.length ? types : undefined,
+    ticketId: q.get("ticket") || undefined,
+    board: q.get("board") || undefined,
+    source: q.get("source") || undefined,
+    before: q.get("before") || undefined,
+    limit,
+  }) ?? { events: [] };
+  return ok(r.nextCursor ? r : { events: r.events });
+};
+
+/** LEGACY: superseded by GET /api/events (automation.finished); kept for back-compat. */
 const automationLog: Handler = (_kb, _req, _p, ctx) => ok({ runs: ctx.log?.recent(20) ?? [] });
 
 const SAMPLE_STATUS = "done";
@@ -231,6 +256,7 @@ const routes: Route[] = [
   route("POST", "/api/fix", fix),
   route("GET", "/api/config", getConfig),
   route("PUT", "/api/config", putConfig),
+  route("GET", "/api/events", events),
   route("GET", "/api/automation/log", automationLog),
   route("POST", "/api/automation/test", automationTest),
 ];

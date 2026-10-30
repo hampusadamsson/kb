@@ -200,7 +200,7 @@ describe("static files", () => {
 
 async function openEvents(url: string) {
   const ac = new AbortController();
-  const res = await fetch(url + "/api/events", { signal: ac.signal });
+  const res = await fetch(url + "/api/stream", { signal: ac.signal });
   const reader = res.body!.getReader();
   const dec = new TextDecoder();
   let buf = "";

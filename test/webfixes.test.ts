@@ -64,7 +64,7 @@ describe("csrf", () => {
 
 describe("host allow-list", () => {
   it("rejects foreign Host on loopback for api, static and events", async () => {
-    for (const p of ["/api/board", "/", "/app.js", "/api/events"]) {
+    for (const p of ["/api/board", "/", "/app.js", "/api/stream"]) {
       expect(await raw(p, "evil.example:" + srv.port)).toBe(421);
       expect(await raw(p, "evil.example")).toBe(421);
       expect(await raw(p, "localhost:1")).toBe(421);
@@ -181,7 +181,7 @@ describe("headers", () => {
 describe("sse", () => {
   it("sends retry and fires on temp-file + rename-over", async () => {
     const ac = new AbortController();
-    const res = await fetch(srv.url + "/api/events", { signal: ac.signal });
+    const res = await fetch(srv.url + "/api/stream", { signal: ac.signal });
     const reader = res.body!.getReader();
     let buf = "";
     void (async () => {

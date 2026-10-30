@@ -13,6 +13,16 @@ import {
 } from "./automation.js";
 import { automationsFor, columnsFor, CONFIG_FILE, loadConfig, STARTER_CONFIG, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
+import {
+  clipText,
+  diffConfig,
+  isoWithOffset,
+  newEventId,
+  summarizeDiff,
+  type EventSink,
+  type KbEvent,
+  type KbEventSource,
+} from "./events.js";
 import { addComment, commentKey, idScalar, keyOf, readFile, render, updateFile } from "./frontmatter.js";
 import {
   duplicates,
@@ -141,6 +151,10 @@ export interface KanbanOptions {
   automations?: boolean;
   /** called when an automation run finishes */
   onAutomation?: (rec: AutomationRecord) => void;
+  /** audit event sink; absent → no events */
+  events?: EventSink;
+  /** who triggers the operations (default "unknown") */
+  source?: KbEventSource;
 }
 
 // ---- helpers ----
@@ -238,13 +252,29 @@ export class Kanban {
   private readonly automationsOn: boolean;
   private readonly onAutomation?: (rec: AutomationRecord) => void;
   private readonly inflight = new Set<Promise<void>>();
+  private readonly sink?: EventSink;
+  private readonly source: KbEventSource;
 
   constructor(opts: KanbanOptions) {
+    this.sink = opts.events;
+    this.source = opts.source ?? "unknown";
     this.dir = opts.dir;
     this.now = opts.now ?? (() => new Date());
     this.runner = opts.runner;
     this.automationsOn = opts.automations !== false;
     this.onAutomation = opts.onAutomation;
+  }
+
+  /** Emit an audit event. Never throws. */
+  private emit(type: KbEvent["type"], summary: string, data: Record<string, unknown>, ref: Partial<Pick<KbEvent, "board" | "ticketId" | "ticketName" | "path">> = {}): void {
+    if (!this.sink) return;
+    try {
+      const d = this.now();
+      const e: KbEvent = { id: newEventId(d), ts: isoWithOffset(d), type, source: this.source, ...ref, summary, data };
+      this.sink.emit(e);
+    } catch {
+      // auditing must never break an operation
+    }
   }
 
   /** Resolves when all in-flight automation runs (incl. status writes) are finished. */
@@ -283,13 +313,22 @@ export class Kanban {
   /** Start matching automations for an event on the ticket at `rel` (state after the write). Never throws. */
   private dispatch(config: Config, rel: string, event: AutomationEvent): void {
     const runner = this.runner;
-    if (!runner || !this.automationsOn) return;
+    const off = !runner || !this.automationsOn;
+    if (off && !this.sink) return;
     try {
       const ticket = scan(this.dir, config).tickets.find((t) => t.path === rel);
       if (!ticket) return;
+      const ref = { board: ticket.board, ticketId: String(ticket.id), ticketName: ticket.name, path: rel };
       for (const rule of automationsFor(config, ticket.board)) {
-        if (!matchRule(rule, event, ticket)) continue;
+        if (!matchRule({ ...rule, enabled: true }, event, ticket)) continue;
+        if (off || rule.enabled === false) {
+          const reason = rule.enabled === false ? "rule-disabled" : "automations-off";
+          this.emit("automation.skipped", `automation "${rule.name}" skipped on #${String(ticket.id)} (${reason})`, { rule: rule.name, reason, event }, ref);
+          continue;
+        }
+        const startMs = this.now().getTime();
         const startedAt = commentKey(this.now(), true);
+        this.emit("automation.started", `automation "${rule.name}" started on #${String(ticket.id)}`, { rule: rule.name, event }, ref);
         this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "running", at: startedAt });
         const rec = (command: string, result: RunResult): AutomationRecord => ({
           board: ticket.board,
@@ -307,6 +346,15 @@ export class Kanban {
           const entry: Record<string, unknown> = { status: r.status, at: r.finishedAt, exit: r.result.exitCode };
           if (r.result.error) entry.error = r.result.error;
           this.writeAutomationStatus(rel, ticket.id, rule.name, entry);
+          const data: Record<string, unknown> = {
+            rule: rule.name,
+            status: r.status,
+            exit: r.result.exitCode,
+            durationMs: this.now().getTime() - startMs,
+            command: clipText(r.command),
+          };
+          if (r.result.error) data.error = r.result.error;
+          this.emit("automation.finished", `automation "${rule.name}" ${r.status} on #${String(ticket.id)}`, data, ref);
           try {
             this.onAutomation?.(r);
           } catch {
@@ -323,7 +371,7 @@ export class Kanban {
         const p: Promise<void> = (async () => {
           let result: RunResult;
           try {
-            result = await runner.run(command, { cwd: this.dir, env: { KB_AUTOMATION: "1" } });
+            result = await runner!.run(command, { cwd: this.dir, env: { KB_AUTOMATION: "1" } });
           } catch (e) {
             result = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
           }
@@ -355,7 +403,28 @@ export class Kanban {
    * for renamed columns/boards, and refuses to drop a column that tickets still use.
    */
   updateConfig(config: unknown, opts: UpdateConfigOptions = {}): UpdateConfigResult {
-    return updateConfigFile(this.dir, config, opts);
+    let before: Config | undefined;
+    if (this.sink && !opts.dryRun) {
+      try {
+        before = loadConfig(this.dir);
+      } catch {
+        before = undefined;
+      }
+    }
+    const r = updateConfigFile(this.dir, config, opts);
+    if (before && !opts.dryRun && (r.configChanged || r.changes.length)) {
+      try {
+        const diff = diffConfig(before, loadConfig(this.dir), opts.renames);
+        this.emit("config.updated", summarizeDiff(diff, r.changes.length), {
+          ...diff,
+          ticketsMigrated: r.changes.length,
+          tickets: r.changes.slice(0, 50).map((c) => ({ path: c.path, field: c.field, from: c.from, to: c.to })),
+        });
+      } catch {
+        // ignore
+      }
+    }
+    return r;
   }
 
   /** Read config and scan all tickets. */
@@ -456,6 +525,19 @@ export class Kanban {
       throw e;
     }
     const rel2 = path.relative(this.dir, abs);
+    this.emit(
+      "ticket.created",
+      `#${id} created in ${status}: ${input.name}`,
+      {
+        status,
+        board,
+        labels,
+        props: Object.fromEntries(extra),
+        hasBody: body !== "",
+        hasComment: input.comment !== undefined,
+      },
+      { board, ticketId: id, ticketName: input.name, path: rel2 },
+    );
     this.dispatch(config, rel2, { type: "created_in", to: status });
     return { id, path: rel2, warnings };
   }
@@ -495,10 +577,62 @@ export class Kanban {
     if (patch.comment !== undefined) addComment(doc, patch.comment, this.now());
     const body = patch.body !== undefined ? bodyText(patch.body) : oldBody;
     fs.writeFileSync(abs, render(doc, body, crlf));
+    if (this.sink) this.emitUpdate(config, t, patch, oldBody, body, extra, unset);
     if (patch.status !== undefined && patch.status !== t.status) {
       this.dispatch(config, t.path, { type: "moved_to", from: t.status, to: patch.status });
     }
     return { id: t.id, warnings };
+  }
+
+  /** One event per kind of change actually made (old ticket vs patch). */
+  private emitUpdate(
+    config: Config,
+    t: Ticket,
+    patch: Patch,
+    oldBody: string,
+    newBody: string,
+    extra: [string, unknown][],
+    unset: string[],
+  ): void {
+    const tid = String(t.id ?? "?");
+    const newBoard = patch.board ?? t.board;
+    const ref = { board: newBoard, ticketId: tid, ticketName: patch.name ?? t.name, path: t.path };
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    void config;
+    if (patch.board !== undefined && patch.board !== t.board) {
+      this.emit("ticket.board", `#${tid} board ${t.board} → ${patch.board}`, { from: t.board, to: patch.board }, ref);
+    }
+    if (patch.status !== undefined && patch.status !== t.status) {
+      this.emit("ticket.moved", `#${tid} moved ${t.status ?? "(none)"} → ${patch.status}`, { from: t.status ?? null, to: patch.status }, ref);
+    }
+    if (patch.name !== undefined && patch.name !== t.name) {
+      this.emit("ticket.renamed", `#${tid} renamed "${t.name}" → "${patch.name}"`, { from: t.name, to: patch.name }, ref);
+    }
+    const added = [...new Set(patch.addLabels ?? [])].filter((l) => !t.labels.includes(l));
+    const removed = [...new Set(patch.removeLabels ?? [])].filter((l) => t.labels.includes(l) && !added.includes(l));
+    if (added.length || removed.length) {
+      const bits = [...added.map((l) => `+${l}`), ...removed.map((l) => `-${l}`)];
+      this.emit("ticket.labels", `#${tid} labels ${bits.join(" ")}`, { added, removed }, ref);
+    }
+    const set: Record<string, unknown> = {};
+    const old: Record<string, unknown> = {};
+    for (const [k, v] of extra) {
+      if (Object.hasOwn(t.props, k) && same(t.props[k], v)) continue;
+      set[k] = v;
+      if (Object.hasOwn(t.props, k)) old[k] = t.props[k];
+    }
+    const unsetKeys = [...new Set(unset)].filter((k) => Object.hasOwn(t.props, k) && !(k in set));
+    for (const k of unsetKeys) old[k] = t.props[k];
+    if (Object.keys(set).length || unsetKeys.length) {
+      const bits = [...Object.keys(set).map((k) => `${k}=${clipText(JSON.stringify(set[k]) ?? "", 40)}`), ...unsetKeys.map((k) => `-${k}`)];
+      this.emit("ticket.props", `#${tid} props ${bits.join(" ")}`, { set, unset: unsetKeys, old }, ref);
+    }
+    if (patch.body !== undefined && newBody !== oldBody) {
+      this.emit("ticket.body", `#${tid} body changed (${oldBody.length} → ${newBody.length} chars)`, { changed: true, fromLength: oldBody.length, toLength: newBody.length }, ref);
+    }
+    if (patch.comment !== undefined) {
+      this.emit("ticket.comment", `#${tid} comment: ${clipText(patch.comment, 80)}`, { text: clipText(patch.comment) }, ref);
+    }
   }
 
   move(idArg: string, status: string): UpdateResult {
@@ -513,6 +647,12 @@ export class Kanban {
     if (doc.errors.length) throw new KanbanError("parse", `${t.path}: ${doc.errors[0].message}`);
     const key = addComment(doc, text, this.now());
     fs.writeFileSync(abs, render(doc, body, crlf));
+    this.emit(
+      "ticket.comment",
+      `#${String(t.id ?? "?")} comment: ${clipText(text, 80)}`,
+      { key, text: clipText(text) },
+      { board: t.board, ticketId: String(t.id ?? "?"), ticketName: t.name, path: t.path },
+    );
     return key;
   }
 
@@ -608,6 +748,11 @@ export class Kanban {
       pool.push({ id });
       if (!dryRun) setId(path.join(this.dir, t.path), id);
       changes.push({ path: t.path, from: hasId(t) ? t.id : undefined, to: id });
+    }
+    if (!dryRun && changes.length) {
+      this.emit("ids.fixed", `fixed ${changes.length} id(s)`, {
+        changes: changes.map((c) => ({ path: c.path, from: c.from === undefined ? null : String(c.from), to: c.to })),
+      });
     }
     return changes;
   }

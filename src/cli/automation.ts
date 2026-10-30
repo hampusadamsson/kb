@@ -1,11 +1,17 @@
+import { createEventLog } from "../eventLog.js";
 import { createAutomationLog } from "../automationLog.js";
-import { createKanban, type Kanban } from "../core/index.js";
+import { createKanban, type Kanban, type KanbanOptions } from "../core/index.js";
 import type { AutomationRecord } from "../core/automation.js";
 import { createShellRunner } from "../runner.js";
 
 /** Automations are off inside script runs (KB_AUTOMATION set) or with --no-automation. */
 export function automationEnabled(flagOff: boolean): boolean {
   return !flagOff && !process.env.KB_AUTOMATION;
+}
+
+/** Event-log options for CLI-created Kanbans; scripts run by automations (KB_AUTOMATION) log as "automation". */
+export function eventOpts(cwd: string): Pick<KanbanOptions, "events" | "source"> {
+  return { events: createEventLog(cwd), source: process.env.KB_AUTOMATION ? "automation" : "cli" };
 }
 
 export interface AutomationSession {
@@ -23,6 +29,7 @@ export function automationSession(enabled: boolean): AutomationSession {
       const log = createAutomationLog(cwd);
       const kb = createKanban({
         dir: cwd,
+        ...eventOpts(cwd),
         runner,
         automations: enabled,
         onAutomation: (rec) => {

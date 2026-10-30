@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createKanban } from "../core/index.js";
 import type { AutomationLog } from "../automationLog.js";
+import { createEventLog, type EventLog } from "../eventLog.js";
 import type { AutomationRunner } from "../core/automation.js";
 import { errorResponse, handleApi } from "./api.js";
 import { EventHub } from "./watch.js";
@@ -16,7 +17,10 @@ export interface ServerOptions {
   now?: () => Date;
   /** runs automations; absent → none run */
   runner?: AutomationRunner;
+  /** legacy automation log */
   log?: AutomationLog;
+  /** audit event log (default: <dir>/.kb/events.log) */
+  events?: EventLog;
 }
 
 export interface RunningServer {
@@ -163,6 +167,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const wanted = opts.port ?? DEFAULT_PORT;
   const dir = path.resolve(opts.dir);
   const hub = new EventHub(dir);
+  const events = opts.events ?? createEventLog(dir);
   const loopback = ["127.0.0.1", "::1", "localhost"].includes(host.toLowerCase());
   const pending = new Set<Promise<void>>();
   let allowedHosts: Set<string> | undefined; // set once the port is known; undefined = no check
@@ -184,7 +189,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     if (writes && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
       return sendJson(res, 415, { error: "content-type must be application/json", code: "unsupported" });
     }
-    if (url.pathname === "/api/events") {
+    if (url.pathname === "/api/stream") {
       if (method !== "GET") return sendJson(res, 405, { error: "method not allowed", code: "method-not-allowed" });
       return hub.add(res);
     }
@@ -193,9 +198,11 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       dir,
       now: opts.now,
       runner: opts.runner,
+      events,
+      source: "web",
       onAutomation: opts.log ? (rec) => opts.log!.append(rec) : undefined,
     }); // fresh view per request
-    const r = await handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log });
+    const r = await handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log, events });
     if (opts.runner) {
       const p = kb.settled().catch(() => {});
       pending.add(p);

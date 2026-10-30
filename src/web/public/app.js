@@ -188,7 +188,7 @@ const onChanged = debounce(() => {
 }, 100);
 
 function connect() {
-  const es = new EventSource("/api/events");
+  const es = new EventSource("/api/stream");
   const live = $("live");
   const set = (ok) => {
     live.classList.toggle("ok", ok);

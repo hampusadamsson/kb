@@ -7,6 +7,10 @@ const KEEP_LINES = 200;
 const TAIL_BYTES = 256 * 1024;
 const OUT_CAP = 4 * 1024;
 
+/**
+ * LEGACY: kept for back-compat (GET /api/automation/log, .kb/automation.log).
+ * The UI should use automation.finished events from the event log (src/eventLog.ts) going forward.
+ */
 export interface AutomationLog {
   append(rec: AutomationRecord): void;
   /** newest first */

@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createKanban, hasChanges, KanbanError, parseProperty, type Kanban, type Patch, type Warning } from "../../core/index.js";
 import { fmtWarning } from "../format.js";
+import { eventOpts } from "../automation.js";
 
 export interface Io {
   warn: (msg: string) => void;
@@ -56,7 +57,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
   if (name !== undefined && o.name !== undefined && name !== o.name) {
     throw new KanbanError("invalid", "name given twice with different values");
   }
-  const kb = (io.kanban ?? ((d) => createKanban({ dir: d })))(cwd);
+  const kb = (io.kanban ?? ((d) => createKanban({ dir: d, ...eventOpts(d) })))(cwd);
   const r = kb.add({
     name: (o.name ?? name) as string,
     status: o.status,
@@ -74,7 +75,7 @@ export function add(cwd: string, name: string | undefined, o: AddOpts, io: Io = 
 }
 
 export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): string {
-  const kb = (io.kanban ?? ((d) => createKanban({ dir: d })))(cwd);
+  const kb = (io.kanban ?? ((d) => createKanban({ dir: d, ...eventOpts(d) })))(cwd);
   const t = kb.get(id);
   const patch: Patch = {
     name: o.name,
@@ -98,7 +99,7 @@ export function mv(cwd: string, id: string, status: string, io: Io = defaultIo):
 }
 
 export function comment(cwd: string, id: string, text: string, now = new Date()): string {
-  return createKanban({ dir: cwd, now: () => now }).comment(id, text);
+  return createKanban({ dir: cwd, now: () => now, ...eventOpts(cwd) }).comment(id, text);
 }
 
 export function edit(cwd: string, id: string): void {
