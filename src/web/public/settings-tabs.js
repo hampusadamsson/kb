@@ -30,6 +30,7 @@ export function tabList(initial, getActive, select) {
             tabIndex: on ? 0 : -1,
             onclick: () => select(it.id),
           },
+          it.running ? h("span", { class: "sdot running tab-run", "aria-hidden": "true" }) : null,
           h("span", { text: it.label }),
           it.dirty ? h("span", { class: "dirty", title: "Unsaved changes", "aria-label": "unsaved changes", text: "•" }) : null,
         ),

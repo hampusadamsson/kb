@@ -16,8 +16,22 @@ export interface RunResult {
   error?: string;
 }
 
+/** Error text of a run terminated by the user (web Kill button). */
+export const KILLED_BY_USER = "killed by user";
+
+/** Describes what a run is for (informational; runners may register it). */
+export interface RunMeta {
+  board?: string;
+  rule?: string;
+  ticketId?: string;
+  ticketName?: string;
+  path?: string;
+  /** a test run from the settings UI */
+  test?: boolean;
+}
+
 export interface AutomationRunner {
-  run(command: string, opts: { cwd: string; env: Record<string, string> }): Promise<RunResult>;
+  run(command: string, opts: { cwd: string; env: Record<string, string>; meta?: RunMeta }): Promise<RunResult>;
 }
 
 export interface AutomationRecord {

@@ -3,6 +3,8 @@ import { api } from "./api.js";
 import { h, clear, toast } from "./dom.js";
 import { automationList } from "./automations.js";
 import * as logs from "./logs.js";
+import * as live from "./live.js";
+import { liveLabel } from "./live-logic.js";
 import { tabList, tabPanel } from "./settings-tabs.js";
 import {
   checkForm,
@@ -30,9 +32,21 @@ let busy = false;
 
 export const isOpen = () => dlg().open;
 
+let liveChanged = () => {};
+/** Called by app.js with a callback for when the number of running automations changes. */
+export function onLiveChange(cb) {
+  liveChanged = cb;
+}
+export const refreshLive = () => live.refresh();
+export const liveCount = () => live.count();
+
 export function init(applied, logsCtx) {
   onApplied = applied;
-  if (logsCtx) logs.configure(logsCtx);
+  if (logsCtx) {
+    logs.configure(logsCtx);
+    live.configure({ openTicket: logsCtx.openTicket, onChange: () => (refreshTabs(), liveChanged()) });
+  }
+  dlg().addEventListener("close", () => live.unmount());
   dlg().addEventListener("mousedown", (e) => {
     dlg().dataset.bd = e.target === dlg() ? "1" : "";
   });
@@ -112,6 +126,7 @@ function tabItems() {
   return [
     { id: "config", label: "Config", dirty: d.config, error: bad === "config" },
     { id: "automations", label: "Automations", dirty: d.automations, error: bad === "automations" },
+    { id: "live", label: liveLabel(live.count()), running: live.count() > 0 },
     { id: "health", label: n ? `Health (${n})` : "Health" },
     { id: "logs", label: "Logs" },
   ];
@@ -149,6 +164,7 @@ async function renderPanel() {
   slot.replaceChildren(panel);
   if (activeTab === "health") return void panel.append(...(await healthPanel()));
   if (activeTab === "logs") return void logs.mount(panel);
+  if (activeTab === "live") return void live.mount(panel);
   if (!form) return void panel.append(h("p", { class: "form-error", text: formError || "Cannot load the config." }));
   if (activeTab === "config") panel.append(configPanel());
   else panel.append(automationsPanel());
@@ -157,7 +173,7 @@ async function renderPanel() {
 const rerenderConfig = () => {
   refreshTabs();
   const panel = document.querySelector(".set-panel");
-  if (!panel || activeTab === "health" || activeTab === "logs") return;
+  if (!panel || activeTab === "health" || activeTab === "logs" || activeTab === "live") return;
   const keep = panel.scrollTop;
   renderPanel().then(() => {
     const p = document.querySelector(".set-panel");

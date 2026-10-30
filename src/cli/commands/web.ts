@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createKanban } from "../../core/index.js";
 import { createAutomationLog } from "../../automationLog.js";
+import { LiveRuns } from "../../liveRuns.js";
 import { createShellRunner } from "../../runner.js";
 import { startServer, type RunningServer } from "../../web/server.js";
 
@@ -55,13 +56,15 @@ export async function runWeb(cwd: string, opts: WebOpts, io: WebIO): Promise<Run
   const port = explicit ? parsePort(opts.port as string | number) : 4747;
   createKanban({ dir: cwd }).load(); // throws if config missing/invalid
 
-  const runner = opts.automation === false ? undefined : createShellRunner();
+  const live = new LiveRuns();
+  const runner = opts.automation === false ? undefined : createShellRunner({ registry: live });
   const server = await startServer({
     dir: cwd,
     host,
     port,
     strictPort: explicit,
     runner,
+    live,
     log: createAutomationLog(cwd),
   });
   const wildcard = host === "0.0.0.0" || host === "::";

@@ -4,6 +4,7 @@ import type { EventLog } from "../eventLog.js";
 import type { AutomationRunner } from "../core/automation.js";
 import { renderCommand } from "../core/automation.js";
 import { KanbanError, type Kanban, type Patch } from "../core/index.js";
+import type { LiveRuns } from "../liveRuns.js";
 import { duplicateKeys, toDetail, toView } from "./view.js";
 
 export interface ApiRequest {
@@ -42,6 +43,7 @@ export interface ApiContext {
   runner?: AutomationRunner;
   log?: AutomationLog;
   events?: EventLog;
+  live?: LiveRuns;
 }
 
 type Handler = (kb: Kanban, req: ApiRequest, params: string[], ctx: ApiContext) => ApiResponse | Promise<ApiResponse>;
@@ -197,6 +199,14 @@ const events: Handler = (_kb, req, _p, ctx) => {
 /** LEGACY: superseded by GET /api/events (automation.finished); kept for back-compat. */
 const automationLog: Handler = (_kb, _req, _p, ctx) => ok({ runs: ctx.log?.recent(20) ?? [] });
 
+const automationRuns: Handler = (_kb, _req, _p, ctx) =>
+  !ctx.runner || !ctx.live ? ok({ runs: [], disabled: true }) : ok({ runs: ctx.live.list() });
+
+const automationKill: Handler = (_kb, _req, p, ctx) => {
+  if (!ctx.live || !ctx.live.kill(p[0])) return fail(404, "not-found", `no running automation ${p[0]}`);
+  return ok({ ok: true }, 202);
+};
+
 const SAMPLE_STATUS = "done";
 const MAX_TEST_RUNS = 2;
 let testRuns = 0;
@@ -229,7 +239,7 @@ const automationTest: Handler = async (kb, req, _p, ctx) => {
   if (testRuns >= MAX_TEST_RUNS) return fail(429, "busy", "too many test runs in progress; try again shortly");
   testRuns++;
   try {
-    const result = await ctx.runner.run(command, { cwd: kb.dir, env: { KB_AUTOMATION: "1" } });
+    const result = await ctx.runner.run(command, { cwd: kb.dir, env: { KB_AUTOMATION: "1" }, meta: { test: true, board: vars.board } });
     return ok({ command, result });
   } finally {
     testRuns--;
@@ -260,6 +270,8 @@ const routes: Route[] = [
   route("GET", "/api/events", events),
   route("GET", "/api/automation/log", automationLog),
   route("POST", "/api/automation/test", automationTest),
+  route("GET", "/api/automation/runs", automationRuns),
+  route("POST", "/api/automation/runs/:id/kill", automationKill),
 ];
 
 /** Pure request handler: no HTTP, just the Kanban core. */

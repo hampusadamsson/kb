@@ -13,6 +13,7 @@ import {
   type AutomationRecord,
   type AutomationRunner,
   type RunResult,
+  KILLED_BY_USER,
 } from "./automation.js";
 import { automationsFor, columnsFor, CONFIG_FILE, loadConfig, STARTER_CONFIG, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
@@ -375,6 +376,7 @@ export class Kanban {
             command: clipText(r.command),
           };
           if (r.result.error) data.error = r.result.error;
+          if (r.result.error === KILLED_BY_USER) data.killed = true;
           this.emit("automation.finished", `automation "${rule.name}" ${r.status} on #${String(ticket.id)}`, data, ref);
           try {
             this.onAutomation?.(r);
@@ -392,7 +394,11 @@ export class Kanban {
         const p: Promise<void> = (async () => {
           let result: RunResult;
           try {
-            result = await runner!.run(command, { cwd: this.dir, env: { KB_AUTOMATION: "1" } });
+            result = await runner!.run(command, {
+              cwd: this.dir,
+              env: { KB_AUTOMATION: "1" },
+              meta: { board: ticket.board, rule: rule.name, ticketId: String(ticket.id), ticketName: ticket.name, path: rel },
+            });
           } catch (e) {
             result = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
           }

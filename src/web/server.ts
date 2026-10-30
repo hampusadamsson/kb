@@ -6,6 +6,7 @@ import { createKanban } from "../core/index.js";
 import type { AutomationLog } from "../automationLog.js";
 import { createEventLog, type EventLog } from "../eventLog.js";
 import type { AutomationRunner } from "../core/automation.js";
+import type { LiveRuns } from "../liveRuns.js";
 import { errorResponse, handleApi } from "./api.js";
 import { EventHub } from "./watch.js";
 
@@ -17,6 +18,8 @@ export interface ServerOptions {
   now?: () => Date;
   /** runs automations; absent → none run */
   runner?: AutomationRunner;
+  /** registry the runner reports running automations to (enables the Live tab and kill) */
+  live?: LiveRuns;
   /** legacy automation log */
   log?: AutomationLog;
   /** audit event log (default: <dir>/.kb/events.log) */
@@ -168,6 +171,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const dir = path.resolve(opts.dir);
   const hub = new EventHub(dir);
   const events = opts.events ?? createEventLog(dir);
+  const offRuns = opts.live?.onChange(() => hub.notifyRuns());
   const loopback = ["127.0.0.1", "::1", "localhost"].includes(host.toLowerCase());
   const pending = new Set<Promise<void>>();
   let allowedHosts: Set<string> | undefined; // set once the port is known; undefined = no check
@@ -202,7 +206,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       source: "web",
       onAutomation: opts.log ? (rec) => opts.log!.append(rec) : undefined,
     }); // fresh view per request
-    const r = await handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log, events });
+    const r = await handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log, events, live: opts.live });
     if (opts.runner) {
       const p = kb.settled().catch(() => {});
       pending.add(p);
@@ -253,6 +257,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
+        offRuns?.();
         hub.close();
         server.close((err) => (err ? reject(err) : resolve()));
         server.closeAllConnections();

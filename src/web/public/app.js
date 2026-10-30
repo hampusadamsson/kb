@@ -212,10 +212,19 @@ function connect() {
     set(false);
   });
   es.addEventListener("changed", onChanged);
+  es.addEventListener("runs", () => settings.refreshLive());
 }
+
+// Header dot while automations run
+settings.onLiveChange(() => {
+  const n = settings.liveCount();
+  $("settings-run").hidden = n === 0;
+  $("settings-btn").title = n ? `${n} automation${n === 1 ? "" : "s"} running` : "";
+});
 
 // ---- boot ----
 
 filters.set(state.filters);
 connect();
 load();
+settings.refreshLive();

@@ -60,6 +60,11 @@ export class EventHub {
     }, wait);
   }
 
+  /** Tell clients the set of running automations changed. */
+  notifyRuns(): void {
+    this.broadcast("event: runs\ndata: {}\n\n");
+  }
+
   private broadcast(msg: string): void {
     for (const res of this.clients) res.write(msg);
   }

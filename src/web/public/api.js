@@ -46,6 +46,8 @@ export const api = {
   validate: () => request("GET", "/api/validate"),
   testAutomation: (body) => request("POST", "/api/automation/test", body),
   automationLog: () => request("GET", "/api/automation/log"),
+  automationRuns: () => request("GET", "/api/automation/runs"),
+  killRun: (id) => request("POST", `/api/automation/runs/${enc(id)}/kill`, {}),
   events: (params) => request("GET", "/api/events" + (params ? "?" + params : "")),
   fix: (dryRun) => request("POST", "/api/fix", { dryRun }),
 };

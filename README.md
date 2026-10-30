@@ -573,6 +573,14 @@ The **Logs** tab shows a table, newest first: Time (relative; absolute on hover)
 
 The same data is available from `GET /api/events` (see [REST API](#rest-api)).
 
+### Settings → Live
+
+The **Live** tab lists automation runs in progress in this `kb web` server (rule runs and Test runs). The tab shows `Live (n)` and a pulsing yellow dot (also on the Settings button) while something runs. Each row shows rule (or *Test run*), board, ticket link (opens the ticket), start time, ticking elapsed `mm:ss`, a timeout progress bar, the command, and an expandable tail (~2 KB) of stdout/stderr. **Kill** asks for confirmation, then sends SIGTERM to the process group and SIGKILL after 2 s. A killed rule run is written to the ticket as `status: failed`, `exit: null`, `error: killed by user`, and its `automation.finished` event has `error: "killed by user"` and `killed: true`. Finished runs are in Logs. With `--no-automation` the tab says automations are disabled.
+
+- `GET /api/automation/runs` → `{ runs }` newest first (`runId, kind: rule|test, board?, rule?, ticketId?, ticketName?, path?, command, pid, startedAt, timeoutMs, elapsedMs, output`); disabled → `{ runs: [], disabled: true }`.
+- `POST /api/automation/runs/:id/kill` → 202 `{ ok: true }`; unknown/finished id → 404 `not-found`. Same-origin guards apply.
+- SSE `runs` event on `/api/stream` when a run starts, finishes or is killed (`changed` is unaffected). The open tab also polls every 2 s for the output tail.
+
 ### Legacy automation log
 
 `.kb/automation.log` and `GET /api/automation/log` (last 20 finished runs, newest first) are still written and served for backward compatibility; the UI no longer uses them. `automation.finished` events carry the same run info (command, exit, duration) but not stdout/stderr.
@@ -607,6 +615,7 @@ kb web [--host <addr>] [--port <n>] [--no-open]
   - Renaming a column rewrites `status` on every ticket using it; renaming a board rewrites an explicit `board:`. Before anything is written the UI shows how many ticket files will change (dry run) and asks to confirm.
   - Removing a column is **blocked** while tickets still use it (the error lists them). Removing a board override is allowed; its tickets fall back to the default columns. Unsorted tickets never block.
   - Invalid configs (empty/duplicate columns, empty name or glob) are refused and nothing is written. If `kanban.yaml` changes on disk while the form is open, a banner offers **Reload** (and **Overwrite** after a stale save).
+  - *Live* tab: automation runs currently in progress, see [Settings → Live](#settings--live). Tab order: Config / Automations / Live / Health / Logs.
   - *Health* tab: `validate` results and board warnings; `fix` with a dry-run preview before applying. Parse errors are shown only here.
   - *Logs* tab: the audit event table, see [Settings → Logs](#settings--logs). Automation run history lives here (filter *Automations*); the old *Last runs* list is gone.
 - Tickets with duplicate ids or no id are read-only and carry badges (use `fix`).
@@ -648,7 +657,9 @@ JSON in and out. Errors: `{ "error": "...", "code": "..." }`.
 | `POST /api/automation/test` | Render and really run a script with a sample ticket (see [Automations](#automations)) |
 | `GET /api/automation/log` | Legacy: `{ runs }`, the last 20 automation runs, newest first |
 | `GET /api/events` | Audit events (query below) |
-| `GET /api/stream` | SSE stream (`changed` events; was `/api/events`) |
+| `GET /api/stream` | SSE stream (`changed` and `runs` events; was `/api/events`) |
+| `GET /api/automation/runs` | Automation runs in progress (Live tab) |
+| `POST /api/automation/runs/:id/kill` | Kill a running automation (202; 404 if not running) |
 
 `GET /api/events` query (all optional): `q` (substring search), `type` (event type; repeat the param or comma-separate; a trailing `.*` matches a prefix, e.g. `ticket.*`), `ticket` (ticket id), `board`, `source` (`cli`/`web`/`automation`), `before` (event id cursor: only older events), `limit` (integer 1..200, default 50; otherwise 400 `invalid`). Returns `{ events, nextCursor? }`, newest first; pass `nextCursor` as `before` for the next page. See [Activity log](#activity-log-audit-events).
 
