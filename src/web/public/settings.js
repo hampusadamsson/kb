@@ -1,6 +1,7 @@
 // Settings dialog: board config form (kanban.yaml), health (validate + warnings), fix ids.
 import { api } from "./api.js";
 import { h, clear, toast } from "./dom.js";
+import { automationList, lastRuns } from "./automations.js";
 import {
   checkForm,
   configToForm,
@@ -101,6 +102,7 @@ async function renderAll() {
     section("Errors", v.errors, "error"),
     section("Warnings", v.warnings, "warn"),
     boardSection(),
+    await lastRuns(),
     h(
       "div",
       { class: "fix-area" },
@@ -150,7 +152,8 @@ function configSection() {
       h("div", { class: "field" }, h("label", { text: "Ticket files (glob)" }), input(form.glob, (v) => ((form.glob = v), rerenderDirty()), "Glob")),
     ),
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Columns (in order)" }), columnList(form.columns, rerenderDirty)),
-    h("span", { class: "lbl", text: "Per-board columns (optional overrides)" }),
+    h("div", { class: "field" }, h("span", { class: "lbl", text: "Automations (default board)" }), automationList({ rules: form.automations, cols: form.columns, board: () => form.name.trim(), onChange: rerenderDirty })),
+    h("span", { class: "lbl", text: "Per-board columns and automations (optional overrides)" }),
     h(
       "div",
       { class: "board-overrides" },
@@ -174,6 +177,8 @@ function configSection() {
             }),
           ),
           columnList(b.columns, rerenderDirty),
+          h("span", { class: "lbl", text: "Automations" }),
+          automationList({ rules: b.automations, cols: b.columns, board: () => b.name.trim(), onChange: rerenderDirty }),
         ),
       ),
       h("button", {
@@ -181,7 +186,7 @@ function configSection() {
         class: "btn small",
         text: "+ Add board override",
         onclick: () => {
-          form.boards.push({ orig: null, name: "", columns: [{ orig: null, value: "" }] });
+          form.boards.push({ orig: null, name: "", columns: [{ orig: null, value: "" }], automations: [] });
           rerenderConfig();
         },
       }),

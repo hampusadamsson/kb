@@ -20,6 +20,8 @@ export interface TicketDetail extends TicketView {
   comments: Record<string, string>;
   /** parsed frontmatter, including reserved keys */
   data: Record<string, unknown>;
+  /** per-rule automation status written by the runner: name → {status, at, exit?, error?} */
+  automations: Record<string, unknown>;
 }
 
 /** Keys of ids shared by more than one ticket. */
@@ -46,6 +48,11 @@ export function toView(t: Ticket, dups: Set<string>): TicketView {
   };
 }
 
+function automationsOf(data: Record<string, unknown>): Record<string, unknown> {
+  const a = data.automations;
+  return a && typeof a === "object" && !Array.isArray(a) ? (a as Record<string, unknown>) : {};
+}
+
 export function toDetail(t: Ticket, dups: Set<string>): TicketDetail {
-  return { ...toView(t, dups), body: t.body, comments: t.comments, data: t.data };
+  return { ...toView(t, dups), body: t.body, comments: t.comments, data: t.data, automations: automationsOf(t.data) };
 }

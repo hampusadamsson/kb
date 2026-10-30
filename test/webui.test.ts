@@ -152,3 +152,49 @@ describe("settings form logic", async () => {
     expect(L.describeTicketChange({ path: "a.md", field: "board", from: "x", to: undefined })).toBe("a.md: board x → (default board)");
   });
 });
+
+describe("automation form logic", async () => {
+  const L = await import("../src/web/public/logic.js");
+  const rule = { name: "r", when: { moved_to: "done", labels: ["bug"], props: { n: 1, k: "v" } }, run: "echo {{ id }}" };
+  const cfg = () => ({
+    name: "default", glob: "*.md", columns: ["todo", "done"], automations: [structuredClone(rule)],
+    boards: { b: { columns: ["x", "y"], automations: [{ name: "q", when: { created_in: "x" }, run: "true", enabled: false }] } },
+  });
+
+  it("round-trips rules (typed props kept) and omits empty automations", () => {
+    const f = L.configToForm(cfg());
+    expect(L.formToPayload(f).config).toEqual(cfg());
+    expect(L.formDirty(f, cfg())).toBe(false);
+    const plain = { name: "default", glob: "*.md", columns: ["todo"], boards: {} };
+    expect(L.formToPayload(L.configToForm(plain)).config).toEqual(plain);
+  });
+
+  it("retargets rules on column rename and edits props", () => {
+    const f = L.configToForm(cfg());
+    f.columns[1].value = "shipped";
+    f.boards[0].columns[0].value = "ex";
+    f.automations[0].props[0].value = "2";
+    const p = L.formToPayload(f).config;
+    expect(p.automations[0].when.moved_to).toBe("shipped");
+    expect(p.automations[0].when.props).toEqual({ n: "2", k: "v" });
+    expect(p.boards.b.automations[0].when.created_in).toBe("ex");
+    expect(L.checkForm(f)).toBe("");
+  });
+
+  it("checkForm: removed column, blanks, duplicates", () => {
+    let f = L.configToForm(cfg());
+    f.columns[1].value = "";
+    expect(L.checkForm(f)).toMatch(/Cannot remove column "done": used by automation "r"/);
+    f = L.configToForm(cfg()); f.automations[0].name = " "; expect(L.checkForm(f)).toMatch(/no name/);
+    f = L.configToForm(cfg()); f.automations[0].run = " "; expect(L.checkForm(f)).toMatch(/empty script/);
+    f = L.configToForm(cfg()); f.automations.push({ ...L.newRule(f.columns), name: "r", run: "x" }); expect(L.checkForm(f)).toMatch(/Duplicate automation name "r"/);
+    f = L.configToForm(cfg()); f.automations[0].column = "nope"; expect(L.checkForm(f)).toMatch(/"nope"/);
+  });
+
+  it("test helpers", () => {
+    expect(L.testBody({ run: "x", event: "created_in" }, "b")).toEqual({ run: "x", event: "created_in", board: "b" });
+    expect(L.describeTestRun({ command: "echo 1", result: { exitCode: 0, stdout: "1\n", stderr: "" } })).toBe("$ echo 1\nexit: 0\n--- stdout ---\n1");
+    expect(L.describeAutomations({ r: { status: "done", at: "T" } })).toEqual(["r: done at T"]);
+    expect(L.describeAutomations(undefined)).toEqual([]);
+  });
+});

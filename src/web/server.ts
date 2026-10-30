@@ -192,7 +192,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       runner: opts.runner,
       onAutomation: opts.log ? (rec) => opts.log!.append(rec) : undefined,
     }); // fresh view per request
-    const r = handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log });
+    const r = await handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log });
     sendJson(res, r.status, r.body);
   };
 

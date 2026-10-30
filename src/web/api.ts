@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { AutomationLog } from "../automationLog.js";
 import type { AutomationRunner } from "../core/automation.js";
+import { renderCommand } from "../core/automation.js";
 import { KanbanError, type Kanban, type Patch } from "../core/index.js";
 import { duplicateKeys, toDetail, toView } from "./view.js";
 
@@ -41,7 +42,7 @@ export interface ApiContext {
   log?: AutomationLog;
 }
 
-type Handler = (kb: Kanban, req: ApiRequest, params: string[], ctx: ApiContext) => ApiResponse;
+type Handler = (kb: Kanban, req: ApiRequest, params: string[], ctx: ApiContext) => ApiResponse | Promise<ApiResponse>;
 
 /** Throws if the client's mtime is stale; returns the current ticket otherwise. */
 function checkFresh(kb: Kanban, id: string, mtime: unknown): ApiResponse | undefined {
@@ -170,6 +171,37 @@ const putConfig: Handler = (kb, req) => {
 
 const automationLog: Handler = (_kb, _req, _p, ctx) => ok({ runs: ctx.log?.recent(20) ?? [] });
 
+const SAMPLE_STATUS = "done";
+
+/** Renders `run` with a sample ticket and really executes it (not logged, no ticket touched). */
+const automationTest: Handler = async (kb, req, _p, ctx) => {
+  const b = req.body;
+  const run = str(b.run, "run");
+  if (run === undefined || run.trim() === "") throw new KanbanError("invalid", "run must not be empty");
+  if (!ctx.runner) return fail(503, "disabled", "automations are disabled (kb web --no-automation)");
+  const event = str(b.event, "event") ?? "moved_to";
+  if (event !== "moved_to" && event !== "created_in") throw new KanbanError("invalid", "event must be moved_to or created_in");
+  const s = obj(b.sample, "sample") ?? {};
+  const to = str(s.to, "sample.to") ?? SAMPLE_STATUS;
+  const labels = strArray(s.labels, "sample.labels") ?? [];
+  const vars = {
+    id: str(s.id, "sample.id") ?? "000",
+    name: str(s.name, "sample.name") ?? "Sample ticket",
+    body: str(s.body, "sample.body") ?? "Sample body",
+    board: str(b.board, "board") ?? kb.load().config.name,
+    status: str(s.status, "sample.status") ?? to,
+    from: str(s.from, "sample.from") ?? (event === "moved_to" ? "todo" : undefined),
+    to,
+    path: "sample.md",
+    labels: labels.join(","),
+    event,
+    props: obj(s.props, "sample.props") ?? {},
+  };
+  const command = renderCommand(run, vars); // throws invalid on unknown variable
+  const result = await ctx.runner.run(command, { cwd: kb.dir, env: { KB_AUTOMATION: "1" } });
+  return ok({ command, result });
+};
+
 interface Route {
   method: string;
   re: RegExp;
@@ -192,10 +224,11 @@ const routes: Route[] = [
   route("GET", "/api/config", getConfig),
   route("PUT", "/api/config", putConfig),
   route("GET", "/api/automation/log", automationLog),
+  route("POST", "/api/automation/test", automationTest),
 ];
 
 /** Pure request handler: no HTTP, just the Kanban core. */
-export function handleApi(kb: Kanban, req: ApiRequest, ctx: ApiContext = {}): ApiResponse {
+export async function handleApi(kb: Kanban, req: ApiRequest, ctx: ApiContext = {}): Promise<ApiResponse> {
   const path = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
   const hits = routes.filter((r) => r.re.test(path));
   if (hits.length === 0) return fail(404, "not-found", `unknown route ${path}`);
@@ -209,7 +242,7 @@ export function handleApi(kb: Kanban, req: ApiRequest, ctx: ApiContext = {}): Ap
     } catch {
       return fail(400, "invalid", "malformed percent-encoding in path");
     }
-    return r.handler(kb, req, params, ctx);
+    return await r.handler(kb, req, params, ctx);
   } catch (e) {
     return errorResponse(e);
   }

@@ -130,7 +130,31 @@ export function describeChange(c) {
 
 // ---- settings (kanban.yaml form) ----
 
+const colValues = (rows) => rows.map((r) => r.value.trim()).filter((v) => v !== "");
 const colRows = (cols) => cols.map((c) => ({ orig: c, value: c }));
+
+const ruleRow = (a) => ({
+  orig: a.name,
+  name: a.name,
+  event: a.when.created_in !== undefined ? "created_in" : "moved_to",
+  column: a.when.created_in ?? a.when.moved_to ?? "",
+  labels: [...(a.when.labels ?? [])],
+  props: Object.entries(a.when.props ?? {}).map(([key, raw]) => ({ key, value: String(raw), raw })),
+  run: a.run,
+  enabled: a.enabled !== false,
+});
+
+/** A blank rule for a board whose columns are `cols` (form rows). */
+export const newRule = (cols) => ({
+  orig: null,
+  name: "",
+  event: "moved_to",
+  column: colValues(cols)[0] ?? "",
+  labels: [],
+  props: [],
+  run: "",
+  enabled: true,
+});
 
 /** GET /api/config → editable form state. `orig` = name in the file (null for new rows). */
 export function configToForm(c) {
@@ -138,9 +162,39 @@ export function configToForm(c) {
     name: c.name,
     glob: c.glob,
     columns: colRows(c.columns),
-    boards: Object.entries(c.boards ?? {}).map(([n, b]) => ({ orig: n, name: n, columns: colRows(b.columns) })),
+    automations: (c.automations ?? []).map(ruleRow),
+    boards: Object.entries(c.boards ?? {}).map(([n, b]) => ({
+      orig: n,
+      name: n,
+      columns: colRows(b.columns),
+      automations: (b.automations ?? []).map(ruleRow),
+    })),
   };
 }
+
+/** Column a rule points at after in-form column renames (rows keep their `orig`). */
+export function effectiveColumn(rows, column) {
+  const row = rows.find((r) => r.orig === column && r.value.trim() !== "");
+  return row ? row.value.trim() : column;
+}
+
+/** Form rule → config automation object (typed prop values preserved when unchanged). */
+function ruleToConfig(r, cols) {
+  const when = { [r.event]: effectiveColumn(cols, r.column) };
+  const labels = r.labels.map((l) => l.trim()).filter(Boolean);
+  if (labels.length) when.labels = labels;
+  const props = {};
+  for (const p of r.props) {
+    const k = p.key.trim();
+    if (k) props[k] = p.raw !== undefined && String(p.raw) === p.value ? p.raw : p.value;
+  }
+  if (Object.keys(props).length) when.props = props;
+  const out = { name: r.name.trim(), when, run: r.run };
+  if (!r.enabled) out.enabled = false;
+  return out;
+}
+
+const rulesToConfig = (rules, cols) => (rules ?? []).map((r) => ruleToConfig(r, cols));
 
 /** Rows that were renamed: { oldName: newName } (blank new names are not renames, they are removals). */
 function renamedColumns(rows) {
@@ -152,17 +206,18 @@ function renamedColumns(rows) {
   return out;
 }
 
-const colValues = (rows) => rows.map((r) => r.value.trim()).filter((v) => v !== "");
 
 /** Form state → PUT /api/config payload parts: { config, renames }. */
 export function formToPayload(f) {
   const config = { name: f.name.trim(), glob: f.glob.trim(), columns: colValues(f.columns), boards: {} };
+  if (f.automations?.length) config.automations = rulesToConfig(f.automations, f.columns);
   const renames = { columns: {}, boards: {} };
   const top = renamedColumns(f.columns);
   if (Object.keys(top).length) renames.columns[""] = top;
   for (const b of f.boards) {
     const name = b.name.trim();
     config.boards[name] = { columns: colValues(b.columns) };
+    if (b.automations?.length) config.boards[name].automations = rulesToConfig(b.automations, b.columns);
     if (b.orig !== null) {
       if (name !== b.orig) renames.boards[b.orig] = name;
       const m = renamedColumns(b.columns);
@@ -190,6 +245,11 @@ export function checkForm(f) {
     if (b.columns.length === 0) return `Board "${n}" needs at least one column.`;
     if (dup(b.columns) !== undefined) return `Board "${n}": duplicate column "${dup(b.columns)}".`;
   }
+  const targets = [{ board: p.name, rules: f.automations ?? [], cols: f.columns }, ...f.boards.map((b) => ({ board: b.name.trim(), rules: b.automations ?? [], cols: b.columns }))];
+  for (const t of targets) {
+    const err = checkRules(t.board, t.rules, t.cols);
+    if (err) return err;
+  }
   return "";
 }
 
@@ -206,4 +266,54 @@ export function moveItem(list, i, delta) {
 export function describeTicketChange(c) {
   const to = c.to === undefined ? "(default board)" : c.to;
   return `${c.path}: ${c.field} ${c.from ?? "(none)"} → ${to}`;
+}
+
+/** Rule checks for one board; returns a message or "". */
+export function checkRules(board, rules, cols) {
+  const have = colValues(cols);
+  const seen = new Set();
+  for (const r of rules) {
+    const name = r.name.trim();
+    const who = name ? `Automation "${name}"` : "An automation";
+    const where = ` on board "${board}"`;
+    if (!name) return `An automation${where} has no name.`;
+    if (seen.has(name)) return `Duplicate automation name "${name}"${where}.`;
+    seen.add(name);
+    if (!r.run.trim()) return `${who}${where} has an empty script.`;
+    const col = effectiveColumn(cols, r.column);
+    if (!col) return `${who}${where} needs a column.`;
+    if (!have.includes(col)) return `Cannot remove column "${col}": used by automation "${name}"${where}. Change or remove the rule first.`;
+  }
+  return "";
+}
+
+/** Template variables offered in the script hint. */
+export const AUTOMATION_VARS = ["id", "name", "body", "board", "status", "from", "to", "path", "labels", "event", "props.<key>"];
+
+/** One line for a log record: `board/rule`. */
+export const logTitle = (r) => `${r.board}/${r.rule}`;
+
+/** Test-run request body from a form rule. */
+export function testBody(rule, board) {
+  const b = { run: rule.run, event: rule.event };
+  if (board) b.board = board;
+  return b;
+}
+
+/** Test-run result → text for the <pre>. */
+export function describeTestRun(r) {
+  const res = r.result;
+  const lines = [`$ ${r.command}`, `exit: ${res.exitCode ?? "(none)"}`];
+  if (res.error) lines.push(`error: ${res.error}`);
+  if (res.stdout) lines.push("--- stdout ---", res.stdout.replace(/\n$/, ""));
+  if (res.stderr) lines.push("--- stderr ---", res.stderr.replace(/\n$/, ""));
+  return lines.join("\n");
+}
+
+/** Ticket detail `automations` object → "name: status at" lines. */
+export function describeAutomations(a) {
+  return Object.entries(a ?? {}).map(([name, e]) => {
+    const x = e && typeof e === "object" ? e : { status: String(e) };
+    return `${name}: ${x.status ?? "?"}${x.at ? ` at ${x.at}` : ""}`;
+  });
 }

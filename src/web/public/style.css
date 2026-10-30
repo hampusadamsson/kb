@@ -120,3 +120,19 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   .column { flex-basis: 85vw; }
   .row2 { flex-direction: column; }
 }
+
+/* automations */
+.auto-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; }
+.auto-card { border: 1px solid var(--border, #333); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: rgba(255, 255, 255, 0.02); }
+.auto-card .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.auto-card .row input[type="text"] { flex: 1; min-width: 120px; }
+.auto-card .check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.auto-run { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; resize: vertical; }
+.auto-out { max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; padding: 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.35); }
+.auto-out[hidden] { display: none; }
+.hint { font-size: 12px; margin: 0; }
+.runs { list-style: none; margin: 0; padding: 0; }
+.run-row { display: flex; gap: 10px; width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 4px 2px; cursor: pointer; font: inherit; }
+.run-row:hover { background: rgba(255, 255, 255, 0.05); }
+.run-status.done { color: var(--ok); }
+.run-status.failed { color: var(--err); }

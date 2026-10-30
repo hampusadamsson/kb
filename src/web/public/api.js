@@ -44,5 +44,7 @@ export const api = {
   patch: (id, body) => request("PATCH", `/api/tickets/${enc(id)}`, body),
   comment: (id, text, mtime) => request("POST", `/api/tickets/${enc(id)}/comments`, { text, mtime }),
   validate: () => request("GET", "/api/validate"),
+  testAutomation: (body) => request("POST", "/api/automation/test", body),
+  automationLog: () => request("GET", "/api/automation/log"),
   fix: (dryRun) => request("POST", "/api/fix", { dryRun }),
 };

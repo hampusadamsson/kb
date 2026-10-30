@@ -4,6 +4,7 @@ import { h, clear, chipInput, toast } from "./dom.js";
 import {
   buildCreate,
   buildPatch,
+  describeAutomations,
   display,
   hasPatch,
   rowsToProps,
@@ -11,6 +12,11 @@ import {
   sortedComments,
   statusOptions,
 } from "./logic.js";
+
+const autoLines = (a) => {
+  const lines = describeAutomations(a);
+  return lines.length ? [h("dt", { text: "Automations" }), h("dd", { class: "mono" }, lines.map((l) => h("div", { text: l })))] : [];
+};
 
 const dlg = () => document.getElementById("ticket-dialog");
 let current = null; // the open session, if any
@@ -111,6 +117,7 @@ class Session {
           h("dd", { class: "mono", text: this.detail.hasId ? display(this.detail.id) : "(none)" }),
           h("dt", { text: "Type" }),
           h("dd", { class: "mono", text: display(this.detail.data?.type ?? "ticket") }),
+          ...autoLines(this.detail.automations),
         );
 
     this.commentList = h("ul", { class: "comments" });
