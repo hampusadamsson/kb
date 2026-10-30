@@ -278,7 +278,7 @@ Limitation: the scripts were checked only by generating, sourcing and syntax-che
 
 ## Ticket format
 
-A ticket is any markdown file matched by `glob` whose YAML frontmatter has `type: ticket`. Other files are ignored silently. Flat directory by default.
+A ticket is any markdown file matched by `glob` whose YAML frontmatter has `type: ticket`. Other files (notes without frontmatter, templates like `type: {{ type }}`, invalid YAML) are ignored silently, and `kb` never prints YAML library warnings. A file with unparseable frontmatter is only reported (as a parse error, also by `kb validate`) if its frontmatter has a line `type: ticket`. Flat directory by default.
 
 Reserved keys: `type`, `id`, `name`, `status`, `board`, `labels`, `comments`.
 

@@ -3,6 +3,9 @@ import path from "node:path";
 import { Document, parseDocument, Scalar, YAMLMap, type Pair } from "yaml";
 import { KanbanError } from "./errors.js";
 
+/** yaml options: never print warnings to the process (real errors stay in doc.errors). */
+export const YAML_OPTS = { logLevel: "error" } as const;
+
 const FM_RE = /^---\r?\n(?:([\s\S]*?\r?\n)?)---[ \t]*(?:\r?\n|$)/;
 
 export interface Split {
@@ -25,7 +28,7 @@ export function keyOf(p: Pair): string {
 export function readFile(file: string): { doc: Document; body: string; crlf: boolean } {
   const text = fs.readFileSync(file, "utf8");
   const { yaml, body } = splitFrontmatter(text);
-  return { doc: parseDocument(yaml ?? ""), body, crlf: text.startsWith("---\r\n") };
+  return { doc: parseDocument(yaml ?? "", YAML_OPTS), body, crlf: text.startsWith("---\r\n") };
 }
 
 /** Render frontmatter + body. With crlf, frontmatter uses CRLF; body is untouched. */

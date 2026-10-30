@@ -6,7 +6,7 @@ import { z } from "zod";
 import { automationProblems } from "./automation.js";
 import { automationSchema, columnsFor, CONFIG_FILE, loadConfig, type Automation, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
-import { updateFile } from "./frontmatter.js";
+import { updateFile, YAML_OPTS } from "./frontmatter.js";
 import { scan, UNSORTED, type Ticket } from "./tickets.js";
 
 /** Editable view of kanban.yaml (defaults filled in). */
@@ -302,7 +302,7 @@ export function updateConfigFile(dir: string, raw: unknown, opts: UpdateConfigOp
   const changes = planTicketChanges(old, next, tickets, renames, boardRen, automationBlocks(old, next, boardRen));
   const autoProblems = automationProblems(next);
   if (autoProblems.length) throw new KanbanError("invalid", autoProblems.join("; "));
-  const doc = parseDocument(fs.readFileSync(file, "utf8"));
+  const doc = parseDocument(fs.readFileSync(file, "utf8"), YAML_OPTS);
   const configChanged = applyConfigToDoc(doc, old, next, boardRen);
 
   if (opts.dryRun) return { changes, configChanged, mtime };

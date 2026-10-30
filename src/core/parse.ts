@@ -1,5 +1,6 @@
 import { parse } from "yaml";
 import { KanbanError } from "./errors.js";
+import { YAML_OPTS } from "./frontmatter.js";
 
 /** Reusable text syntax for UIs: "key:value" properties and "!" negation in filters. */
 
@@ -12,7 +13,7 @@ export function parseProperty(arg: string): [string, unknown] {
   if (raw === "") return [key, ""];
   let value: unknown;
   try {
-    value = parse(raw);
+    value = parse(raw, YAML_OPTS);
   } catch {
     value = raw;
   }

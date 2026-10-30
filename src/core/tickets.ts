@@ -3,7 +3,7 @@ import path from "node:path";
 import { parseDocument } from "yaml";
 import { columnsFor, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
-import { splitFrontmatter } from "./frontmatter.js";
+import { splitFrontmatter, YAML_OPTS } from "./frontmatter.js";
 import { parsePropertyFilter, splitNegation } from "./parse.js";
 
 export const RESERVED = ["type", "id", "name", "status", "board", "labels", "comments", "automations"];
@@ -39,6 +39,8 @@ export interface ScanResult {
   diagnostics: Diagnostic[];
 }
 
+const TICKET_TYPE_RE = /^type:\s*["']?ticket["']?\s*$/m;
+
 export function scan(cwd: string, config: Config): ScanResult {
   const tickets: Ticket[] = [];
   const diagnostics: Diagnostic[] = [];
@@ -55,9 +57,12 @@ export function scan(cwd: string, config: Config): ScanResult {
       const raw = fs.readFileSync(abs, "utf8");
       const { yaml, body } = splitFrontmatter(raw);
       if (yaml === undefined) continue;
-      const doc = parseDocument(yaml);
+      const doc = parseDocument(yaml, YAML_OPTS);
       if (doc.errors.length) {
-        diagnostics.push({ path: rel, message: `frontmatter: ${doc.errors[0].message}` });
+        // Unparseable: only report if it declares itself a ticket; other notes are ignored.
+        if (TICKET_TYPE_RE.test(yaml)) {
+          diagnostics.push({ path: rel, message: `frontmatter: ${doc.errors[0].message}` });
+        }
         continue;
       }
       const data = doc.toJS();

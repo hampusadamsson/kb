@@ -3,6 +3,7 @@ import path from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import { KanbanError } from "./errors.js";
+import { YAML_OPTS } from "./frontmatter.js";
 
 export const CONFIG_FILE = "kanban.yaml";
 
@@ -57,7 +58,7 @@ export function loadConfig(cwd: string): Config {
   }
   let data: unknown;
   try {
-    data = parse(text);
+    data = parse(text, YAML_OPTS);
   } catch (e) {
     throw new KanbanError("config", `${CONFIG_FILE}: invalid YAML: ${(e as Error).message}`);
   }
