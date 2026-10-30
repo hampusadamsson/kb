@@ -1,7 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
-import { columnsFor, type Config } from "./config.js";
+import {
+  columnsFor,
+  globMatches,
+  isPathExcluded,
+  isPathIncluded,
+  isTicketFile,
+  scanGlobs,
+  ticketRules,
+  type Config,
+} from "./config.js";
 import { KanbanError } from "./errors.js";
 import { splitFrontmatter, YAML_OPTS } from "./frontmatter.js";
 import { parsePropertyFilter, splitNegation } from "./parse.js";
@@ -44,9 +53,13 @@ const TICKET_TYPE_RE = /^type:\s*["']?ticket["']?\s*$/m;
 export function scan(cwd: string, config: Config): ScanResult {
   const tickets: Ticket[] = [];
   const diagnostics: Diagnostic[] = [];
-  const files = fs
-    .globSync(config.glob, { cwd })
-    .filter((f) => !f.split(path.sep).includes("node_modules"))
+  const rules = ticketRules(config);
+  const files = [
+    ...new Set(
+      fs.globSync(scanGlobs(config), { cwd }).map((f) => f.split(path.sep).join("/")),
+    ),
+  ]
+    .filter((f) => !isPathExcluded(rules, f))
     .sort();
 
   for (const rel of files) {
@@ -56,19 +69,22 @@ export function scan(cwd: string, config: Config): ScanResult {
       if (!stat.isFile()) continue;
       const raw = fs.readFileSync(abs, "utf8");
       const { yaml, body } = splitFrontmatter(raw);
-      if (yaml === undefined) continue;
-      const doc = parseDocument(yaml, YAML_OPTS);
-      if (doc.errors.length) {
-        // Unparseable: only report if it declares itself a ticket; other notes are ignored.
-        if (TICKET_TYPE_RE.test(yaml)) {
-          diagnostics.push({ path: rel, message: `frontmatter: ${doc.errors[0].message}` });
+      let data: Record<string, unknown> | undefined = undefined;
+      if (yaml !== undefined) {
+        const doc = parseDocument(yaml, YAML_OPTS);
+        if (doc.errors.length) {
+          // Unparseable: report only if it is a ticket by rules decidable without parsing.
+          const declared = rules.baseline && globMatches(rel, config.glob) && TICKET_TYPE_RE.test(yaml);
+          if (declared || isPathIncluded(rules, rel, config.glob)) {
+            diagnostics.push({ path: rel, message: `frontmatter: ${doc.errors[0].message}` });
+          }
+          continue;
         }
-        continue;
+        const js = doc.toJS();
+        if (js && typeof js === "object" && !Array.isArray(js)) data = js as Record<string, unknown>;
       }
-      const data = doc.toJS();
-      if (!data || typeof data !== "object" || Array.isArray(data)) continue;
-      if (data.type !== "ticket") continue;
-      tickets.push(toTicket(rel, data, body, raw, stat.mtimeMs, config));
+      if (!isTicketFile(rules, rel, data, config.glob)) continue;
+      tickets.push(toTicket(rel, data ?? {}, body, raw, stat.mtimeMs, config));
     } catch (e) {
       diagnostics.push({ path: rel, message: (e as Error).message });
     }
@@ -76,9 +92,9 @@ export function scan(cwd: string, config: Config): ScanResult {
   return { tickets, diagnostics };
 }
 
-/** Does a path (relative to the config dir) match the config's ticket glob? */
+/** Does a path (relative to the config dir) fall in the scanned area (top-level glob or an include glob)? */
 export function matchesTicketGlob(config: Config, rel: string): boolean {
-  return path.matchesGlob(rel.split(path.sep).join("/"), config.glob);
+  return scanGlobs(config).some((g) => globMatches(rel, g));
 }
 
 function toTicket(
@@ -106,7 +122,7 @@ function toTicket(
   return {
     path: rel,
     id: data.id,
-    name: data.name != null ? String(data.name) : "",
+    name: data.name != null ? String(data.name) : path.posix.basename(rel, path.posix.extname(rel)),
     status,
     column,
     board,

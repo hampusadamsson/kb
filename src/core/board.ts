@@ -15,7 +15,17 @@ import {
   type RunResult,
   KILLED_BY_USER,
 } from "./automation.js";
-import { automationsFor, columnsFor, CONFIG_FILE, loadConfig, STARTER_CONFIG, type Config } from "./config.js";
+import {
+  automationsFor,
+  columnsFor,
+  CONFIG_FILE,
+  isTicketFile,
+  isValidGlob,
+  loadConfig,
+  STARTER_CONFIG,
+  ticketRules,
+  type Config,
+} from "./config.js";
 import { KanbanError } from "./errors.js";
 import {
   clipText,
@@ -47,7 +57,9 @@ import {
 } from "./tickets.js";
 import {
   getConfigSnapshot,
+  previewTicketRules,
   updateConfigFile,
+  type TicketPreview,
   type ConfigSnapshot,
   type UpdateConfigOptions,
   type UpdateConfigResult,
@@ -57,7 +69,7 @@ import { filenameFor, padId } from "./util.js";
 // ---- types ----
 
 export interface Warning {
-  kind: "unsorted" | "missing-id" | "duplicate-id" | "parse-error";
+  kind: "unsorted" | "missing-id" | "duplicate-id" | "parse-error" | "not-scanned";
   /** single affected file (relative to dir), when there is one */
   path?: string;
   /** all affected files (duplicate ids) */
@@ -454,6 +466,11 @@ export class Kanban {
     return r;
   }
 
+  /** Read-only: how the proposed ticket rules change the set of tickets (against the current files). */
+  previewTicketRules(tickets: unknown): TicketPreview {
+    return previewTicketRules(this.dir, tickets);
+  }
+
   /** Read config and scan all tickets. */
   load(): LoadResult {
     const config = loadConfig(this.dir);
@@ -542,6 +559,14 @@ export class Kanban {
       if (inside === "" || inside.startsWith("..") || path.isAbsolute(inside) || !abs.endsWith(".md")) {
         throw new KanbanError("invalid", `file must be a .md path inside the board directory: ${rel}`);
       }
+    }
+    const rel0 = path.relative(path.resolve(this.dir), abs).split(path.sep).join("/");
+    if (!isTicketFile(ticketRules(config), rel0, data, config.glob)) {
+      warnings.push({
+        kind: "not-scanned",
+        path: rel0,
+        message: `${rel0} is not matched by glob/tickets rules; it will not show on the board`,
+      });
     }
     const body = input.body !== undefined ? bodyText(input.body) : "";
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -706,6 +731,22 @@ export class Kanban {
     } catch (e) {
       err(undefined, (e as Error).message);
       return result();
+    }
+
+    const rules = ticketRules(config);
+    for (const kind of ["include", "exclude"] as const) {
+      const seen = new Set<string>();
+      rules[kind].forEach((r, i) => {
+        const label = `tickets.${kind}[${i}]${r.name ? ` "${r.name}"` : ""}`;
+        if (r.glob !== undefined && !isValidGlob(r.glob)) err(CONFIG_FILE, `${label}: invalid glob "${r.glob}"`);
+        if (r.name) {
+          if (seen.has(r.name)) warn(CONFIG_FILE, `${label}: duplicate rule name`);
+          seen.add(r.name);
+        }
+      });
+    }
+    if (!rules.baseline && rules.include.length === 0) {
+      warn(CONFIG_FILE, "tickets.baseline is false and there are no include rules: no tickets can exist");
     }
 
     const { tickets, diagnostics } = scan(this.dir, config);

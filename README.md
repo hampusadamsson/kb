@@ -278,7 +278,7 @@ Limitation: the scripts were checked only by generating, sourcing and syntax-che
 
 ## Ticket format
 
-A ticket is any markdown file matched by `glob` whose YAML frontmatter has `type: ticket`. Other files (notes without frontmatter, templates like `type: {{ type }}`, invalid YAML) are ignored silently, and `kb` never prints YAML library warnings. A file with unparseable frontmatter is only reported (as a parse error, also by `kb validate`) if its frontmatter has a line `type: ticket`. Flat directory by default.
+By default a ticket is any markdown file matched by `glob` whose YAML frontmatter has `type: ticket`. What counts as a ticket is configurable with the `tickets` key (see [Configuration](#configuration-kanbanyaml)): files can be opted in without `type: ticket`, or opted out. Other files (notes without frontmatter, templates like `type: {{ type }}`, invalid YAML) are ignored silently, and `kb` never prints YAML library warnings. A file with unparseable frontmatter is only reported (as a parse error, also by `kb validate`) if its frontmatter has a line `type: ticket`. Flat directory by default.
 
 Reserved keys: `type`, `id`, `name`, `status`, `board`, `labels`, `comments`.
 
@@ -305,7 +305,8 @@ Rules:
 
 - **id**: frontmatter property; any value (int or string). Filename is irrelevant for identity. New ids are zero-padded strings (`"001"`, padded to 3, grows past 999), written as quoted YAML strings (`id: "001"`) so they stay strings. Ids are displayed exactly as stored (`#001`; legacy `id: 1` shows `#1`; no id shows `#?`). `--id <value>` is stored exactly as given, as a string (`--id 7` stores `"7"`). Error if taken (duplicate rule below). `set` refuses to change id. Numeric id = integer or digit-only string; used for next-id (max numeric + 1, padded) and sorting.
 - **Filename on add**: `./<id>-slug.md` (the id string, i.e. zero-padded `NNN` by default; slug from name). Override with `-f/--file` (relative to config dir). With `--id` the prefix is `<slug(id)>`. Files are never renamed.
-- **name**: title stored as `name:`; body is free markdown.
+- **name**: title stored as `name:`; body is free markdown. A ticket without `name` (possible for files opted in by `tickets.include`) shows its filename without extension.
+- **Included files**: a file matched by an include rule is a ticket even without `type`, `id`, `name`, `status` or frontmatter (missing status → unsorted warning, missing id → warning; `kb fix` assigns ids). `mv`/`set` create the frontmatter if needed and never add `type: ticket`. `kb add` always writes `type: ticket`, and warns (`not-scanned`) when `-f` points outside what `glob`/`tickets` scan.
 - **status**: decides the column. Missing, or not a column of the ticket's board → shown in the "unsorted" group with a warning. Files are never auto-edited (except via fix/write commands).
 - **board**: optional. Absent = default board. Written only when not default. Boards are discovered from tickets.
 - **labels**: list property, rendered as `[x]` tags. All other non-reserved properties are rendered automatically as `key:value` labels.
@@ -334,6 +335,7 @@ File: `./kanban.yaml`, read from the current working directory only. If missing,
 | `name` | Optional, default `"default"`. Name of the default board (tickets without `board:`). |
 | `columns` | Required, non-empty, ordered as listed. |
 | `glob` | Optional, default `"*.md"`, e.g. `"**/*.md"`; relative to the config dir. `node_modules` is always excluded. |
+| `tickets` | Optional, what counts as a ticket: `baseline`, `include`, `exclude` rules. See [Ticket rules](#ticket-rules). |
 | `boards.<name>.columns` | Optional per-board column override. Boards not listed use the top-level `columns`. |
 | `automations` | Optional rules for the default board, see [Automations](#automations). |
 | `boards.<name>.automations` | Optional rules for that board. Not inherited from the default board. |
@@ -373,6 +375,32 @@ boards:
     columns: [backlog, active, shipped]
     automations: []
 ```
+
+### Ticket rules
+
+```yaml
+glob: "*.md"                    # files scanned by default
+tickets:
+  baseline: true                # default true: `type: ticket` (within glob) counts; false → only include rules count
+  include:                      # a file matching ANY include rule is a ticket (even without type: ticket)
+    - name: tasks-folder        # optional label, used in messages
+      glob: "tasks/**/*.md"     # path glob relative to the kanban dir; may reach outside the top-level glob
+      prefix: "T-"              # file name (basename) starts with
+      props: { kind: task }     # frontmatter equals (string compare like `kb ls -p`; list = any element); "!value" negates
+      has: [status]             # keys that must exist ("!key" = must NOT exist)
+  exclude:                      # a file matching ANY exclude rule is never a ticket
+    - glob: "templates/**"
+    - prefix: "_"
+    - props: { type: daily }
+```
+
+- Within one rule all given conditions must match (AND); a rule needs at least one condition. Across rules it is OR.
+- A file is a ticket iff it is not excluded AND ((`baseline` AND `type: ticket` AND inside the top-level `glob`) OR it matches an include rule). **Exclude wins** over include and baseline.
+- Include rule `glob`s add their files to the scan. An include rule without `glob` only applies to files inside the top-level `glob`. Only `.md` files are ever tickets; `node_modules` and `.kb` are always excluded.
+- Globs are relative to the kanban dir: absolute paths and `..` are rejected; `prefix` is a file name prefix and must not contain `/`.
+- Files with unparseable frontmatter are reported as parse errors only if they are tickets by rules that need no parsing (an include rule with only `glob`/`prefix`, or a `type: ticket` line within `glob`); `props`/`has` rules cannot be evaluated for them, so they are skipped silently. Files excluded by path/prefix are silent.
+- `kb validate`: invalid globs are errors; duplicate rule names and `baseline: false` without include rules are warnings.
+- Saving via the settings API (`PUT /api/config`, `tickets` field) rewrites only the `tickets` key (comments elsewhere kept; the key is removed when it equals the default). A dry run also returns `ticketScope: {gained, lost}`; `POST /api/config/preview-tickets` with `{tickets}` returns `{total, newlyIncluded, newlyExcluded, unchanged, gained, lost}` (path lists capped at 50) without writing anything.
 
 ### Validation rules
 

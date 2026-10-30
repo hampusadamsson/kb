@@ -1,5 +1,5 @@
 // Audit event model. UI/process agnostic: core only emits to an injected sink.
-import type { Config } from "./config.js";
+import { ticketRules, type Config, type TicketRule } from "./config.js";
 
 export type KbEventType =
   | "ticket.created"
@@ -81,7 +81,36 @@ function shapes(c: Config): Map<string, BoardShape> {
 const rec = (v: unknown): Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
+export interface TicketRulesDiff {
+  baselineChanged: boolean;
+  include: { added: number; removed: number; changed: number };
+  exclude: { added: number; removed: number; changed: number };
+}
+
+function diffRuleList(a: TicketRule[], b: TicketRule[]): { added: number; removed: number; changed: number } {
+  // rules are identified by name when they have one, else by content
+  const key = (r: TicketRule) => r.name ?? JSON.stringify(r);
+  const am = new Map(a.map((r) => [key(r), JSON.stringify(r)]));
+  const bm = new Map(b.map((r) => [key(r), JSON.stringify(r)]));
+  let added = 0;
+  let changed = 0;
+  for (const [k, v] of bm) {
+    if (!am.has(k)) added++;
+    else if (am.get(k) !== v) changed++;
+  }
+  return { added, removed: [...am.keys()].filter((k) => !bm.has(k)).length, changed };
+}
+
+export function diffTicketRules(old: Config, next: Config): TicketRulesDiff | undefined {
+  const o = ticketRules(old);
+  const n = ticketRules(next);
+  if (JSON.stringify(o) === JSON.stringify(n)) return undefined;
+  return { baselineChanged: o.baseline !== n.baseline, include: diffRuleList(o.include, n.include), exclude: diffRuleList(o.exclude, n.exclude) };
+}
+
 export interface ConfigDiff {
+  /** present only when the ticket rules changed (event data key: ticketRules; `tickets` is the migrated-ticket list) */
+  ticketRules?: TicketRulesDiff;
   columns: { added: { board: string; name: string }[]; removed: { board: string; name: string }[]; renamed: { board: string; from: string; to: string }[] };
   boards: { added: string[]; removed: string[]; renamed: { from: string; to: string }[] };
   automations: { added: { board: string; name: string }[]; removed: { board: string; name: string }[]; changed: { board: string; name: string }[] };
@@ -142,6 +171,8 @@ export function diffConfig(old: Config, next: Config, rawRenames: unknown): Conf
       for (const a of oldS.get(name)!.automations) d.automations.removed.push({ board: name, name: String(rec(a).name) });
     }
   }
+  const td = diffTicketRules(old, next);
+  if (td) d.ticketRules = td;
   return d;
 }
 
@@ -157,6 +188,7 @@ export function summarizeDiff(d: ConfigDiff, migrated: number): string {
   add("automation(s) added", d.automations.added.length);
   add("automation(s) removed", d.automations.removed.length);
   add("automation(s) changed", d.automations.changed.length);
+  if (d.ticketRules) parts.push("ticket rules changed");
   add("ticket(s) migrated", migrated);
   return `config updated${parts.length ? ": " + parts.join(", ") : ""}`;
 }

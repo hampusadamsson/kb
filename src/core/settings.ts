@@ -4,7 +4,19 @@ import path from "node:path";
 import { isMap, isSeq, parseDocument, Scalar, type Document, type YAMLSeq } from "yaml";
 import { z } from "zod";
 import { automationProblems } from "./automation.js";
-import { automationSchema, columnsFor, CONFIG_FILE, loadConfig, type Automation, type Config } from "./config.js";
+import {
+  automationSchema,
+  columnsFor,
+  CONFIG_FILE,
+  isDefaultTicketRules,
+  isValidGlob,
+  loadConfig,
+  parseTicketRules,
+  ticketRules,
+  type Automation,
+  type Config,
+  type TicketRules,
+} from "./config.js";
 import { KanbanError } from "./errors.js";
 import { updateFile, YAML_OPTS } from "./frontmatter.js";
 import { scan, UNSORTED, type Ticket } from "./tickets.js";
@@ -14,8 +26,23 @@ export interface ConfigInput {
   name: string;
   columns: string[];
   glob: string;
+  /** ticket definition; omitted when default (baseline only, no rules) */
+  tickets?: TicketRules;
   automations?: Automation[];
   boards: Record<string, { columns: string[]; automations?: Automation[] }>;
+}
+
+export interface TicketPreview {
+  /** tickets under the proposed rules */
+  total: number;
+  /** paths (max 50) that are tickets only under the proposed rules */
+  newlyIncluded: string[];
+  newlyExcluded: string[];
+  /** tickets under both */
+  unchanged: number;
+  /** full counts (lists are capped) */
+  gained: number;
+  lost: number;
 }
 
 export interface ConfigSnapshot {
@@ -56,6 +83,8 @@ export interface UpdateConfigResult {
   changes: TicketChange[];
   configChanged: boolean;
   mtime: number;
+  /** tickets gained/lost by changed ticket rules (dryRun only) */
+  ticketScope?: { gained: number; lost: number };
 }
 
 // ---- validation ----
@@ -71,6 +100,7 @@ const inputSchema = z.object({
   glob: nonEmpty("glob"),
   columns: columnsSchema,
   automations: z.array(automationSchema).optional(),
+  tickets: z.unknown().optional(),
   boards: z
     .record(nonEmpty("board name"), z.object({ columns: columnsSchema, automations: z.array(automationSchema).optional() }))
     .default({}),
@@ -217,6 +247,13 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
   let changed = false;
   if (next.name !== old.name) (doc.set("name", next.name), (changed = true));
   if (next.glob !== old.glob) (doc.set("glob", next.glob), (changed = true));
+  const oldT = ticketRules(old);
+  const newT = next.tickets ?? oldT;
+  if (JSON.stringify(oldT) !== JSON.stringify(newT)) {
+    if (isDefaultTicketRules(newT)) doc.delete("tickets");
+    else doc.set("tickets", doc.createNode(compactRules(newT)));
+    changed = true;
+  }
   if (!same(next.columns, old.columns)) (setColumns(doc, ["columns"], next.columns), (changed = true));
 
   // renamed board overrides keep their position in the file
@@ -256,6 +293,35 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
   return changed;
 }
 
+/** Minimal YAML form: defaults and empty lists are not written. */
+function compactRules(t: TicketRules): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!t.baseline) out.baseline = false;
+  if (t.include.length) out.include = t.include;
+  if (t.exclude.length) out.exclude = t.exclude;
+  return out;
+}
+
+/** Ticket paths of a scan under the given rules (files from the current scan area plus include globs). */
+export function previewTicketRules(dir: string, raw: unknown): TicketPreview {
+  const rules = parseTicketRules(raw);
+  const old = loadConfig(dir);
+  const bad = [...rules.include, ...rules.exclude].find((r) => r.glob !== undefined && !isValidGlob(r.glob));
+  if (bad) throw new KanbanError("invalid", `invalid glob "${bad.glob}"`);
+  const current = new Set(scan(dir, old).tickets.map((t) => t.path));
+  const next = new Set(scan(dir, { ...old, tickets: rules }).tickets.map((t) => t.path));
+  const gained = [...next].filter((p) => !current.has(p));
+  const lost = [...current].filter((p) => !next.has(p));
+  return {
+    total: next.size,
+    newlyIncluded: gained.slice(0, 50),
+    newlyExcluded: lost.slice(0, 50),
+    unchanged: [...next].filter((p) => current.has(p)).length,
+    gained: gained.length,
+    lost: lost.length,
+  };
+}
+
 function applyTicketChanges(dir: string, changes: TicketChange[]): void {
   const byPath = new Map<string, TicketChange[]>();
   for (const c of changes) byPath.set(c.path, [...(byPath.get(c.path) ?? []), c]);
@@ -280,6 +346,7 @@ export function getConfigSnapshot(dir: string): ConfigSnapshot {
   }
   const config: ConfigInput = { name: c.name, columns: [...c.columns], glob: c.glob, boards };
   if (c.automations?.length) config.automations = structuredClone(c.automations);
+  if (!isDefaultTicketRules(c.tickets)) config.tickets = structuredClone(ticketRules(c));
   return {
     config,
     mtime: fs.statSync(path.join(dir, CONFIG_FILE)).mtimeMs,
@@ -287,7 +354,17 @@ export function getConfigSnapshot(dir: string): ConfigSnapshot {
 }
 
 export function updateConfigFile(dir: string, raw: unknown, opts: UpdateConfigOptions = {}): UpdateConfigResult {
-  const next = parseWith(inputSchema, "config", raw) as ConfigInput;
+  const next = parseWith(inputSchema, "config", raw) as unknown as ConfigInput;
+  if ((raw as { tickets?: unknown })?.tickets !== undefined) {
+    next.tickets = parseTicketRules((raw as { tickets: unknown }).tickets);
+    for (const kind of ["include", "exclude"] as const) {
+      next.tickets[kind].forEach((r, i) => {
+        if (r.glob !== undefined && !isValidGlob(r.glob)) {
+          throw new KanbanError("invalid", `invalid tickets: tickets.${kind}[${i}]${r.name ? ` "${r.name}"` : ""}: invalid glob "${r.glob}"`);
+        }
+      });
+    }
+  } else next.tickets = undefined; // omitted = keep the current rules (older clients don't send it)
   const renames = parseWith(renamesSchema, "renames", opts.renames ?? {});
   const file = path.join(dir, CONFIG_FILE);
   const old = loadConfig(dir);
@@ -305,7 +382,12 @@ export function updateConfigFile(dir: string, raw: unknown, opts: UpdateConfigOp
   const doc = parseDocument(fs.readFileSync(file, "utf8"), YAML_OPTS);
   const configChanged = applyConfigToDoc(doc, old, next, boardRen);
 
-  if (opts.dryRun) return { changes, configChanged, mtime };
+  let ticketScope: { gained: number; lost: number } | undefined;
+  if (next.tickets && JSON.stringify(ticketRules(old)) !== JSON.stringify(next.tickets)) {
+    const p = previewTicketRules(dir, next.tickets);
+    ticketScope = { gained: p.gained, lost: p.lost };
+  }
+  if (opts.dryRun) return { changes, configChanged, mtime, ...(ticketScope ? { ticketScope } : {}) };
   // tickets first: if a write fails midway, repeating the request still finds the rest to migrate
   applyTicketChanges(dir, changes);
   if (configChanged) fs.writeFileSync(file, doc.toString({ lineWidth: 0, flowCollectionPadding: false }));

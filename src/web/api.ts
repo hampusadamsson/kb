@@ -174,6 +174,12 @@ const putConfig: Handler = (kb, req) => {
   return ok({ dryRun: b.dryRun === true, ...r });
 };
 
+/** POST body: {tickets}. Read-only preview of the proposed ticket rules. */
+const previewTickets: Handler = (kb, req) => {
+  if (req.body.tickets === undefined) throw new KanbanError("invalid", "tickets required");
+  return ok(kb.previewTicketRules(req.body.tickets));
+};
+
 /** GET /api/events?q=&type=&ticket=&board=&source=&before=&limit= (type repeatable / comma-separated) */
 const events: Handler = (_kb, req, _p, ctx) => {
   const q = req.query;
@@ -267,6 +273,7 @@ const routes: Route[] = [
   route("POST", "/api/fix", fix),
   route("GET", "/api/config", getConfig),
   route("PUT", "/api/config", putConfig),
+  route("POST", "/api/config/preview-tickets", previewTickets),
   route("GET", "/api/events", events),
   route("GET", "/api/automation/log", automationLog),
   route("POST", "/api/automation/test", automationTest),
