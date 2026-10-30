@@ -21,6 +21,7 @@ export function automationList({ rules, cols, board, onChange }) {
   const box = h("div", { class: "auto-list" });
   const draw = () => {
     clear(box);
+    if (!rules.length) box.append(h("p", { class: "muted empty-auto", text: "No automations on this board yet." }));
     for (const r of rules) box.append(card(r));
     box.append(
       h("button", {

@@ -2,11 +2,14 @@
 import { api } from "./api.js";
 import { h, clear, toast } from "./dom.js";
 import { automationList, lastRuns } from "./automations.js";
+import { tabList, tabPanel } from "./settings-tabs.js";
 import {
   checkForm,
   configToForm,
   describeChange,
   describeTicketChange,
+  dirtyTabs,
+  errorTab,
   formDirty,
   formToPayload,
   moveItem,
@@ -45,6 +48,7 @@ export async function open() {
   banner = "";
   preview = null;
   formError = "";
+  activeTab = "config";
   await loadConfig();
   await renderAll();
 }
@@ -52,9 +56,11 @@ export async function open() {
 /** Called on live updates while open: refresh health; handle config changes on disk. */
 export async function refresh() {
   if (!dlg().open || busy) return;
+  let changed = false;
   try {
     const c = await api.config();
     if (!loaded || c.mtime !== loaded.mtime) {
+      changed = true;
       if (form && formDirty(form, loaded.config)) banner = "external";
       else {
         loaded = c;
@@ -65,7 +71,14 @@ export async function refresh() {
   } catch {
     /* shown by renderAll through validate */
   }
-  await renderAll();
+  if (changed || !document.getElementById("settings-panel-slot")) return renderAll();
+  try {
+    validation = await api.validate();
+  } catch {
+    return;
+  }
+  refreshTabs();
+  if (activeTab === "health") await renderPanel(); // only the health panel depends on live data
 }
 
 async function loadConfig() {
@@ -83,77 +96,123 @@ async function loadConfig() {
 
 // ---- render ----
 
+let activeTab = "config";
+let validation = null; // last GET /api/validate
+let tabs = null; // tab strip controller
+
+const healthCount = () => (validation ? validation.errors.length + validation.warnings.length + boardWarnings.length : 0);
+
+function tabItems() {
+  const d = form && loaded ? dirtyTabs(form, loaded.config) : { config: false, automations: false };
+  const bad = formError ? errorTab(formError) : "";
+  const n = healthCount();
+  return [
+    { id: "config", label: "Config", dirty: d.config, error: bad === "config" },
+    { id: "automations", label: "Automations", dirty: d.automations, error: bad === "automations" },
+    { id: "health", label: n ? `Health (${n})` : "Health" },
+  ];
+}
+
+const refreshTabs = () => tabs?.update(tabItems());
+
+function selectTab(id) {
+  if (id === activeTab) return;
+  activeTab = id;
+  refreshTabs();
+  renderPanel();
+}
+
 async function renderAll() {
   const body = document.getElementById("settings-body");
-  let v;
   try {
-    v = await api.validate();
+    validation = await api.validate();
   } catch (e) {
     clear(body);
     body.append(h("p", { class: "form-error", text: e.message }));
     return;
   }
-  const fixBox = h("div", { class: "fix-box" });
-  const keep = body.scrollTop;
   clear(body);
-  body.append(
-    configSection(),
-    h("h3", { class: "section-title", text: "Health" }),
-    section("Errors", v.errors, "error"),
-    section("Warnings", v.warnings, "warn"),
-    boardSection(),
-    await lastRuns(),
-    h(
-      "div",
-      { class: "fix-area" },
-      h("button", { type: "button", class: "btn", text: "Fix ids…", onclick: () => planFix(fixBox) }),
-      fixBox,
-    ),
-  );
-  body.scrollTop = keep;
+  tabs = tabList(tabItems(), () => activeTab, selectTab);
+  body.append(tabs.el, h("div", { id: "settings-panel-slot" }));
+  await renderPanel();
 }
 
-function rerenderConfig() {
-  const old = document.getElementById("config-section");
-  if (old) old.replaceWith(configSection());
+/** Rebuild the active tab's panel (config/automations are built from the shared form state). */
+async function renderPanel() {
+  const slot = document.getElementById("settings-panel-slot");
+  if (!slot) return;
+  const panel = tabPanel(activeTab);
+  slot.replaceChildren(panel);
+  if (activeTab === "health") return void panel.append(...(await healthPanel()));
+  if (!form) return void panel.append(h("p", { class: "form-error", text: formError || "Cannot load the config." }));
+  if (activeTab === "config") panel.append(configPanel());
+  else {
+    panel.append(automationsPanel());
+    const runs = await lastRuns();
+    if (document.getElementById(panel.id) === panel) panel.querySelector(".runs-slot")?.replaceWith(runs);
+  }
 }
+
+const rerenderConfig = () => {
+  refreshTabs();
+  const panel = document.querySelector(".set-panel");
+  if (!panel || activeTab === "health") return;
+  const keep = panel.scrollTop;
+  renderPanel().then(() => {
+    const p = document.querySelector(".set-panel");
+    if (p) p.scrollTop = keep;
+  });
+};
 
 const input = (value, onInput, label, extra = {}) =>
   h("input", { type: "text", value, "aria-label": label, oninput: (e) => onInput(e.target.value), ...extra });
 
-function configSection() {
-  const sec = h("section", { id: "config-section", class: "config" }, h("h3", { class: "section-title", text: "Board config (kanban.yaml)" }));
-  if (!form) {
-    sec.append(h("p", { class: "form-error", text: formError || "Cannot load the config." }));
-    return sec;
-  }
-  if (banner) {
-    sec.append(
-      h(
-        "div",
-        { class: "banner", role: "alert" },
-        h("span", { text: banner === "stale" ? "kanban.yaml changed on disk since you opened this." : "kanban.yaml changed on disk." }),
-        h("button", { type: "button", class: "btn small", text: "Reload", onclick: reload }),
-        banner === "stale" ? h("button", { type: "button", class: "btn small danger", text: "Overwrite", onclick: () => save(true) }) : null,
-      ),
-    );
-  }
+const onDirty = () => {
+  const btn = document.getElementById("config-save");
+  if (btn) btn.disabled = !formDirty(form, loaded.config) || busy;
+  const rv = document.getElementById("config-revert");
+  if (rv) rv.disabled = !formDirty(form, loaded.config);
+  refreshTabs();
+};
 
-  const rerenderDirty = () => {
-    const btn = document.getElementById("config-save");
-    if (btn) btn.disabled = !formDirty(form, loaded.config) || busy;
-  };
+function bannerBox() {
+  if (!banner) return null;
+  return h(
+    "div",
+    { class: "banner", role: "alert" },
+    h("span", { text: banner === "stale" ? "kanban.yaml changed on disk since you opened this." : "kanban.yaml changed on disk." }),
+    h("button", { type: "button", class: "btn small", text: "Reload", onclick: reload }),
+    banner === "stale" ? h("button", { type: "button", class: "btn small danger", text: "Overwrite", onclick: () => save(true) }) : null,
+  );
+}
 
+/** Shared by Config and Automations tabs: error, preview, Revert/Save. */
+function formFooter() {
+  return h(
+    "div",
+    { class: "form-footer" },
+    formError ? h("p", { class: "form-error", role: "alert", text: formError }) : null,
+    preview ? previewBox() : null,
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { id: "config-revert", type: "button", class: "btn", text: "Revert", disabled: !formDirty(form, loaded.config), onclick: reload }),
+      h("button", { id: "config-save", type: "button", class: "btn primary", text: "Save config", disabled: !formDirty(form, loaded.config) || busy, onclick: () => save(false) }),
+    ),
+  );
+}
+
+function configPanel() {
+  const sec = h("section", { id: "config-section", class: "config" }, h("h3", { class: "section-title", text: "Board config (kanban.yaml)" }), bannerBox());
   sec.append(
     h(
       "div",
       { class: "row2" },
-      h("div", { class: "field" }, h("label", { text: "Default board name" }), input(form.name, (v) => ((form.name = v), rerenderDirty()), "Default board name")),
-      h("div", { class: "field" }, h("label", { text: "Ticket files (glob)" }), input(form.glob, (v) => ((form.glob = v), rerenderDirty()), "Glob")),
+      h("div", { class: "field" }, h("label", { text: "Default board name" }), input(form.name, (v) => ((form.name = v), onDirty()), "Default board name")),
+      h("div", { class: "field" }, h("label", { text: "Ticket files (glob)" }), input(form.glob, (v) => ((form.glob = v), onDirty()), "Glob")),
     ),
-    h("div", { class: "field" }, h("span", { class: "lbl", text: "Columns (in order)" }), columnList(form.columns, rerenderDirty)),
-    h("div", { class: "field" }, h("span", { class: "lbl", text: "Automations (default board)" }), automationList({ rules: form.automations, cols: form.columns, board: () => form.name.trim(), onChange: rerenderDirty })),
-    h("span", { class: "lbl", text: "Per-board columns and automations (optional overrides)" }),
+    h("div", { class: "field" }, h("span", { class: "lbl", text: "Columns (in order)" }), columnList(form.columns, onDirty)),
+    h("span", { class: "lbl", text: "Per-board column overrides (optional)" }),
     h(
       "div",
       { class: "board-overrides" },
@@ -164,7 +223,7 @@ function configSection() {
           h(
             "div",
             { class: "row" },
-            input(b.name, (v) => ((b.name = v), rerenderDirty()), "Board name"),
+            input(b.name, (v) => ((b.name = v), onDirty()), "Board name"),
             h("button", {
               type: "button",
               class: "btn small danger",
@@ -176,9 +235,7 @@ function configSection() {
               },
             }),
           ),
-          columnList(b.columns, rerenderDirty),
-          h("span", { class: "lbl", text: "Automations" }),
-          automationList({ rules: b.automations, cols: b.columns, board: () => b.name.trim(), onChange: rerenderDirty }),
+          columnList(b.columns, onDirty),
         ),
       ),
       h("button", {
@@ -191,18 +248,28 @@ function configSection() {
         },
       }),
     ),
+    formFooter(),
   );
+  return sec;
+}
 
-  if (formError) sec.append(h("p", { class: "form-error", role: "alert", text: formError }));
-  if (preview) sec.append(previewBox());
-  sec.append(
-    h(
-      "div",
-      { class: "actions" },
-      h("button", { type: "button", class: "btn", text: "Revert", disabled: !formDirty(form, loaded.config), onclick: reload }),
-      h("button", { id: "config-save", type: "button", class: "btn primary", text: "Save config", disabled: !formDirty(form, loaded.config) || busy, onclick: () => save(false) }),
-    ),
+function automationsPanel() {
+  const boards = [{ name: () => form.name.trim() || "(unnamed)", rules: form.automations, cols: form.columns, test: () => form.name.trim() }].concat(
+    form.boards.map((b) => ({ name: () => b.name.trim() || "(unnamed)", rules: b.automations, cols: b.columns, test: () => b.name.trim() })),
   );
+  const sec = h("section", { class: "config", id: "automations-section" }, bannerBox());
+  boards.forEach((b, i) => {
+    const title = b.name();
+    sec.append(
+      h(
+        "div",
+        { class: "board-auto" },
+        h("h4", { text: `Board: ${title}${i === 0 ? " (default)" : ""}` }),
+        automationList({ rules: b.rules, cols: b.cols, board: b.test, onChange: onDirty }),
+      ),
+    );
+  });
+  sec.append(h("div", { class: "runs-slot" }), formFooter());
   return sec;
 }
 
@@ -311,6 +378,17 @@ async function save(overwrite, confirmed = false) {
 }
 
 // ---- health ----
+
+async function healthPanel() {
+  const v = validation;
+  const fixBox = h("div", { class: "fix-box" });
+  return [
+    section("Errors", v.errors, "error"),
+    section("Warnings", v.warnings, "warn"),
+    boardSection(),
+    h("div", { class: "fix-area" }, h("button", { type: "button", class: "btn", text: "Fix ids…", onclick: () => planFix(fixBox) }), fixBox),
+  ];
+}
 
 function section(title, issues, kind) {
   return h(

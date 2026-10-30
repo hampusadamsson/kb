@@ -145,8 +145,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .sdot.unknown { background: var(--unk); }
 @keyframes sdot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .sdot.running { animation: none; } }
-.card-autos { display: flex; align-items: center; gap: 4px; margin-top: 6px; height: 10px; }
-.card-autos .more { font-size: 10px; line-height: 10px; color: var(--muted); }
+.card-autos { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; min-height: 10px; }
+.card-autos .dots { display: flex; flex-wrap: wrap; gap: 4px; flex: none; max-width: 100%; }
+.card-autos .running-names { flex: 1; min-width: 0; font-size: 10px; line-height: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .auto-wrap { display: contents; }
 .auto-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .auto-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -154,3 +155,14 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .auto-row.failed .auto-word { color: var(--err); }
 .auto-error { flex-basis: 100%; color: #fca5a5; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 17px; }
 .run-row .sdot { align-self: center; }
+
+dialog#settings-dialog { width: min(760px, 96vw); }
+.set-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.set-tabs .tab { border-radius: 6px 6px 0 0; border-bottom: 0; }
+.set-tabs .tab[aria-selected="false"]:hover { background: var(--chip); }
+.set-tabs .dirty { color: var(--warn); margin-left: 4px; }
+.set-panel { min-height: 420px; max-height: 66vh; overflow: auto; padding-top: 8px; }
+.set-panel[hidden] { display: none; }
+.board-auto { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+.board-auto h4 { margin: 0 0 6px; }
+.form-footer { position: sticky; bottom: 0; background: var(--bg); padding-top: 6px; border-top: 1px solid var(--border); margin-top: 8px; }

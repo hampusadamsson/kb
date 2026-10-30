@@ -248,7 +248,7 @@ export function checkForm(f) {
   const targets = [{ board: p.name, rules: f.automations ?? [], cols: f.columns }, ...f.boards.map((b) => ({ board: b.name.trim(), rules: b.automations ?? [], cols: b.columns }))];
   for (const t of targets) {
     const err = checkRules(t.board, t.rules, t.cols);
-    if (err) return err;
+    if (err) return `${AUTOMATIONS_PREFIX}${err}`;
   }
   return "";
 }
@@ -402,4 +402,35 @@ export function automationLabel(i, now = new Date()) {
   const rel = relativeTime(i.at, now);
   const exit = i.exit !== null && i.exit !== undefined && i.exit !== "" ? ` (exit ${i.exit})` : "";
   return `${i.name}: ${i.state === "unknown" ? `unknown status${i.status ? ` "${i.status}"` : ""}` : i.state}${rel ? ` ${rel}` : ""}${exit}${i.error ? ` – ${i.error}` : ""}`;
+}
+
+export const AUTOMATIONS_PREFIX = "Automations: ";
+
+/** Settings tab a checkForm error belongs to. */
+export const errorTab = (msg) => (String(msg).startsWith(AUTOMATIONS_PREFIX) ? "automations" : "config");
+
+/** Names of running automations, worst-first order, e.g. "running: pi, followup" ("" when none). */
+export function runningText(sum) {
+  const names = sum.worstFirst.filter((i) => i.state === "running").map((i) => i.name);
+  return names.length ? `running: ${names.join(", ")}` : "";
+}
+
+/** Roving-tabindex keyboard navigation: id of the tab to focus for `key`, or null if the key is not handled. */
+export function nextTab(tabs, current, key) {
+  if (!tabs.length) return null;
+  const i = Math.max(0, tabs.indexOf(current));
+  if (key === "ArrowRight") return tabs[(i + 1) % tabs.length];
+  if (key === "ArrowLeft") return tabs[(i - 1 + tabs.length) % tabs.length];
+  if (key === "Home") return tabs[0];
+  if (key === "End") return tabs[tabs.length - 1];
+  return null;
+}
+
+/** Which tabs have unsaved changes: compares the config-side and automation-side payloads. */
+export function dirtyTabs(f, loaded) {
+  const a = formToPayload(f).config;
+  const b = formToPayload(configToForm(loaded)).config;
+  const autos = (c) => JSON.stringify([c.automations ?? [], Object.entries(c.boards).map(([n, x]) => [n, x.automations ?? []])]);
+  const strip = (c) => JSON.stringify({ ...c, automations: undefined, boards: Object.fromEntries(Object.entries(c.boards).map(([n, x]) => [n, { columns: x.columns }])) });
+  return { config: strip(a) !== strip(b), automations: autos(a) !== autos(b) };
 }

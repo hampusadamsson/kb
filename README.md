@@ -342,14 +342,15 @@ kb web [--host <addr>] [--port <n>] [--no-open]
 - Cards; drag a card to another column of the **same board** to change its `status`. Cross-board drags are ignored.
 - Create: the **+** in each column header opens the create dialog with that board and status preset. There is no global "New" button.
 - Detail dialog: name, status, board, labels, properties, body, comments (add comments there). Comment keys have minute granularity (seconds on collision).
-- **Automation status dots**: tickets with `automations:` run status in frontmatter show small dots on the card (up to 3, worst first, `+N` for more) and an *Automations* section in the detail dialog (rule, status word, relative time, exit code, error). Legend: green = done, yellow (pulsing) = running, red = failed (failed status, non-zero exit or error), grey = unknown. Each dot has a tooltip/aria-label; updates arrive live, and an open dialog only refreshes that section (your edits are kept, no "changed on disk" banner).
+- **Automation status dots**: tickets with `automations:` run status in frontmatter show one small dot per automation on the card (worst first: failed, running, done, unknown; wraps onto a second line when many) plus the names of running rules (`running: pi, followup`) and an *Automations* section in the detail dialog (rule, status word, relative time, exit code, error). Legend: green = done, yellow (pulsing) = running, red = failed (failed status, non-zero exit or error), grey = unknown. Each dot has a tooltip/aria-label; updates arrive live, and an open dialog only refreshes that section (your edits are kept, no "changed on disk" banner).
 - Filter bar: text, labels, properties, with `!` negation as in `kb ls`. State lives in the URL hash: `#board=..&text=..&l=..&p=..`.
-- **Settings** (header button, badge = issue count):
-  - *Board config* form for `kanban.yaml`: default board name, `glob`, ordered columns (rename inline, reorder, add, remove), and per-board column overrides (add, rename, remove). Saving keeps your YAML comments and unrelated keys.
+- **Settings** (header button, badge = issue count) is a dialog with three tabs (arrow keys switch, `Home`/`End` jump): **Config**, **Automations**, **Health**. Config and Automations share one form state (one dirty state, one Save/Revert; a • marks tabs with unsaved changes); Health shows its issue count in the tab title.
+  - **Automations** tab: one section per board (default + overrides) with the rule builder and a *Last runs* list. Automation validation errors are prefixed `Automations:`.
+  - *Config* tab: form for `kanban.yaml`: default board name, `glob`, ordered columns (rename inline, reorder, add, remove), and per-board column overrides (add, rename, remove). Saving keeps your YAML comments and unrelated keys.
   - Renaming a column rewrites `status` on every ticket using it; renaming a board rewrites an explicit `board:`. Before anything is written the UI shows how many ticket files will change (dry run) and asks to confirm.
   - Removing a column is **blocked** while tickets still use it (the error lists them). Removing a board override is allowed; its tickets fall back to the default columns. Unsorted tickets never block.
   - Invalid configs (empty/duplicate columns, empty name or glob) are refused and nothing is written. If `kanban.yaml` changes on disk while the form is open, a banner offers **Reload** (and **Overwrite** after a stale save).
-  - *Health*: `validate` results and board warnings; `fix` with a dry-run preview before applying. Parse errors are shown only here.
+  - *Health* tab: `validate` results and board warnings; `fix` with a dry-run preview before applying. Parse errors are shown only here.
 - Tickets with duplicate ids or no id are read-only and carry badges (use `fix`).
 - Stale-edit banner: edits send the ticket's mtime; if the file changed on disk the UI offers **Reload** or **Overwrite**.
 - Not available in the UI: `init` and `edit`.

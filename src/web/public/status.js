@@ -1,6 +1,6 @@
 // Automation status UI: dots, detail section, card indicator row.
 import { h, clear } from "./dom.js";
-import { absoluteTime, automationLabel, automationsText, relativeTime, summarizeAutomations } from "./logic.js";
+import { absoluteTime, automationLabel, automationsText, relativeTime, runningText, summarizeAutomations } from "./logic.js";
 
 /** Small status dot; `state` is done|running|failed|unknown. */
 export function dot(state, label) {
@@ -39,13 +39,16 @@ export function automationsWrap(automations) {
 export function cardIndicator(autos) {
   const sum = summarizeAutomations(autos);
   if (!sum.total) return null;
-  const shown = sum.worstFirst.slice(0, 3);
-  const more = sum.total - shown.length;
+  const running = runningText(sum);
   const el = h(
     "div",
-    { class: "card-autos", "aria-hidden": "true" },
-    shown.map((i) => h("span", { class: `sdot ${i.state}` })),
-    more > 0 ? h("span", { class: "more", text: `+${more}` }) : null,
+    { class: "card-autos" },
+    h(
+      "span",
+      { class: "dots" },
+      sum.worstFirst.map((i) => dot(i.state, automationLabel(i))),
+    ),
+    running ? h("span", { class: "running-names", title: running, text: running }) : null,
   );
   return { el, text: automationsText(sum) };
 }

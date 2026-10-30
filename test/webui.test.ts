@@ -257,6 +257,39 @@ describe("automation status helpers", () => {
     expect(any.automationsText(any.summarizeAutomations({ a: { status: "done" } }))).toBe("1 automation: 1 done");
     expect(any.summarizeAutomations([{ name: "x", status: "failed" }]).worst).toBe("failed");
   });
+  it("runningText lists running rule names (no cap)", () => {
+    const s = any.summarizeAutomations({ a: { status: "running" }, b: { status: "done" }, c: { status: "running" }, d: { status: "running" }, e: { status: "running" } });
+    expect(any.runningText(s)).toBe("running: a, c, d, e");
+    expect(s.worstFirst).toHaveLength(5);
+    expect(any.runningText(any.summarizeAutomations({ a: { status: "done" } }))).toBe("");
+  });
+  it("nextTab", () => {
+    const t = ["config", "automations", "health"];
+    expect(any.nextTab(t, "config", "ArrowRight")).toBe("automations");
+    expect(any.nextTab(t, "health", "ArrowRight")).toBe("config");
+    expect(any.nextTab(t, "config", "ArrowLeft")).toBe("health");
+    expect(any.nextTab(t, "automations", "Home")).toBe("config");
+    expect(any.nextTab(t, "automations", "End")).toBe("health");
+    expect(any.nextTab(t, "automations", "x")).toBeNull();
+    expect(any.nextTab([], "a", "End")).toBeNull();
+  });
+  it("errorTab groups automation errors; dirtyTabs splits changes", () => {
+    expect(any.errorTab("Automations: An automation has no name.")).toBe("automations");
+    expect(any.errorTab("Glob must not be empty.")).toBe("config");
+    const cfg = { name: "d", glob: "*.md", columns: ["a", "b"], boards: { x: { columns: ["a"] } } };
+    const f = any.configToForm(cfg);
+    expect(any.dirtyTabs(f, cfg)).toEqual({ config: false, automations: false });
+    f.boards[0].columns[0].value = "z";
+    expect(any.dirtyTabs(f, cfg)).toEqual({ config: true, automations: false });
+    f.automations.push(any.newRule(f.columns));
+    expect(any.dirtyTabs(f, cfg).automations).toBe(true);
+    f.automations[0].name = "r";
+    f.automations[0].run = "echo";
+    f.name = "d";
+    expect(any.checkForm(f)).toBe("");
+    f.automations[0].run = "";
+    expect(any.checkForm(f)).toMatch(/^Automations: /);
+  });
   it("automationLabel", () => {
     const i = any.summarizeAutomations({ "log-review": { status: "done", at: "2026-10-30T15:18:00", exit: 0 } }).list[0];
     expect(any.automationLabel(i, now)).toBe("log-review: done 2 min ago (exit 0)");
