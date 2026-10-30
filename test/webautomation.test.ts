@@ -72,3 +72,18 @@ describe("POST /api/automation/test", () => {
     expect((await call("GET")).status).toBe(405);
   });
 });
+
+describe("test-run concurrency", () => {
+  it("rejects a 3rd concurrent test run with 429 busy", async () => {
+    await start();
+    const slow = () => call("POST", { run: "sleep 1" });
+    const a = slow(), b = slow();
+    await new Promise((r) => setTimeout(r, 300));
+    const c = await call("POST", { run: "echo hi" });
+    expect(c.status).toBe(429);
+    expect(c.json.code).toBe("busy");
+    expect((await a).status).toBe(200);
+    expect((await b).status).toBe(200);
+    expect((await call("POST", { run: "echo hi" })).status).toBe(200);
+  });
+});

@@ -31,6 +31,33 @@ describe("shell runner", () => {
     expect(x.stdout.split("\n")[0]).toBe("1 bar");
     expect(x.stdout).toMatch(/tmp/);
   });
+  it("handles a 2MB command", async () => {
+    const x = await r.run(`printf %s '${"x".repeat(2_000_000)}' | wc -c`, { cwd, env: {} });
+    expect(x.error).toBeUndefined();
+    expect(x.stdout.trim()).toBe("2000000");
+  });
+  it("returns promptly when a script backgrounds a process", async () => {
+    const t0 = Date.now();
+    const x = await createShellRunner({ timeoutMs: 3000 }).run("sleep 2 &", { cwd, env: {} });
+    expect(x.exitCode).toBe(0);
+    expect(x.error).toBeUndefined();
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+  it("keeps output written before exit", async () => {
+    const x = await r.run("echo a; echo b >&2; sleep 2 &", { cwd, env: {} });
+    expect(x).toMatchObject({ exitCode: 0, stdout: "a\n", stderr: "b\n" });
+  });
+  it("killAll kills running scripts", async () => {
+    const k = createShellRunner({ timeoutMs: 10000 });
+    const t0 = Date.now();
+    const p = k.run("sleep 5", { cwd, env: {} });
+    await new Promise((res) => setTimeout(res, 150));
+    k.killAll();
+    const x = await p;
+    expect(x.exitCode).toBeNull();
+    expect(x.error).toMatch(/killed by SIGKILL/);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
   it("never rejects on bad cwd", async () => {
     const x = await r.run("true", { cwd: "/nonexistent-dir-xyz", env: {} });
     expect(x.exitCode).toBeNull();

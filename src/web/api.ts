@@ -172,6 +172,8 @@ const putConfig: Handler = (kb, req) => {
 const automationLog: Handler = (_kb, _req, _p, ctx) => ok({ runs: ctx.log?.recent(20) ?? [] });
 
 const SAMPLE_STATUS = "done";
+const MAX_TEST_RUNS = 2;
+let testRuns = 0;
 
 /** Renders `run` with a sample ticket and really executes it (not logged, no ticket touched). */
 const automationTest: Handler = async (kb, req, _p, ctx) => {
@@ -198,8 +200,14 @@ const automationTest: Handler = async (kb, req, _p, ctx) => {
     props: obj(s.props, "sample.props") ?? {},
   };
   const command = renderCommand(run, vars); // throws invalid on unknown variable
-  const result = await ctx.runner.run(command, { cwd: kb.dir, env: { KB_AUTOMATION: "1" } });
-  return ok({ command, result });
+  if (testRuns >= MAX_TEST_RUNS) return fail(429, "busy", "too many test runs in progress; try again shortly");
+  testRuns++;
+  try {
+    const result = await ctx.runner.run(command, { cwd: kb.dir, env: { KB_AUTOMATION: "1" } });
+    return ok({ command, result });
+  } finally {
+    testRuns--;
+  }
 };
 
 interface Route {

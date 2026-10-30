@@ -42,6 +42,29 @@ describe("automation log", () => {
     expect(fs.statSync(file()).size).toBeLessThan(256 * 1024 + 2048);
     expect(l.recent(1)[0].rule).toBe("r399");
   });
+  it("clips the stored command to 4KB", () => {
+    const l = createAutomationLog(dir);
+    l.append({ ...rec(1), command: "c".repeat(100000) });
+    const c = l.recent()[0].command;
+    expect(c.length).toBeLessThan(4200);
+    expect(c).toContain("[truncated]");
+  });
+  it("recent reads only the tail and drops the partial first line", () => {
+    const l = createAutomationLog(dir);
+    fs.mkdirSync(path.dirname(file()), { recursive: true });
+    const old = JSON.stringify(rec(0, "z".repeat(3000))) + "\n";
+    fs.writeFileSync(file(), old.repeat(200)); // ~600KB, no rotation yet
+    l.append(rec(1));
+    const r = l.recent(1000);
+    expect(r[0].rule).toBe("r1");
+    expect(r.length).toBeLessThan(60);
+    expect(r.length).toBeGreaterThan(30);
+  });
+  it("rotation leaves no temp files", () => {
+    const l = createAutomationLog(dir);
+    for (let i = 0; i < 400; i++) l.append(rec(i, "y".repeat(500)));
+    expect(fs.readdirSync(path.dirname(file()))).toEqual(["automation.log"]);
+  });
   it("tolerates corrupt lines", () => {
     const l = createAutomationLog(dir);
     l.append(rec(1));

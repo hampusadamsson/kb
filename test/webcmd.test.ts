@@ -4,7 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { runWeb, type WebIO } from "../src/cli/commands/web.js";
+import { automationExposureWarning, runWeb, type WebIO } from "../src/cli/commands/web.js";
 import { createKanban } from "../src/core/index.js";
 import type { RunningServer } from "../src/web/server.js";
 
@@ -50,6 +50,26 @@ describe("runWeb", () => {
     expect(t.out[0]).toBe(`kb web running at http://localhost:${s.port}`);
     expect(t.out[1]).toBe(`listening on 0.0.0.0:${s.port}`);
     expect(t.err[0]).toBe(`warning: no auth — anyone who can reach 0.0.0.0:${s.port} can read and edit your tickets`);
+  });
+  it("warns about unauthenticated automations on non-loopback", async () => {
+    const t = io();
+    await start(tmp(), { host: "0.0.0.0", port: 0, open: false }, t.i);
+    expect(t.err[1]).toBe(automationExposureWarning("0.0.0.0", true));
+    const q = io();
+    await start(tmp(), { host: "0.0.0.0", port: 0, open: false, automation: false }, q.i);
+    expect(q.err).toHaveLength(1);
+  });
+  it("automationExposureWarning decides", () => {
+    expect(automationExposureWarning("127.0.0.1", true)).toBeUndefined();
+    expect(automationExposureWarning("localhost", true)).toBeUndefined();
+    expect(automationExposureWarning("0.0.0.0", false)).toBeUndefined();
+    expect(automationExposureWarning("0.0.0.0", true)).toBe(
+      "warning: listening on 0.0.0.0 without authentication; automations can run commands on this machine. Use --no-automation to disable.",
+    );
+  });
+  it("shutdown closes and returns", async () => {
+    const s = await runWeb(tmp(), { port: 0, open: false }, io().i);
+    await s.shutdown(200);
   });
   it("errors without config", async () => {
     await expect(runWeb(tmp(false), { port: 0, open: false }, io().i)).rejects.toThrow(/kb init/);

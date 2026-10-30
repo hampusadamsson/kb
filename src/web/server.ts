@@ -23,6 +23,8 @@ export interface RunningServer {
   url: string;
   port: number;
   host: string;
+  /** resolves when automation runs started by requests have finished */
+  settled(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -162,6 +164,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const dir = path.resolve(opts.dir);
   const hub = new EventHub(dir);
   const loopback = ["127.0.0.1", "::1", "localhost"].includes(host.toLowerCase());
+  const pending = new Set<Promise<void>>();
   let allowedHosts: Set<string> | undefined; // set once the port is known; undefined = no check
 
   const handler = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
@@ -193,6 +196,11 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       onAutomation: opts.log ? (rec) => opts.log!.append(rec) : undefined,
     }); // fresh view per request
     const r = await handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log });
+    if (opts.runner) {
+      const p = kb.settled().catch(() => {});
+      pending.add(p);
+      void p.then(() => pending.delete(p));
+    }
     sendJson(res, r.status, r.body);
   };
 
@@ -233,6 +241,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     url: `http://${shown}:${actual}`,
     port: actual,
     host,
+    settled: async () => {
+      while (pending.size) await Promise.all([...pending]);
+    },
     close: () =>
       new Promise<void>((resolve, reject) => {
         hub.close();

@@ -110,7 +110,7 @@ export function automationList({ rules, cols, board, onChange }) {
       h("div", { class: "field" }, h("span", { class: "lbl", text: "…and has labels" }), chips.el),
       h("div", { class: "field" }, h("span", { class: "lbl", text: "…and properties" }), propRows),
       h("textarea", { class: "mono auto-run", rows: 3, placeholder: "echo {{ id }} >> done.txt", "aria-label": "Script", value: r.run, oninput: (e) => ((r.run = e.target.value), onChange()) }),
-      h("p", { class: "muted hint", text: `Variables: ${AUTOMATION_VARS.map((v) => `{{ ${v} }}`).join(" ")}. Values are shell-quoted automatically.` }),
+      h("p", { class: "muted hint", text: `Variables: ${AUTOMATION_VARS.map((v) => `{{ ${v} }}`).join(" ")}. Values are shell-quoted automatically: write placeholders bare (echo {{ name }}), not in quotes.` }),
       h("div", { class: "row" }, test, h("span", { class: "muted", text: "Runs the script for real with a sample ticket." })),
       out,
     );

@@ -122,7 +122,7 @@ Examples:
       if (r.errors > 0) process.exitCode = 1;
     }));
 
-  program.command("web").description("Start the local web UI")
+  program.command("web").description("Start the local web UI (automation values are shell-quoted: write {{ name }} bare, not in quotes)")
     .option("--host <addr>", "address to bind", "127.0.0.1")
     .option("--port <n>", "port (default 4747, auto-increments if busy)")
     .option("--no-open", "do not open the browser")
@@ -135,7 +135,7 @@ Examples:
           opener: defaultOpener,
         });
         const stop = (): void => {
-          server.close().then(() => process.exit(0), () => process.exit(1));
+          server.shutdown().then(() => process.exit(0), () => process.exit(1));
         };
         process.once("SIGINT", stop);
         process.once("SIGTERM", stop);

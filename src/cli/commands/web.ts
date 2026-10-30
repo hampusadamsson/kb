@@ -42,18 +42,26 @@ function parsePort(v: string | number): number {
   return n;
 }
 
-export async function runWeb(cwd: string, opts: WebOpts, io: WebIO): Promise<RunningServer> {
+export function automationExposureWarning(host: string, automationsEnabled: boolean): string | undefined {
+  if (!automationsEnabled || LOOPBACK.has(host.toLowerCase())) return undefined;
+  return `warning: listening on ${host} without authentication; automations can run commands on this machine. Use --no-automation to disable.`;
+}
+
+export const SHUTDOWN_DEADLINE_MS = 5000;
+
+export async function runWeb(cwd: string, opts: WebOpts, io: WebIO): Promise<RunningServer & { shutdown(deadlineMs?: number): Promise<void> }> {
   const host = opts.host ?? "127.0.0.1";
   const explicit = opts.port !== undefined;
   const port = explicit ? parsePort(opts.port as string | number) : 4747;
   createKanban({ dir: cwd }).load(); // throws if config missing/invalid
 
+  const runner = opts.automation === false ? undefined : createShellRunner();
   const server = await startServer({
     dir: cwd,
     host,
     port,
     strictPort: explicit,
-    runner: opts.automation === false ? undefined : createShellRunner(),
+    runner,
     log: createAutomationLog(cwd),
   });
   const wildcard = host === "0.0.0.0" || host === "::";
@@ -63,6 +71,21 @@ export async function runWeb(cwd: string, opts: WebOpts, io: WebIO): Promise<Run
   if (!LOOPBACK.has(host)) {
     io.err(`warning: no auth — anyone who can reach ${host}:${server.port} can read and edit your tickets`);
   }
+  const exposure = automationExposureWarning(host, runner !== undefined);
+  if (exposure) io.err(exposure);
   if (opts.open !== false) io.opener(url);
-  return server;
+  return {
+    ...server,
+    async shutdown(deadlineMs = SHUTDOWN_DEADLINE_MS) {
+      try {
+        await server.close();
+      } finally {
+        let t: NodeJS.Timeout | undefined;
+        const deadline = new Promise<void>((r) => (t = setTimeout(r, deadlineMs)));
+        await Promise.race([server.settled(), deadline]);
+        clearTimeout(t);
+        runner?.killAll();
+      }
+    },
+  };
 }

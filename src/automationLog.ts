@@ -4,6 +4,7 @@ import type { AutomationRecord } from "./core/automation.js";
 
 const MAX_BYTES = 256 * 1024;
 const KEEP_LINES = 200;
+const TAIL_BYTES = 256 * 1024;
 const OUT_CAP = 4 * 1024;
 
 export interface AutomationLog {
@@ -20,12 +21,14 @@ export function createAutomationLog(dir: string): AutomationLog {
   return {
     append(rec) {
       try {
-        const r = { ...rec, result: { ...rec.result, stdout: clip(rec.result.stdout), stderr: clip(rec.result.stderr) } };
+        const r = { ...rec, command: clip(rec.command), result: { ...rec.result, stdout: clip(rec.result.stdout), stderr: clip(rec.result.stderr) } };
         fs.mkdirSync(folder, { recursive: true });
         fs.appendFileSync(file, JSON.stringify(r) + "\n");
         if (fs.statSync(file).size > MAX_BYTES) {
           const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
-          fs.writeFileSync(file, lines.slice(-KEEP_LINES).join("\n") + "\n");
+          const tmp = `${file}.${process.pid}.tmp`;
+          fs.writeFileSync(tmp, lines.slice(-KEEP_LINES).join("\n") + "\n");
+          fs.renameSync(tmp, file);
         }
       } catch {
         // logging must never break a command
@@ -34,7 +37,25 @@ export function createAutomationLog(dir: string): AutomationLog {
     recent(n = 20) {
       let text: string;
       try {
-        text = fs.readFileSync(file, "utf8");
+        const fd = fs.openSync(file, "r");
+        try {
+          const size = fs.fstatSync(fd).size;
+          const len = Math.min(size, TAIL_BYTES);
+          const buf = Buffer.alloc(len);
+          let got = 0;
+          while (got < len) {
+            const k = fs.readSync(fd, buf, got, len - got, size - len + got);
+            if (k <= 0) break;
+            got += k;
+          }
+          text = buf.subarray(0, got).toString("utf8");
+          if (size > len) {
+            const nl = text.indexOf("\n");
+            text = nl < 0 ? "" : text.slice(nl + 1); // drop partial first line
+          }
+        } finally {
+          fs.closeSync(fd);
+        }
       } catch {
         return [];
       }
