@@ -68,7 +68,9 @@ describe("GET /api/events", () => {
         // aborted
       }
     })();
-    await new Promise((r) => setTimeout(r, 200));
+    // FSEvents may replay the just-written kanban.yaml; let that settle before measuring
+    await new Promise((r) => setTimeout(r, 500));
+    buf = "";
     fs.mkdirSync(path.join(dir, ".kb"), { recursive: true });
     fs.appendFileSync(path.join(dir, ".kb", "events.log"), "{}\n");
     await new Promise((r) => setTimeout(r, 600));
