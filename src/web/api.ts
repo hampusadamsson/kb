@@ -1,3 +1,4 @@
+import path from "node:path";
 import { KanbanError, type Kanban, type Patch } from "../core/index.js";
 import { duplicateKeys, toDetail, toView } from "./view.js";
 
@@ -96,6 +97,10 @@ const detail: Handler = (kb, _req, [id]) => {
 
 const create: Handler = (kb, req) => {
   const b = req.body;
+  const f = str(b.file, "file");
+  if (f !== undefined && (path.isAbsolute(f) || path.win32.isAbsolute(f) || f.split(/[\\/]/).includes(".."))) {
+    throw new KanbanError("invalid", "file must be a relative path inside the board directory");
+  }
   const r = kb.add({
     name: str(b.name, "name") as string,
     status: str(b.status, "status"),
@@ -175,7 +180,13 @@ export function handleApi(kb: Kanban, req: ApiRequest): ApiResponse {
   if (!r) return fail(405, "method-not-allowed", `${req.method} not allowed on ${path}`);
   try {
     const m = r.re.exec(path)!;
-    return r.handler(kb, req, m.slice(1).map(decodeURIComponent));
+    let params: string[];
+    try {
+      params = m.slice(1).map(decodeURIComponent);
+    } catch {
+      return fail(400, "invalid", "malformed percent-encoding in path");
+    }
+    return r.handler(kb, req, params);
   } catch (e) {
     return errorResponse(e);
   }

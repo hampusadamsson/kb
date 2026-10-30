@@ -37,7 +37,9 @@ const TYPES: Record<string, string> = {
   ".png": "image/png",
 };
 
-const CSP = "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'";
+const CSP =
+  "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; " +
+  "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -50,7 +52,9 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
     "Content-Length": Buffer.byteLength(data),
+    ...(status === 413 ? { Connection: "close" } : {}),
   });
   res.end(data);
 }
@@ -59,15 +63,17 @@ function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
+    let tooLarge = false;
     req.on("data", (c: Buffer) => {
       size += c.length;
       if (size > MAX_BODY) {
-        reject(new HttpError(413, "too-large", "request body too large (max 1 MB)"));
-        req.destroy();
-      } else chunks.push(c);
+        tooLarge = true; // keep draining (discarding) so the response can be delivered
+        chunks.length = 0;
+      } else if (!tooLarge) chunks.push(c);
     });
     req.on("error", reject);
     req.on("end", () => {
+      if (tooLarge) return reject(new HttpError(413, "too-large", "request body too large (max 1 MB)"));
       const text = Buffer.concat(chunks).toString("utf8");
       if (text.trim() === "") return resolve({});
       try {
@@ -89,6 +95,17 @@ function sameOrigin(req: http.IncomingMessage): boolean {
   } catch {
     return false;
   }
+}
+
+function hostAllowed(req: http.IncomingMessage, allowed: Set<string> | undefined): boolean {
+  if (!allowed) return true;
+  return allowed.has((req.headers.host ?? "").toLowerCase());
+}
+
+function secFetchOk(req: http.IncomingMessage): boolean {
+  const v = req.headers["sec-fetch-site"];
+  if (v === undefined) return true;
+  return v === "same-origin" || v === "none";
 }
 
 function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): void {
@@ -114,6 +131,7 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathna
       "Cache-Control": "no-store",
       "Content-Security-Policy": CSP,
       "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
       "Content-Length": data.length,
     });
     res.end(req.method === "HEAD" ? undefined : data);
@@ -138,16 +156,25 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const wanted = opts.port ?? DEFAULT_PORT;
   const dir = path.resolve(opts.dir);
   const hub = new EventHub(dir);
+  const loopback = ["127.0.0.1", "::1", "localhost"].includes(host.toLowerCase());
+  let allowedHosts: Set<string> | undefined; // set once the port is known; undefined = no check
 
   const handler = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const method = req.method ?? "GET";
+    if (!hostAllowed(req, allowedHosts)) {
+      return sendJson(res, 421, { error: "host not allowed", code: "host-not-allowed" });
+    }
     if (!url.pathname.startsWith("/api/") && url.pathname !== "/api") {
       return serveStatic(req, res, url.pathname);
     }
     res.setHeader("Cache-Control", "no-store");
-    if (method !== "GET" && method !== "HEAD" && !sameOrigin(req)) {
+    const writes = method !== "GET" && method !== "HEAD";
+    if (writes && (!sameOrigin(req) || !secFetchOk(req))) {
       return sendJson(res, 403, { error: "cross-origin request refused", code: "forbidden" });
+    }
+    if (writes && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+      return sendJson(res, 415, { error: "content-type must be application/json", code: "unsupported" });
     }
     if (url.pathname === "/api/events") {
       if (method !== "GET") return sendJson(res, 405, { error: "method not allowed", code: "method-not-allowed" });
@@ -188,6 +215,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   }
 
   const actual = (server.address() as { port: number }).port;
+  if (loopback) {
+    allowedHosts = new Set(["localhost", "127.0.0.1", "[::1]"].map((n) => `${n}:${actual}`));
+  }
   const shown = host.includes(":") ? `[${host}]` : host;
   return {
     url: `http://${shown}:${actual}`,

@@ -307,6 +307,12 @@ export class Kanban {
 
     const rel = input.file ?? filenameFor(id, input.name);
     const abs = path.resolve(this.dir, rel);
+    if (input.file !== undefined) {
+      const inside = path.relative(path.resolve(this.dir), abs);
+      if (inside === "" || inside.startsWith("..") || path.isAbsolute(inside) || !abs.endsWith(".md")) {
+        throw new KanbanError("invalid", `file must be a .md path inside the board directory: ${rel}`);
+      }
+    }
     const body = input.body !== undefined ? bodyText(input.body) : "";
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     try {

@@ -6,6 +6,7 @@ import { CONFIG_FILE, loadConfig, matchesTicketGlob, type Config } from "../core
 const IGNORED = new Set(["node_modules", "dist", ".git"]);
 const KEEPALIVE_MS = 25_000;
 const DEBOUNCE_MS = 100;
+const MAX_WAIT_MS = 1000;
 
 /** One shared fs watcher fanning out `changed` events to SSE clients. */
 export class EventHub {
@@ -14,6 +15,7 @@ export class EventHub {
   private timer: NodeJS.Timeout | undefined;
   private keepAlive: NodeJS.Timeout;
   private config: Config | undefined;
+  private firstPending = 0;
 
   constructor(private readonly dir: string) {
     try {
@@ -31,20 +33,31 @@ export class EventHub {
     const rel = filename.toString();
     const parts = rel.split(path.sep);
     if (parts.some((p) => IGNORED.has(p))) return false;
-    if (rel === CONFIG_FILE) return true;
-    try {
-      this.config = loadConfig(this.dir);
-    } catch {
-      // config unreadable: fall back to any markdown file
-      return rel.endsWith(".md");
+    if (rel === CONFIG_FILE) {
+      this.config = undefined; // reload on next use
+      return true;
+    }
+    if (!this.config) {
+      try {
+        this.config = loadConfig(this.dir);
+      } catch {
+        // config unreadable: fall back to any markdown file (not cached)
+        return rel.endsWith(".md");
+      }
     }
     return matchesTicketGlob(this.config, rel);
   }
 
   private onFile(filename: string | Buffer | null): void {
     if (!this.relevant(filename)) return;
+    const now = Date.now();
+    if (!this.timer) this.firstPending = now;
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.broadcast("event: changed\ndata: {}\n\n"), DEBOUNCE_MS);
+    const wait = Math.max(0, Math.min(DEBOUNCE_MS, this.firstPending + MAX_WAIT_MS - now));
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      this.broadcast("event: changed\ndata: {}\n\n");
+    }, wait);
   }
 
   private broadcast(msg: string): void {
@@ -58,8 +71,9 @@ export class EventHub {
       "Cache-Control": "no-store",
       Connection: "keep-alive",
     });
-    res.write(": connected\n\n");
+    res.write("retry: 2000\n: connected\n\n");
     this.clients.add(res);
+    res.on("error", () => this.clients.delete(res));
     res.on("close", () => this.clients.delete(res));
   }
 

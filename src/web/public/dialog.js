@@ -325,8 +325,9 @@ class Session {
 
   async addComment() {
     const text = this.commentInput.value.trim();
-    if (!text) return;
+    if (!text || this.busy) return;
     this.showError("");
+    this.busy = true;
     try {
       const r = await api.comment(String(this.detail.id), text, this.mtime);
       this.commentInput.value = "";
@@ -336,6 +337,8 @@ class Session {
       this.ctx.onSaved?.(true);
     } catch (e) {
       this.handleError(e);
+    } finally {
+      this.busy = false;
     }
   }
 

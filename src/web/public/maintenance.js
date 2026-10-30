@@ -11,8 +11,11 @@ export const isOpen = () => dlg().open;
 
 export function init(applied) {
   onApplied = applied;
+  dlg().addEventListener("mousedown", (e) => {
+    dlg().dataset.bd = e.target === dlg() ? "1" : "";
+  });
   dlg().addEventListener("click", (e) => {
-    if (e.target === dlg()) dlg().close();
+    if (e.target === dlg() && dlg().dataset.bd === "1") dlg().close();
   });
 }
 

@@ -175,7 +175,7 @@ $("maint-btn").addEventListener("click", () => maint.open());
 $("maint-close").addEventListener("click", () => $("maint-dialog").close());
 maint.init(() => load());
 
-// Click on the backdrop closes the ticket dialog only if the click started and ended there.
+// Click on the backdrop closes a dialog only if the click started and ended there.
 $("ticket-dialog").addEventListener("mousedown", (e) => {
   $("ticket-dialog").dataset.bd = e.target === $("ticket-dialog") ? "1" : "";
 });

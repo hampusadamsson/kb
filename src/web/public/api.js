@@ -14,8 +14,8 @@ async function request(method, url, body) {
   try {
     res = await fetch(url, {
       method,
-      headers: body === undefined ? {} : { "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: method === "GET" ? {} : { "content-type": "application/json" },
+      body: method === "GET" ? undefined : JSON.stringify(body ?? {}),
       cache: "no-store",
     });
   } catch (e) {
