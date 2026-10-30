@@ -1,6 +1,8 @@
 import { Command } from "commander";
 import { automationEnabled, automationSession } from "./automation.js";
 import { boards } from "./commands/boards.js";
+import { complete } from "./commands/complete.js";
+import { generate, SHELLS } from "./completion.js";
 import { useColor } from "./format.js";
 import { fix } from "./commands/fix.js";
 import { init } from "./commands/init.js";
@@ -12,7 +14,7 @@ import { add, comment, defaultIo, edit, mv, set, type AddOpts, type SetOpts, typ
 
 export const commandNames = [
   "init", "ls", "boards", "show", "add", "set", "mv",
-  "edit", "comment", "fix", "validate", "web",
+  "edit", "comment", "fix", "validate", "web", "completion",
 ] as const;
 
 /** Central error handler: message to stderr, exit code 1. */
@@ -143,6 +145,22 @@ Examples:
         console.error(`error: ${(e as Error).message}`);
         process.exitCode = 1;
       }
+    });
+
+  program.command("completion").description("Print a shell completion script (bash, zsh)")
+    .argument("<shell>", `one of: ${SHELLS.join(", ")}`)
+    .addHelpText("after", `
+Install:
+  zsh:   source <(kb completion zsh)     (needs: autoload -U compinit && compinit)
+  bash:  source <(kb completion bash)
+         or: kb completion bash > /etc/bash_completion.d/kb`)
+    .action((shell: string) => run(() => process.stdout.write(generate(program, shell))));
+
+  program.command("__complete", { hidden: true }).argument("<kind>").argument("[arg]")
+    .allowUnknownOption()
+    .action((kind: string, arg: string | undefined) => {
+      const out = complete(cwd(), kind, arg);
+      if (out.length) process.stdout.write(out.join("\n") + "\n");
     });
   return program;
 }

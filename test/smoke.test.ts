@@ -9,6 +9,6 @@ describe("kb", () => {
   });
   it("stub exits 1", () => {
     const p = buildProgram();
-    expect(p.commands.map((c) => c.name())).toEqual([...commandNames]);
+    expect(p.commands.map((c) => c.name()).filter((n) => n !== "__complete")).toEqual([...commandNames]);
   });
 });
