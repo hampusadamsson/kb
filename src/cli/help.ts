@@ -3,7 +3,6 @@ import { makeStyle, useColor, type Style } from "./format.js";
 
 export const WIDTH = 100;
 export const MAIN_COMMANDS = ["ls", "add", "mv", "set", "show", "comment", "edit"] as const;
-const ROOT_INTRO = "Local markdown kanban CLI.";
 
 export interface HelpSection {
   title: string;
@@ -100,7 +99,7 @@ function mkFormat(style: () => Style) {
     const section = (title: string, lines: string[]): void => {
       if (lines.length) blocks.push([st.bold(title), ...lines]);
     };
-    const desc = cmd.parent ? cmd.description() : ROOT_INTRO;
+    const desc = cmd.description();
     if (desc) blocks.push(wrapParagraphs(desc, WIDTH, ""));
     section("USAGE", [`  ${usage(cmd, help)}`]);
 
@@ -150,5 +149,7 @@ export function formatHelp(cmd: Command, help: Help, style: Style = makeStyle(us
 /** Apply the formatter to a command and all its (current) subcommands. */
 export function configureHelp(program: Command): void {
   program.configureHelp({ formatHelp: (cmd, help) => formatHelp(cmd, help, makeStyle(useColor())) });
+  program.helpOption("-h, --help", `help for ${program.name()}`);
+  if (!program.parent) program.helpCommand("help [command]", "Help about any command");
   for (const c of program.commands) configureHelp(c);
 }

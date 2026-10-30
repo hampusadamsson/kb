@@ -5,6 +5,7 @@ import { complete } from "./commands/complete.js";
 import { generate, SHELLS } from "./completion.js";
 import { useColor } from "./format.js";
 import { configureHelp } from "./help.js";
+import { applyHelpContent } from "./help-content.js";
 import { fix } from "./commands/fix.js";
 import { init } from "./commands/init.js";
 import { ls, lsJson, parseLimit } from "./commands/ls.js";
@@ -12,6 +13,8 @@ import { show } from "./commands/show.js";
 import { defaultOpener, runWeb } from "./commands/web.js";
 import { validate } from "./commands/validate.js";
 import { add, comment, defaultIo, edit, mv, set, type AddOpts, type SetOpts, type Io } from "./commands/write.js";
+
+const ID_DESC = "ticket id: exact, or numeric (7 matches 007)";
 
 export const commandNames = [
   "init", "ls", "boards", "show", "add", "set", "mv",
@@ -41,7 +44,7 @@ async function runAuto(flagOff: boolean, fn: (io: Io) => string): Promise<void> 
 }
 
 export function buildProgram(cwd: () => string = () => process.cwd()): Command {
-  const program = new Command("kb").description("Local markdown kanban CLI")
+  const program = new Command("kb").description("Local markdown kanban CLI.")
     .option("--no-automation", "do not run board automations");
   const off = (o: { automation?: boolean }): boolean => o.automation === false || program.opts().automation === false;
 
@@ -58,16 +61,6 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
     .option("--format <format>", "json (default) or text", "json")
     .option("--full", "json: include body and comments")
     .option("--limit <n>", "json: max tickets, 0 = no limit (default 50; warns when cut)")
-    .addHelpText("after", `
-Filters are ANDed. Prefix a value with ! to negate it (quote with single
-quotes in the shell): -l '!bug'  -p '!priority:low'  -p '!priority'  '!wip'
-Examples:
-  kb ls -l bug -p priority:high
-  kb ls -p '!status:done'
-  kb ls login
-  kb ls --full -l bug          include bodies and comments
-  kb ls --limit 0              all tickets
-  kb ls --format text          board view for humans`)
     .action((text: string | undefined, o: { board?: string; label?: string[]; property?: string[]; format: string; full?: boolean; limit?: string }) => run(() => {
       if (o.format !== "json" && o.format !== "text") throw new Error(`--format must be json or text, got "${o.format}"`);
       const f = { board: o.board, text, labels: o.label, props: o.property };
@@ -79,7 +72,7 @@ Examples:
   program.command("boards").description("List boards")
     .action(() => run(() => console.log(boards(cwd()))));
 
-  program.command("show").description("Print a ticket").argument("<id>")
+  program.command("show").description("Print a ticket").argument("<id>", ID_DESC)
     .action((id: string) => run(() => console.log(show(cwd(), id))));
 
   const common = (c: Command): Command =>
@@ -94,24 +87,25 @@ Examples:
       .option("-e, --edit", "open $EDITOR afterwards")
       .option("--no-automation", "do not run board automations");
 
-  common(program.command("add").description("Create a ticket").argument("[name]"))
+  common(program.command("add").description("Create a ticket").argument("[name]", "ticket name (or use -n/--name)"))
     .option("-f, --file <path>", "file path")
     .option("--id <value>", "explicit id")
     .action((name: string | undefined, o: AddOpts & { automation?: boolean }) => runAuto(off(o), (io) => add(cwd(), name, o, io)));
 
-  common(program.command("set").description("Change ticket fields").argument("<id>"))
+  common(program.command("set").description("Change ticket fields").argument("<id>", ID_DESC))
     .option("--unset <key>", "remove property (repeatable)", collect)
     .option("--unlabel <label>", "remove label (repeatable)", collect)
     .action((id: string, o: SetOpts & { automation?: boolean }) => runAuto(off(o), (io) => set(cwd(), id, o, io)));
 
-  program.command("mv").description("Change ticket status").argument("<id>").argument("<status>")
+  program.command("mv").description("Change ticket status").argument("<id>", ID_DESC)
+    .argument("<status>", "target column; an unknown column puts the ticket in unsorted (with a warning)")
     .option("--no-automation", "do not run board automations")
     .action((id: string, status: string, o: { automation?: boolean }) => runAuto(off(o), (io) => mv(cwd(), id, status, io)));
 
-  program.command("edit").description("Open ticket in $EDITOR").argument("<id>")
+  program.command("edit").description("Open ticket in $EDITOR").argument("<id>", ID_DESC)
     .action((id: string) => run(() => edit(cwd(), id)));
 
-  program.command("comment").description("Add a comment").argument("<id>").argument("<text>")
+  program.command("comment").description("Add a comment").argument("<id>", ID_DESC).argument("<text>", "comment text")
     .action((id: string, text: string) => run(() => console.log(comment(cwd(), id, text))));
 
   program.command("fix").description("Repair missing/duplicate ids")
@@ -125,7 +119,7 @@ Examples:
       if (r.errors > 0) process.exitCode = 1;
     }));
 
-  program.command("web").description("Start the local web UI (automation values are shell-quoted: write {{ name }} bare, not in quotes)")
+  program.command("web").description("Start the local web UI")
     .option("--host <addr>", "address to bind", "127.0.0.1")
     .option("--port <n>", "port (default 4747, auto-increments if busy)")
     .option("--no-open", "do not open the browser")
@@ -150,11 +144,6 @@ Examples:
 
   program.command("completion").description("Print a shell completion script (bash, zsh)")
     .argument("<shell>", `one of: ${SHELLS.join(", ")}`)
-    .addHelpText("after", `
-Install:
-  zsh:   source <(kb completion zsh)     (needs: autoload -U compinit && compinit)
-  bash:  source <(kb completion bash)
-         or: kb completion bash > /etc/bash_completion.d/kb`)
     .action((shell: string) => run(() => process.stdout.write(generate(program, shell))));
 
   program.command("__complete", { hidden: true }).argument("<kind>").argument("[arg]")
@@ -163,6 +152,7 @@ Install:
       const out = complete(cwd(), kind, arg);
       if (out.length) process.stdout.write(out.join("\n") + "\n");
     });
+  applyHelpContent(program);
   configureHelp(program);
   return program;
 }

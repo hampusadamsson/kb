@@ -45,6 +45,57 @@ describe("subcommand help", () => {
   });
 });
 
+describe("help content", () => {
+  const root = buildProgram();
+  const pub = commandNames.map((n) => root.commands.find((c) => c.name() === n)!);
+  const helpOf = (c: Command): string => plain(c);
+  const all = [root, ...root.commands.filter((c) => c.name() !== "__complete")];
+
+  it("every public command has description and examples", () => {
+    for (const c of pub) {
+      expect(c.description(), c.name()).not.toBe("");
+      expect(helpOf(c), c.name()).toMatch(/\nEXAMPLES\n {2}\$ kb /);
+    }
+  });
+  it("examples start with $ kb and use a real command", () => {
+    const names = new Set<string>([...commandNames, "help"]);
+    for (const c of all) {
+      const block = helpOf(c).split("\nEXAMPLES\n")[1]?.split("\n\n")[0] ?? "";
+      for (const l of block.split("\n").filter(Boolean)) {
+        const m = l.match(/^ {2}\$ (?:\w+=(?:"[^"]*"|\S+) )?kb (\S+)/) ?? (/^ {2}\$ .*\| kb (\S+)/.exec(l));
+        expect(m, l).toBeTruthy();
+        expect(names.has(m![1]!), l).toBe(true);
+      }
+    }
+  });
+  it("command-specific sections", () => {
+    expect(helpOf(sub("ls"))).toMatch(/\nFILTERS\n[^]*\nOUTPUT\n/);
+    expect(helpOf(sub("web"))).toContain("\nNOTES\n");
+    expect(sub("web").description()).toBe("Start the local web UI");
+    expect(helpOf(sub("completion"))).toContain("source <(kb completion zsh)");
+    expect(helpOf(sub("completion"))).toContain("source <(kb completion bash)");
+    expect(plain(root)).toContain("\nENVIRONMENT\n");
+    expect(plain(root)).toContain("KB_AUTOMATION");
+    expect(plain(root)).toMatch(/^ {2}help +Help about any command$/m);
+  });
+  it("help flag descriptions", () => {
+    expect(plain(root)).toMatch(/-h, --help +help for kb$/m);
+    expect(helpOf(sub("mv"))).toMatch(/-h, --help +help for mv$/m);
+    expect(helpOf(sub("ls"))).toMatch(/-h, --help +help for ls$/m);
+  });
+  it("no line > 100 chars, nothing printed twice", () => {
+    for (const c of all) {
+      const out = helpOf(c);
+      for (const l of out.split("\n")) expect(l.length, `${c.name()}: ${l}`).toBeLessThanOrEqual(100);
+      expect(out.match(/\nEXAMPLES\n/g)?.length ?? 0).toBeLessThanOrEqual(1);
+    }
+    const ls = helpOf(sub("ls"));
+    expect(ls.split("kb ls --limit 0").length).toBe(2);
+    expect(ls).not.toMatch(/^Examples:/m);
+    expect(helpOf(sub("completion")).match(/Install/gi)?.length).toBe(1);
+  });
+});
+
 describe("style and helpers", () => {
   it("bold when styled", () => {
     const c = buildProgram();
