@@ -2,7 +2,7 @@ import type { Command, Help } from "commander";
 import { makeStyle, useColor, type Style } from "./format.js";
 
 export const WIDTH = 100;
-export const MAIN_COMMANDS = ["ls", "add", "mv", "set", "show", "comment", "edit"] as const;
+export const MAIN_COMMANDS = ["ls", "add", "mv", "set", "show", "comment", "edit", "automations"] as const;
 
 export interface HelpSection {
   title: string;

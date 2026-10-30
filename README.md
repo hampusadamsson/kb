@@ -61,6 +61,7 @@ npm run build && npm test
 | `kb comment <id> "text"` | Append a timestamped comment |
 | `kb fix [--dry-run]` | Assign/repair ids |
 | `kb validate` | Check config and tickets |
+| `kb automations [--live\|--all] [-b board] [--format text]` | Running automations (default) or all configured ones; read-only |
 | `kb web [--host <addr>] [--port <n>] [--no-open] [--no-automation]` | Start the local web UI |
 | `kb completion <bash\|zsh>` | Print a shell completion script (see [Shell completion](#shell-completion)) |
 | `kb help [command]` | Help about any command (same as `kb <command> --help`) |
@@ -513,6 +514,10 @@ Two layers:
 2. The guardrail above. It also covers what the variable does not: scripts that call the web API (`curl`) are not blocked by `KB_AUTOMATION`, but still hit the run limit.
 
 There is no depth cap beyond this.
+
+### Listing automations
+
+`kb automations` shows what is running right now (`--live`, default); `kb automations --all` lists every configured rule with its last run and counts (JSON by default, `--format text` for a table, `-b` for one board). It is derived from the tickets' `automations` frontmatter, so scripts started by `kb web` or by the CLI both show up; entries `running` for more than 5 minutes count as stale (not live; status `stale` in `--all`). It never runs anything or writes files. The Live tab in the web UI shows the server's own runs and can kill them.
 
 ### Validation
 

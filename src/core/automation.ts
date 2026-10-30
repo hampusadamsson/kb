@@ -1,6 +1,7 @@
 // Board automations: rule matching, command templates, runner interface. UI/process agnostic.
-import type { Automation } from "./config.js";
+import { automationsFor, type Automation, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
+import { clipText } from "./events.js";
 import { matches, type Ticket } from "./tickets.js";
 
 export interface AutomationEvent {
@@ -276,4 +277,114 @@ export function matchRule(rule: Automation, event: AutomationEvent, ticket: Tick
     if (ok === neg) return false;
   }
   return true;
+}
+
+// ---- overview (read-only, derived from ticket frontmatter) ----
+
+/** A `running` entry older than this is considered stale (same threshold as validate). */
+export const STALE_RUNNING_MS = 5 * 60_000;
+
+export interface AutomationLastRun {
+  ticketId: unknown;
+  /** done | failed | skipped | running | stale */
+  status: string;
+  at: string;
+  exit?: number | null;
+  error?: string;
+}
+
+export interface AutomationLive {
+  rule: string;
+  board: string;
+  ticket: { id: unknown; name: string; path: string };
+  startedAt: string;
+  elapsedMs: number;
+  command: string;
+}
+
+export interface AutomationInfo {
+  name: string;
+  board: string;
+  enabled: boolean;
+  guard: boolean;
+  when: Automation["when"];
+  run: string;
+  /** non-stale running entries */
+  running: number;
+  lastRun: AutomationLastRun | null;
+  counts: { done: number; failed: number; skipped: number; running: number; stale: number };
+}
+
+export interface AutomationOverview {
+  rules: AutomationInfo[];
+  /** non-stale running entries, newest first */
+  live: AutomationLive[];
+}
+
+function atMs(at: unknown): number {
+  const ms = at instanceof Date ? at.getTime() : typeof at === "string" ? new Date(at).getTime() : NaN;
+  return ms;
+}
+
+/** Rule definitions plus runtime data from ticket `automations` frontmatter. Pure. */
+export function buildAutomationOverview(
+  config: Config,
+  tickets: Ticket[],
+  boards: string[],
+  nowMs: number,
+): AutomationOverview {
+  const rules: AutomationInfo[] = [];
+  const live: (AutomationLive & { ms: number })[] = [];
+  for (const board of boards) {
+    const defs = automationsFor(config, board);
+    const infos = new Map<string, AutomationInfo & { lastMs: number }>();
+    for (const r of defs) {
+      infos.set(r.name, {
+        name: r.name,
+        board,
+        enabled: r.enabled !== false,
+        guard: r.guard !== false,
+        when: r.when,
+        run: clipText(r.run),
+        running: 0,
+        lastRun: null,
+        counts: { done: 0, failed: 0, skipped: 0, running: 0, stale: 0 },
+        lastMs: -Infinity,
+      });
+    }
+    for (const t of tickets) {
+      if (t.board !== board) continue;
+      const autos = t.data.automations;
+      if (autos === null || typeof autos !== "object" || Array.isArray(autos)) continue;
+      for (const [rule, e] of Object.entries(autos as Record<string, unknown>)) {
+        if (e === null || typeof e !== "object" || Array.isArray(e)) continue;
+        const ent = e as Record<string, unknown>;
+        let status = typeof ent.status === "string" ? ent.status : "";
+        const ms = atMs(ent.at);
+        const at = ent.at instanceof Date ? ent.at.toISOString() : ent.at === undefined ? "" : String(ent.at);
+        const info = infos.get(rule);
+        if (status === "running") {
+          const stale = Number.isNaN(ms) || nowMs - ms > STALE_RUNNING_MS;
+          if (stale) status = "stale";
+          else live.push({ rule, board, ticket: { id: t.id, name: t.name, path: t.path }, startedAt: at, elapsedMs: Math.max(0, nowMs - ms), command: info?.run ?? "", ms });
+        }
+        if (!info) continue;
+        if (status === "done" || status === "failed" || status === "skipped" || status === "running" || status === "stale") {
+          info.counts[status]++;
+          if (status === "running") info.running++;
+        }
+        const sortMs = Number.isNaN(ms) ? -1 : ms;
+        if (sortMs > info.lastMs || (info.lastRun === null && sortMs >= info.lastMs)) {
+          info.lastMs = sortMs;
+          const last: AutomationLastRun = { ticketId: t.id, status: status || "unknown", at };
+          if (ent.exit !== undefined) last.exit = ent.exit as number | null;
+          if (typeof ent.error === "string") last.error = ent.error;
+          info.lastRun = last;
+        }
+      }
+    }
+    for (const { lastMs: _l, ...i } of infos.values()) rules.push(i);
+  }
+  live.sort((a, b) => b.ms - a.ms);
+  return { rules, live: live.map(({ ms: _m, ...l }) => l) };
 }

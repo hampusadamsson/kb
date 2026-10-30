@@ -6,8 +6,11 @@ import {
   renderCommand,
   ticketVars,
   automationProblems,
+  buildAutomationOverview,
+  type AutomationOverview,
   AUTOMATION_RUN_LIMIT,
   entryRuns,
+  STALE_RUNNING_MS,
   totalRuns,
   type AutomationEvent,
   type AutomationRecord,
@@ -509,6 +512,16 @@ export class Kanban {
     return { boards, warnings };
   }
 
+  /** Automation rules and their runtime state (from ticket frontmatter). Read-only; nothing is run. */
+  automationOverview(opts: { board?: string } = {}): AutomationOverview {
+    const { config, tickets } = this.load();
+    const all = orderedBoards(tickets, config);
+    if (opts.board !== undefined && !all.includes(opts.board)) {
+      throw new KanbanError("not-found", `unknown board "${opts.board}" (boards: ${all.join(", ")})`);
+    }
+    return buildAutomationOverview(config, tickets, opts.board !== undefined ? [opts.board] : all, this.now().getTime());
+  }
+
   /** Find a ticket by id (exact, or numeric match). */
   get(idArg: string): Ticket {
     return findById(this.load().tickets, idArg);
@@ -782,7 +795,7 @@ export class Kanban {
         const { status, at } = e as { status?: unknown; at?: unknown };
         if (status !== "running") continue;
         const ms = at instanceof Date ? at.getTime() : typeof at === "string" ? new Date(at).getTime() : NaN;
-        if (Number.isNaN(ms) || nowMs - ms > 5 * 60_000) {
+        if (Number.isNaN(ms) || nowMs - ms > STALE_RUNNING_MS) {
           warn(t.path, `automation "${rule}" on board "${t.board}" has been running since ${String(at)} (stale?)`);
         }
       }
@@ -836,3 +849,4 @@ export function createKanban(opts: KanbanOptions): Kanban {
   return new Kanban(opts);
 }
 
+export type { AutomationInfo, AutomationLive, AutomationOverview, AutomationLastRun } from "./automation.js";

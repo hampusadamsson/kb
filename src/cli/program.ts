@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { automationEnabled, automationSession } from "./automation.js";
+import { automations } from "./commands/automations.js";
 import { boards } from "./commands/boards.js";
 import { complete } from "./commands/complete.js";
 import { generate, SHELLS } from "./completion.js";
@@ -18,7 +19,7 @@ const ID_DESC = "ticket id: exact, or numeric (7 matches 007)";
 
 export const commandNames = [
   "init", "ls", "boards", "show", "add", "set", "mv",
-  "edit", "comment", "fix", "validate", "web", "completion",
+  "edit", "comment", "fix", "validate", "automations", "web", "completion",
 ] as const;
 
 /** Central error handler: message to stderr, exit code 1. */
@@ -118,6 +119,17 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
       const r = validate(cwd());
       console.log(r.out);
       if (r.errors > 0) process.exitCode = 1;
+    }));
+
+  program.command("automations").description("List running (or all) automations")
+    .option("-l, --live", "only automations running right now (default)")
+    .option("-a, --all", "all configured automations")
+    .option("-b, --board <board>", "only this board")
+    .option("--format <format>", "json (default) or text", "json")
+    .action((o: { live?: boolean; all?: boolean; board?: string; format: string }) => run(() => {
+      if (o.live && o.all) throw new Error("--live and --all cannot be used together");
+      if (o.format !== "json" && o.format !== "text") throw new Error(`--format must be json or text, got "${o.format}"`);
+      console.log(automations(cwd(), { board: o.board, all: o.all, format: o.format }));
     }));
 
   program.command("web").description("Start the local web UI")

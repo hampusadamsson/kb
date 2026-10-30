@@ -135,6 +135,14 @@ const COMMANDS: Record<string, Content> = {
     sections: [["Notes", "Checks kanban.yaml and all tickets for problems. Exit code 1 if errors were found, else 0."]],
     examples: ["kb validate", "kb validate && echo ok"],
   },
+  automations: {
+    sections: [["Notes", [
+      "- Read-only: shows what is running now (default) or every configured automation.",
+      "- JSON by default (for scripts); --format text prints a table. -b picks one board.",
+      "- Setup of automations is documented in the README (Automations).",
+    ]]],
+    examples: ["kb automations", "kb automations --all --format text", "kb automations -b another-board --all"],
+  },
   web: {
     sections: [["Notes", [
       "- Run in the folder with kanban.yaml. Prints 'kb web running at <url>' and opens it.",
