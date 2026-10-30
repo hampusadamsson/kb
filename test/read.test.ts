@@ -156,3 +156,50 @@ describe("cli e2e", () => {
     expect(run("show", "1").stdout).toContain("#1 Hello");
   });
 });
+
+describe("ls filters", () => {
+  const tickets = (o: Parameters<typeof ls>[1]) => ls(dir, o).out.split("\n").filter((l) => l.startsWith("  #")).map((l) => l.trim().split(" ")[0]);
+  beforeEach(() => {
+    fs.writeFileSync(path.join(dir, "kanban.yaml"), CONFIG);
+    tk("a.md", "id: 1\nname: Alpha\nstatus: todo\nlabels: [bug, ui]\npriority: high\nsize: 3\ntags: [x, y]", "Login broken");
+    tk("b.md", "id: 2\nname: Beta\nstatus: doing\nlabels: [bug]\npriority: low");
+    tk("c.md", "id: 3\nname: Gamma\nstatus: todo", "wip notes");
+    tk("d.md", "id: 4\nname: Odd\nstatus: nope\nlabels: [ui]");
+    tk("e.md", "id: 5\nname: Other\nstatus: active\nboard: other\nlabels: [bug]");
+  });
+  it("labels", () => {
+    expect(tickets({ labels: ["bug"] })).toEqual(["#1", "#2", "#5"]);
+    expect(tickets({ labels: ["bug", "ui"] })).toEqual(["#1"]);
+    expect(tickets({ labels: ["!bug"] })).toEqual(["#3", "#4"]);
+  });
+  it("properties", () => {
+    expect(tickets({ props: ["priority:high"] })).toEqual(["#1"]);
+    expect(tickets({ props: ["size:3"] })).toEqual(["#1"]);
+    expect(tickets({ props: ["tags:y"] })).toEqual(["#1"]);
+    expect(tickets({ props: ["priority"] })).toEqual(["#1", "#2"]);
+    expect(tickets({ props: ["!priority:low"] })).toEqual(["#1", "#3", "#4", "#5"]);
+    expect(tickets({ props: ["!priority"] })).toEqual(["#3", "#4", "#5"]);
+    expect(tickets({ props: ["status:todo"] })).toEqual(["#1", "#3"]);
+  });
+  it("text", () => {
+    expect(tickets({ text: "ALPHA" })).toEqual(["#1"]);
+    expect(tickets({ text: "login" })).toEqual(["#1"]);
+    expect(tickets({ text: "priority: low" })).toEqual(["#2"]);
+    expect(tickets({ text: "!wip" })).toEqual(["#1", "#2", "#4", "#5"]);
+  });
+  it("combined with board, omission, counts, warnings", () => {
+    expect(tickets({ labels: ["bug"], board: "default", props: ["!priority:low"] })).toEqual(["#1"]);
+    const r = ls(dir, { labels: ["bug"] });
+    expect(r.out).toContain("todo (1)");
+    expect(r.out).toContain("== other ==");
+    const r2 = ls(dir, { props: ["priority"] });
+    expect(r2.out).not.toContain("== other ==");
+    expect(r2.warnings.join("\n")).toContain("d.md: unsorted");
+    expect(r2.out).not.toContain("unsorted");
+  });
+  it("no match prints nothing; no filters unchanged", () => {
+    expect(ls(dir, { text: "zzzz" }).out).toBe("");
+    expect(ls(dir, {}).out).toBe(ls(dir).out);
+    expect(ls(dir).out).toContain("== other ==");
+  });
+});

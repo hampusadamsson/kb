@@ -21,6 +21,8 @@ export interface Ticket {
   comments: Record<string, string>;
   props: Record<string, unknown>;
   body: string;
+  /** entire raw file content */
+  raw: string;
   data: Record<string, unknown>;
   mtime: number;
 }
@@ -48,7 +50,8 @@ export function scan(cwd: string, config: Config): ScanResult {
     try {
       const stat = fs.statSync(abs);
       if (!stat.isFile()) continue;
-      const { yaml, body } = splitFrontmatter(fs.readFileSync(abs, "utf8"));
+      const raw = fs.readFileSync(abs, "utf8");
+      const { yaml, body } = splitFrontmatter(raw);
       if (yaml === undefined) continue;
       const doc = parseDocument(yaml);
       if (doc.errors.length) {
@@ -58,7 +61,7 @@ export function scan(cwd: string, config: Config): ScanResult {
       const data = doc.toJS();
       if (!data || typeof data !== "object" || Array.isArray(data)) continue;
       if (data.type !== "ticket") continue;
-      tickets.push(toTicket(rel, data, body, stat.mtimeMs, config));
+      tickets.push(toTicket(rel, data, body, raw, stat.mtimeMs, config));
     } catch (e) {
       diagnostics.push({ path: rel, message: (e as Error).message });
     }
@@ -70,6 +73,7 @@ function toTicket(
   rel: string,
   data: Record<string, unknown>,
   body: string,
+  raw: string,
   mtime: number,
   config: Config,
 ): Ticket {
@@ -98,6 +102,7 @@ function toTicket(
     comments,
     props,
     body,
+    raw,
     data,
     mtime,
   };
@@ -173,4 +178,44 @@ export function sortTickets(tickets: Ticket[]): Ticket[] {
     if ((an !== undefined) !== (bn !== undefined)) return an !== undefined ? -1 : 1;
     return String(a.id).localeCompare(String(b.id)) || a.path.localeCompare(b.path);
   });
+}
+
+export interface Filters {
+  text?: string;
+  labels?: string[];
+  props?: string[];
+}
+
+export const hasFilters = (f: Filters): boolean =>
+  !!f.text || !!f.labels?.length || !!f.props?.length;
+
+/** Split a leading "!" (negation) off a filter value. */
+function neg(v: string): [boolean, string] {
+  return v.startsWith("!") ? [true, v.slice(1)] : [false, v];
+}
+
+/** All filters AND together; a leading "!" negates a single filter. */
+export function matches(t: Ticket, f: Filters): boolean {
+  if (f.text) {
+    const [n, text] = neg(f.text);
+    if (t.raw.toLowerCase().includes(text.toLowerCase()) === n) return false;
+  }
+  for (const l of f.labels ?? []) {
+    const [n, label] = neg(l);
+    if (t.labels.includes(label) === n) return false;
+  }
+  for (const p of f.props ?? []) {
+    const [n, spec] = neg(p);
+    const i = spec.indexOf(":");
+    const key = i < 0 ? spec : spec.slice(0, i);
+    const v = t.data[key];
+    let ok: boolean;
+    if (i < 0) ok = v !== undefined && v !== null;
+    else {
+      const want = spec.slice(i + 1);
+      ok = Array.isArray(v) ? v.some((e) => String(e) === want) : v != null && String(v) === want;
+    }
+    if (ok === n) return false;
+  }
+  return true;
 }

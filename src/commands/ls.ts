@@ -1,8 +1,8 @@
 import { columnsFor, loadConfig } from "../config.js";
-import { duplicates, hasId, orderedBoards, scan, sortTickets, UNSORTED, type Ticket } from "../tickets.js";
+import { duplicates, hasFilters, hasId, matches, type Filters, orderedBoards, scan, sortTickets, UNSORTED, type Ticket } from "../tickets.js";
 import { fmtId, fmtValue, makeStyle, type Result } from "./format.js";
 
-export interface LsOpts {
+export interface LsOpts extends Filters {
   board?: string;
   color?: boolean;
 }
@@ -37,7 +37,16 @@ export function ls(cwd: string, opts: LsOpts = {}): Result {
   }
 
   for (const board of names) {
-    const mine = tickets.filter((t) => t.board === board);
+    for (const t of sortTickets(tickets.filter((t) => t.board === board && t.column === UNSORTED))) {
+      const why = t.status === undefined ? "missing status" : `unknown status "${t.status}"`;
+      warnings.push(`warning: ${t.path}: unsorted (${why})`);
+    }
+  }
+
+  const filtered = hasFilters(opts);
+  for (const board of names) {
+    const mine = tickets.filter((t) => t.board === board && matches(t, opts));
+    if (filtered && mine.length === 0) continue;
     out.push(s.bold(`== ${board} ==`));
     for (const col of columnsFor(config, board)) {
       const ts = sortTickets(mine.filter((t) => t.column === col));
@@ -47,11 +56,7 @@ export function ls(cwd: string, opts: LsOpts = {}): Result {
     const uns = sortTickets(mine.filter((t) => t.column === UNSORTED));
     if (uns.length) {
       out.push(s.bold(`${UNSORTED} (${uns.length})`));
-      for (const t of uns) {
-        out.push(line(t, s));
-        const why = t.status === undefined ? "missing status" : `unknown status "${t.status}"`;
-        warnings.push(`warning: ${t.path}: unsorted (${why})`);
-      }
+      for (const t of uns) out.push(line(t, s));
     }
     out.push("");
   }

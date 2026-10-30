@@ -29,10 +29,22 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
   program.command("init").description("Write starter kanban.yaml")
     .action(() => run(() => console.log(init(cwd()))));
 
+  const collect = (v: string, prev: string[] = []) => [...prev, v];
+
   program.command("ls").description("List tickets by board and column")
+    .argument("[text]", "case-insensitive substring match on the whole file; leading ! negates")
     .option("-b, --board <board>", "only this board")
-    .action((o: { board?: string }) => run(() => {
-      const r = ls(cwd(), { board: o.board, color: useColor() });
+    .option("-l, --label <label>", "has label (repeatable)", collect)
+    .option("-p, --property <key[:value]>", "property equals value, or exists (repeatable)", collect)
+    .addHelpText("after", `
+Filters are ANDed. Prefix a value with ! to negate it (quote with single
+quotes in the shell): -l '!bug'  -p '!priority:low'  -p '!priority'  '!wip'
+Examples:
+  kb ls -l bug -p priority:high
+  kb ls -p '!status:done'
+  kb ls login`)
+    .action((text: string | undefined, o: { board?: string; label?: string[]; property?: string[] }) => run(() => {
+      const r = ls(cwd(), { board: o.board, color: useColor(), text, labels: o.label, props: o.property });
       for (const w of r.warnings) console.error(w);
       if (r.out) console.log(r.out);
     }));
@@ -43,7 +55,6 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
   program.command("show").description("Print a ticket").argument("<id>")
     .action((id: string) => run(() => console.log(show(cwd(), id))));
 
-  const collect = (v: string, prev: string[] = []) => [...prev, v];
   const common = (c: Command): Command =>
     c
       .option("-n, --name <name>", "ticket name")

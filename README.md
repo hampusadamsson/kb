@@ -81,7 +81,7 @@ Rules:
 |---|---|
 |---|---|
 | `kb init` | Write starter `kanban.yaml` (refuses if it exists) |
-| `kb ls [-b board]` | List tickets grouped by board → column |
+| `kb ls [text] [-b board] [-l label] [-p prop]` | List tickets grouped by board → column |
 | `kb boards` | List discovered board names (plus configured ones) |
 | `kb add [name]` | Create a ticket |
 | `kb set <id>` | Modify a ticket |
@@ -107,7 +107,22 @@ All boards in sequence (or one with `-b`), grouped board → columns in config o
 ```sh
 kb ls
 kb ls -b another-board
+kb ls -l bug -p priority:high
+kb ls -p '!status:done'
+kb ls login
 ```
+
+Filters:
+
+| Flag | Meaning |
+|---|---|
+| `[text]` | Case-insensitive substring of the whole file (frontmatter + body) |
+| `-l, --label <x>` | Ticket has label `x` (repeatable) |
+| `-p, --property <key:value>` | Frontmatter `key` equals `value` (string compare; any element for lists). Any key, incl. `status`, `board`, `id` (repeatable) |
+| `-p, --property <key>` | Property `key` exists |
+| `-b, --board <board>` | Only this board |
+
+All filters AND together. Prefix a value with `!` to negate it: `-l '!bug'`, `-p '!priority:low'` (also true when absent), `-p '!priority'` (absent), `'!wip'` (text not present). Use single quotes so the shell doesn't expand `!`. Boards with no matching tickets are omitted; counts reflect the filtered tickets; warnings are still computed from all tickets. No matches prints nothing (exit 0).
 
 ```
 == default ==
