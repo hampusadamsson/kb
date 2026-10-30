@@ -1,9 +1,11 @@
 import { Command } from "commander";
 import { boards } from "./commands/boards.js";
 import { useColor } from "./commands/format.js";
+import { fix } from "./commands/fix.js";
 import { init } from "./commands/init.js";
 import { ls } from "./commands/ls.js";
 import { show } from "./commands/show.js";
+import { validate } from "./commands/validate.js";
 import { add, comment, edit, mv, set, type AddOpts, type SetOpts } from "./commands/write.js";
 
 export const commandNames = [
@@ -72,19 +74,15 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
   program.command("comment").description("Add a comment").argument("<id>").argument("<text>")
     .action((id: string, text: string) => run(() => console.log(comment(cwd(), id, text))));
 
-  const stubs = commandNames.filter(
-    (n) => !["init", "ls", "boards", "show", "add", "set", "mv", "comment", "edit"].includes(n),
-  );
-  for (const name of stubs) {
-    program
-      .command(name)
-      .allowUnknownOption()
-      .allowExcessArguments()
-      .helpOption(false)
-      .action(() => {
-        console.error("not implemented");
-        process.exit(1);
-      });
-  }
+  program.command("fix").description("Repair missing/duplicate ids")
+    .option("--dry-run", "show changes without writing")
+    .action((o: { dryRun?: boolean }) => run(() => console.log(fix(cwd(), !!o.dryRun))));
+
+  program.command("validate").description("Check config and tickets")
+    .action(() => run(() => {
+      const r = validate(cwd());
+      console.log(r.out);
+      if (r.errors > 0) process.exitCode = 1;
+    }));
   return program;
 }
