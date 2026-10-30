@@ -1,14 +1,8 @@
 :root {
-  --bg: #f5f6f8; --panel: #ebedf1; --card: #fff; --fg: #1d2330; --muted: #6b7280; --border: #d5d9e0;
-  --accent: #2f6fed; --accent-fg: #fff; --warn: #b45309; --warn-bg: #fef3c7; --err: #b91c1c; --ok: #15803d;
-  --chip: #e6ecff; --chip-fg: #1e3a8a; --prop: #eef0f3;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14171d; --panel: #1c2028; --card: #252a34; --fg: #e6e9ef; --muted: #98a1b0; --border: #343b48;
-    --accent: #5b8cff; --accent-fg: #0b1020; --warn: #fbbf24; --warn-bg: #3b2f0b; --err: #f87171; --ok: #4ade80;
-    --chip: #263458; --chip-fg: #c7d6ff; --prop: #2e3440;
-  }
+  color-scheme: dark;
+  --bg: #14171d; --panel: #1c2028; --card: #252a34; --fg: #e6e9ef; --muted: #98a1b0; --border: #343b48;
+  --accent: #5b8cff; --accent-fg: #0b1020; --warn: #fbbf24; --warn-bg: #3b2f0b; --err: #f87171; --ok: #4ade80;
+  --chip: #263458; --chip-fg: #c7d6ff; --prop: #2e3440;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
