@@ -5,12 +5,13 @@ import { fix } from "./commands/fix.js";
 import { init } from "./commands/init.js";
 import { ls } from "./commands/ls.js";
 import { show } from "./commands/show.js";
+import { defaultOpener, runWeb } from "./commands/web.js";
 import { validate } from "./commands/validate.js";
 import { add, comment, edit, mv, set, type AddOpts, type SetOpts } from "./commands/write.js";
 
 export const commandNames = [
   "init", "ls", "boards", "show", "add", "set", "mv",
-  "edit", "comment", "fix", "validate",
+  "edit", "comment", "fix", "validate", "web",
 ] as const;
 
 /** Central error handler: message to stderr, exit code 1. */
@@ -95,5 +96,27 @@ Examples:
       console.log(r.out);
       if (r.errors > 0) process.exitCode = 1;
     }));
+
+  program.command("web").description("Start the local web UI")
+    .option("--host <addr>", "address to bind", "127.0.0.1")
+    .option("--port <n>", "port (default 4747, auto-increments if busy)")
+    .option("--no-open", "do not open the browser")
+    .action(async (o: { host: string; port?: string; open: boolean }) => {
+      try {
+        const server = await runWeb(cwd(), o, {
+          out: (s) => console.log(s),
+          err: (s) => console.error(s),
+          opener: defaultOpener,
+        });
+        const stop = (): void => {
+          server.close().then(() => process.exit(0), () => process.exit(1));
+        };
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
+      } catch (e) {
+        console.error(`error: ${(e as Error).message}`);
+        process.exitCode = 1;
+      }
+    });
   return program;
 }
