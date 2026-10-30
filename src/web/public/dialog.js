@@ -112,7 +112,7 @@ class Session {
           h("dd", { class: "mono", text: this.detail.hasId ? display(this.detail.id) : "(none)" }),
           h("dt", { text: "Type" }),
           h("dd", { class: "mono", text: display(this.detail.data?.type ?? "ticket") }),
-          (this.autoWrap = automationsWrap(this.detail.automations)),
+          (this.autoWrap = automationsWrap(this.detail.automations, ro ? null : () => this.resetAutomations())),
         );
 
     this.commentList = h("ul", { class: "comments" });
@@ -321,7 +321,7 @@ class Session {
       // runner status update: refresh just the section and the stored mtime, keep the form and any edits
       this.detail = { ...this.detail, mtime: d.mtime, automations: d.automations, data: d.data };
       this.mtime = d.mtime;
-      fillAutomations(this.autoWrap, d.automations);
+      fillAutomations(this.autoWrap, d.automations, new Date(), this.readOnly ? null : () => this.resetAutomations());
       return;
     }
     if (this.dirty()) return this.showBanner("This ticket changed on disk");
@@ -341,6 +341,25 @@ class Session {
       return JSON.stringify(r);
     };
     return strip(d) === strip(this.detail) && rest(d) === rest(this.detail) && d.path === this.detail.path;
+  }
+
+  /** Clear the automations run history (loop-guard counter); no automations are triggered. */
+  async resetAutomations() {
+    if (this.busy) return;
+    this.showError("");
+    this.busy = true;
+    try {
+      await api.patch(String(this.detail.id), { resetAutomations: true, mtime: this.mtime });
+      const d = await api.get(String(this.detail.id));
+      this.detail = { ...this.detail, mtime: d.mtime, automations: d.automations, data: d.data };
+      this.mtime = d.mtime;
+      fillAutomations(this.autoWrap, d.automations, new Date(), () => this.resetAutomations());
+      this.ctx.onSaved?.(true);
+    } catch (e) {
+      this.handleError(e);
+    } finally {
+      this.busy = false;
+    }
   }
 
   async addComment() {

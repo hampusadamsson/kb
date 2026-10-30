@@ -140,6 +140,7 @@ const patch: Handler = (kb, req, [id]) => {
     unsetProps: strArray(b.unsetProps, "unsetProps"),
     body: str(b.body, "body"),
     comment: str(b.comment, "comment"),
+    resetAutomations: b.resetAutomations === true ? true : undefined,
   };
   const r = kb.update(id, p);
   return ok({ id: r.id, warnings: r.warnings, mtime: kb.get(id).mtime });

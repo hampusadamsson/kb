@@ -99,6 +99,12 @@ export function automationList({ rules, cols, board, onChange }) {
       ),
       h(
         "div",
+        { class: "row guard-row" },
+        h("label", { class: "check" }, h("input", { type: "checkbox", "aria-label": "Loop guard", checked: r.guard !== false, onchange: (e) => ((r.guard = e.target.checked), onChange()) }), " Stop after 15 runs per ticket (loop guard)"),
+        h("span", { class: "muted hint", text: "Prevents rules from bouncing tickets back and forth forever. Uncheck to opt out." }),
+      ),
+      h(
+        "div",
         { class: "row" },
         h(
           "select",

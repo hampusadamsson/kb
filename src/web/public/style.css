@@ -198,3 +198,8 @@ dialog#settings-dialog { width: min(760px, 96vw); }
 .pill.ev-auto-skip { background: #4a2f12; color: #fb923c; }
 .pill.ev-auto-start { background: #43380c; color: var(--warn); }
 .pill.ev-other { background: var(--prop); color: var(--fg); }
+
+/* guardrail */
+.sdot.skipped { background: #fb923c; }
+.auto-row.skipped .auto-word { color: #fb923c; }
+.guard-row .hint { flex-basis: 100%; }

@@ -157,14 +157,14 @@ describe("dispatch", () => {
     expect(runner.calls).toHaveLength(1);
     expect(runner.calls[0]).toMatchObject({ command: "echo '001'", cwd: dir, env: { KB_AUTOMATION: "1" } });
     let d = fm(p);
-    expect(d.automations.n).toEqual({ status: "running", at: AT });
+    expect(d.automations.n).toEqual({ status: "running", at: AT, runs: 1 });
     expect(d.automations.c.status).toBe("done");
     expect(d.x).toBe(1);
     expect(Object.values(d.comments)).toEqual(["hi"]);
     runner.finish();
     await kb.settled();
     d = fm(p);
-    expect(d.automations.n).toEqual({ status: "done", at: AT, exit: 0 });
+    expect(d.automations.n).toEqual({ status: "done", at: AT, exit: 0, runs: 1 });
     expect(d.status).toBe("done");
     expect(records.at(-1)).toMatchObject({ rule: "n", status: "done", board: "default", path: p, ticketId: "001" });
   });
@@ -174,11 +174,11 @@ describe("dispatch", () => {
     const { id, path: p } = kb.add({ name: "a" });
     runner.finish({ exitCode: 3 });
     await kb.settled();
-    expect(fm(p).automations.c).toEqual({ status: "failed", at: AT, exit: 3 });
+    expect(fm(p).automations.c).toEqual({ status: "failed", at: AT, exit: 3, runs: 1 });
     kb.move(id, "done");
     runner.finish({ exitCode: null, error: "boom" }, 1);
     await kb.settled();
-    expect(fm(p).automations.n).toEqual({ status: "failed", at: AT, exit: null, error: "boom" });
+    expect(fm(p).automations.n).toEqual({ status: "failed", at: AT, exit: null, error: "boom", runs: 1 });
   });
 
   it("render error → failed without running", async () => {

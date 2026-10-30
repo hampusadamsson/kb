@@ -22,6 +22,8 @@ export const automationSchema = z.object({
     }),
   run: z.string(),
   enabled: z.boolean().optional(),
+  /** loop guard (default true): stop after AUTOMATION_RUN_LIMIT runs per ticket; false opts out */
+  guard: z.boolean().optional(),
 });
 
 const automationsSchema = z.array(automationSchema).optional();

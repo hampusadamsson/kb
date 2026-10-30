@@ -34,6 +34,22 @@ export interface AutomationRecord {
   result: RunResult;
 }
 
+/** Loop guardrail: a ticket with this many recorded automation runs gets no more (unless the rule has guard: false). */
+export const AUTOMATION_RUN_LIMIT = 15;
+
+/** Runs recorded in one `automations` entry (entries without `runs` count as 1). */
+export function entryRuns(e: unknown): number {
+  if (!e || typeof e !== "object" || Array.isArray(e)) return 1;
+  const r = Number((e as Record<string, unknown>).runs);
+  return Number.isFinite(r) && r >= 0 ? Math.floor(r) : 1;
+}
+
+/** Total automation runs recorded on a ticket (`automations` frontmatter value). */
+export function totalRuns(automations: unknown): number {
+  if (!automations || typeof automations !== "object" || Array.isArray(automations)) return 0;
+  return Object.values(automations).reduce<number>((n, e) => n + entryRuns(e), 0);
+}
+
 export const KNOWN_VARS = [
   "id", "name", "body", "board", "status", "from", "to", "path", "labels", "event",
 ] as const;

@@ -209,6 +209,7 @@ describe("automation status helpers", () => {
     expect(s({ status: "done", error: "x" })).toBe("failed");
     expect(s({ status: "failed" })).toBe("failed");
     expect(s({ status: "running" })).toBe("running");
+    expect(s({ status: "skipped", reason: "guardrail: 15 automation runs on this ticket" })).toBe("skipped");
     expect(s({ status: "weird" })).toBe("unknown");
     expect(s({})).toBe("unknown");
     expect(s(null)).toBe("unknown");
@@ -248,7 +249,7 @@ describe("automation status helpers", () => {
     };
     const s = any.summarizeAutomations(m);
     expect(s.total).toBe(6);
-    expect(s.counts).toEqual({ failed: 1, running: 1, done: 3, unknown: 1 });
+    expect(s.counts).toEqual({ failed: 1, running: 1, skipped: 0, done: 3, unknown: 1 });
     expect(s.worst).toBe("failed");
     expect(s.list.map((i: any) => i.name)).toEqual(["d", "c", "b", "a", "f", "e"]);
     expect(s.worstFirst.map((i: any) => i.name)).toEqual(["c", "d", "b", "a", "f", "e"]);
@@ -256,6 +257,26 @@ describe("automation status helpers", () => {
     expect(any.summarizeAutomations(undefined)).toMatchObject({ total: 0, worst: null });
     expect(any.automationsText(any.summarizeAutomations({ a: { status: "done" } }))).toBe("1 automation: 1 done");
     expect(any.summarizeAutomations([{ name: "x", status: "failed" }]).worst).toBe("failed");
+  });
+  it("skipped entries: summary, text, label", () => {
+    const sum = any.summarizeAutomations({ a: { status: "skipped", at: "2026-10-30T10:00:00" }, b: { status: "done" } });
+    expect(sum.counts.skipped).toBe(1);
+    expect(any.automationsText(sum)).toBe("2 automations: 1 skipped, 1 done");
+    expect(any.automationLabel(sum.list[0], now)).toContain("skipped (guardrail)");
+    expect(sum.worst).toBe("skipped");
+  });
+  it("form round-trip keeps guard (default on, omitted; false preserved)", () => {
+    const cfg = { name: "d", glob: "*.md", columns: ["todo", "done"], boards: {}, automations: [
+      { name: "a", when: { moved_to: "done" }, run: "x" },
+      { name: "b", when: { moved_to: "done" }, run: "y", guard: false },
+    ] };
+    const f = any.configToForm(cfg);
+    expect(f.automations.map((r: any) => r.guard)).toEqual([true, false]);
+    expect(any.formToPayload(f).config).toEqual(cfg);
+    expect(any.newRule(f.columns).guard).toBe(true);
+    f.automations[0].guard = false;
+    expect(any.formToPayload(f).config.automations[0].guard).toBe(false);
+    expect(any.dirtyTabs(f, cfg).automations).toBe(true);
   });
   it("runningText lists running rule names (no cap)", () => {
     const s = any.summarizeAutomations({ a: { status: "running" }, b: { status: "done" }, c: { status: "running" }, d: { status: "running" }, e: { status: "running" } });

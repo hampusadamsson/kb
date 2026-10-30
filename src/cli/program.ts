@@ -95,6 +95,7 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
   common(program.command("set").description("Change ticket fields").argument("<id>", ID_DESC))
     .option("--unset <key>", "remove property (repeatable)", collect)
     .option("--unlabel <label>", "remove label (repeatable)", collect)
+    .option("--reset-automations", "clear automation run history (guardrail counter)")
     .action((id: string, o: SetOpts & { automation?: boolean }) => runAuto(off(o), (io) => set(cwd(), id, o, io)));
 
   program.command("mv").description("Change ticket status").argument("<id>", ID_DESC)

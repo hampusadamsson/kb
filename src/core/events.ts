@@ -10,6 +10,7 @@ export type KbEventType =
   | "ticket.body"
   | "ticket.board"
   | "ticket.comment"
+  | "ticket.automations-reset"
   | "ids.fixed"
   | "config.updated"
   | "automation.started"

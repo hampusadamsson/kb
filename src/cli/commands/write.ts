@@ -34,6 +34,7 @@ export interface AddOpts extends CommonOpts {
 export interface SetOpts extends CommonOpts {
   unset?: string[];
   unlabel?: string[];
+  resetAutomations?: boolean;
 }
 
 function props(list: string[] | undefined): Record<string, unknown> | undefined {
@@ -87,6 +88,7 @@ export function set(cwd: string, id: string, o: SetOpts, io: Io = defaultIo): st
     unsetProps: o.unset,
     body: body(o.body, io),
     comment: o.comment,
+    resetAutomations: o.resetAutomations ? true : undefined,
   };
   if (hasChanges(patch)) warnAll(kb.update(id, patch).warnings, io);
   else if (!o.edit) kb.update(id, patch); // throws "no changes requested"

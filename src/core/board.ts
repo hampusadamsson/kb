@@ -6,6 +6,9 @@ import {
   renderCommand,
   ticketVars,
   automationProblems,
+  AUTOMATION_RUN_LIMIT,
+  entryRuns,
+  totalRuns,
   type AutomationEvent,
   type AutomationRecord,
   type AutomationRunner,
@@ -119,6 +122,8 @@ export interface Patch {
   unsetProps?: string[];
   body?: string;
   comment?: string;
+  /** delete the `automations` run history (resets the loop-guard counter); never triggers automations */
+  resetAutomations?: boolean;
 }
 
 export interface UpdateResult {
@@ -164,7 +169,7 @@ export function hasChanges(p: Patch): boolean {
     p.name !== undefined || p.status !== undefined || p.board !== undefined ||
     p.addLabels?.length || p.removeLabels?.length ||
     (p.setProps && Object.keys(p.setProps).length) || p.unsetProps?.length ||
-    p.body !== undefined || p.comment !== undefined
+    p.body !== undefined || p.comment !== undefined || p.resetAutomations === true
   );
 }
 
@@ -282,7 +287,8 @@ export class Kanban {
     while (this.inflight.size) await Promise.allSettled([...this.inflight]);
   }
 
-  private writeAutomationStatus(rel: string, id: unknown, rule: string, entry: Record<string, unknown>): boolean {
+  /** Writes a rule's entry; `runs` is incremented when `bump`, otherwise carried over from the existing entry. */
+  private writeAutomationStatus(rel: string, id: unknown, rule: string, entry: Record<string, unknown>, bump = false): boolean {
     try {
       const idOf = (file: string): unknown => readFile(file).doc.get("id");
       let abs = path.join(this.dir, rel);
@@ -302,7 +308,9 @@ export class Kanban {
         if (cur === undefined || cur === null || !(cur instanceof YAMLMap)) doc.set("automations", doc.createNode({}));
         const at = new Scalar(entry.at);
         at.type = Scalar.QUOTE_DOUBLE;
-        doc.setIn(["automations", rule], doc.createNode({ ...entry, at }));
+        const prev = doc.getIn(["automations", rule]);
+        const prevRuns = prev instanceof YAMLMap ? entryRuns(prev.toJSON()) : 0;
+        doc.setIn(["automations", rule], doc.createNode({ ...entry, at, runs: prevRuns + (bump ? 1 : 0) }));
       });
       return true;
     } catch {
@@ -326,10 +334,21 @@ export class Kanban {
           this.emit("automation.skipped", `automation "${rule.name}" skipped on #${String(ticket.id)} (${reason})`, { rule: rule.name, reason, event }, ref);
           continue;
         }
+        // Loop guard (default on). KB_AUTOMATION=1 already stops CLI loops from scripts; this mainly
+        // protects against scripts calling the web API and other paths that re-trigger rules.
+        if (rule.guard !== false) {
+          const runs = totalRuns(ticket.data.automations);
+          if (runs >= AUTOMATION_RUN_LIMIT) {
+            const reason = `guardrail: ${AUTOMATION_RUN_LIMIT} automation runs on this ticket`;
+            this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "skipped", at: commentKey(this.now(), true), reason });
+            this.emit("automation.skipped", `automation "${rule.name}" skipped on #${String(ticket.id)} (guardrail: ${runs} runs)`, { rule: rule.name, reason: "guardrail", runs, limit: AUTOMATION_RUN_LIMIT, event }, ref);
+            continue;
+          }
+        }
         const startMs = this.now().getTime();
         const startedAt = commentKey(this.now(), true);
         this.emit("automation.started", `automation "${rule.name}" started on #${String(ticket.id)}`, { rule: rule.name, event }, ref);
-        this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "running", at: startedAt });
+        this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "running", at: startedAt }, true);
         const rec = (command: string, result: RunResult): AutomationRecord => ({
           board: ticket.board,
           rule: rule.name,
@@ -574,10 +593,16 @@ export class Kanban {
     applyLabels(doc, patch.addLabels ?? [], patch.removeLabels ?? []);
     for (const [k, v] of extra) doc.set(k, v);
     for (const k of unset) doc.delete(k);
+    const hadAutos = doc.has("automations");
+    if (patch.resetAutomations) doc.delete("automations");
     if (patch.comment !== undefined) addComment(doc, patch.comment, this.now());
     const body = patch.body !== undefined ? bodyText(patch.body) : oldBody;
     fs.writeFileSync(abs, render(doc, body, crlf));
     if (this.sink) this.emitUpdate(config, t, patch, oldBody, body, extra, unset);
+    if (this.sink && patch.resetAutomations) {
+      const tid = String(t.id ?? "?");
+      this.emit("ticket.automations-reset", `#${tid} automation history reset`, { hadHistory: hadAutos }, { board: t.board, ticketId: tid, ticketName: t.name, path: t.path });
+    }
     if (patch.status !== undefined && patch.status !== t.status) {
       this.dispatch(config, t.path, { type: "moved_to", from: t.status, to: patch.status });
     }

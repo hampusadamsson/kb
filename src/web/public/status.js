@@ -2,13 +2,13 @@
 import { h, clear } from "./dom.js";
 import { absoluteTime, automationLabel, automationsText, relativeTime, runningText, summarizeAutomations } from "./logic.js";
 
-/** Small status dot; `state` is done|running|failed|unknown. */
+/** Small status dot; `state` is done|running|failed|skipped|unknown. */
 export function dot(state, label) {
   return h("span", { class: `sdot ${state}`, role: "img", title: label, "aria-label": label });
 }
 
 /** Fill `wrap` (a <div> inside the <dl>) with the Automations dt/dd; empty when no entries. */
-export function fillAutomations(wrap, automations, now = new Date()) {
+export function fillAutomations(wrap, automations, now = new Date(), onReset = null) {
   clear(wrap);
   const sum = summarizeAutomations(automations);
   if (!sum.total) return;
@@ -26,12 +26,12 @@ export function fillAutomations(wrap, automations, now = new Date()) {
       i.error ? h("div", { class: "auto-error", text: i.error }) : null,
     );
   });
-  wrap.append(h("dt", { text: "Automations" }), h("dd", {}, h("ul", { class: "auto-rows", "aria-label": automationsText(sum) }, rows)));
+  wrap.append(h("dt", { text: "Automations" }), h("dd", {}, h("ul", { class: "auto-rows", "aria-label": automationsText(sum) }, rows), onReset ? h("button", { type: "button", class: "btn small", text: "Reset automation history", onclick: onReset }) : null));
 }
 
-export function automationsWrap(automations) {
+export function automationsWrap(automations, onReset = null) {
   const wrap = h("div", { class: "auto-wrap" });
-  fillAutomations(wrap, automations);
+  fillAutomations(wrap, automations, new Date(), onReset);
   return wrap;
 }
 

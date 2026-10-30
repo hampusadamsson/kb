@@ -142,6 +142,7 @@ const ruleRow = (a) => ({
   props: Object.entries(a.when.props ?? {}).map(([key, raw]) => ({ key, value: String(raw), raw })),
   run: a.run,
   enabled: a.enabled !== false,
+  guard: a.guard !== false,
 });
 
 /** A blank rule for a board whose columns are `cols` (form rows). */
@@ -154,6 +155,7 @@ export const newRule = (cols) => ({
   props: [],
   run: "",
   enabled: true,
+  guard: true,
 });
 
 /** GET /api/config → editable form state. `orig` = name in the file (null for new rows). */
@@ -191,6 +193,7 @@ function ruleToConfig(r, cols) {
   if (Object.keys(props).length) when.props = props;
   const out = { name: r.name.trim(), when, run: r.run };
   if (!r.enabled) out.enabled = false;
+  if (r.guard === false) out.guard = false; // default on: omitted from YAML
   return out;
 }
 
@@ -318,13 +321,14 @@ export function describeAutomations(a) {
   });
 }
 
-/** One automation entry → "running" | "done" | "failed" | "unknown". */
+/** One automation entry → "running" | "done" | "failed" | "skipped" | "unknown". */
 export function automationState(e) {
   if (!e || typeof e !== "object" || Array.isArray(e)) return "unknown";
   if (e.error) return "failed";
   const s = typeof e.status === "string" ? e.status.trim().toLowerCase() : "";
   if (s === "failed") return "failed";
   if (s === "running") return "running";
+  if (s === "skipped") return "skipped";
   if (s === "done") {
     const x = e.exit;
     return x !== undefined && x !== null && x !== "" && Number.isFinite(Number(x)) && Number(x) !== 0 ? "failed" : "done";
@@ -369,8 +373,8 @@ export function relativeTime(iso, now = new Date()) {
   return days === 1 ? "yesterday" : date;
 }
 
-const DETAIL_ORDER = { running: 0, failed: 1, done: 2, unknown: 3 };
-const WORST_ORDER = { failed: 0, running: 1, done: 2, unknown: 3 };
+const DETAIL_ORDER = { running: 0, failed: 1, skipped: 2, done: 3, unknown: 4 };
+const WORST_ORDER = { failed: 0, running: 1, skipped: 2, done: 3, unknown: 4 };
 
 /**
  * Map {name: entry} (or array of {name, ...entry}) → {total, counts, worst, list, worstFirst}.
@@ -384,7 +388,7 @@ export function summarizeAutomations(src) {
   });
   const time = (i) => +(parseLocal(i.at) ?? -Infinity);
   const sortBy = (order) => [...items].sort((a, b) => order[a.state] - order[b.state] || time(b) - time(a) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  const counts = { failed: 0, running: 0, done: 0, unknown: 0 };
+  const counts = { failed: 0, running: 0, skipped: 0, done: 0, unknown: 0 };
   for (const i of items) counts[i.state]++;
   const worstFirst = sortBy(WORST_ORDER);
   return { total: items.length, counts, worst: worstFirst[0]?.state ?? null, list: sortBy(DETAIL_ORDER), worstFirst };
@@ -393,7 +397,7 @@ export function summarizeAutomations(src) {
 /** "2 automations: 1 failed, 1 done" ("" when none). */
 export function automationsText(sum) {
   if (!sum.total) return "";
-  const parts = ["failed", "running", "done", "unknown"].filter((k) => sum.counts[k]).map((k) => `${sum.counts[k]} ${k}`);
+  const parts = ["failed", "running", "skipped", "done", "unknown"].filter((k) => sum.counts[k]).map((k) => `${sum.counts[k]} ${k}`);
   return `${sum.total} automation${sum.total === 1 ? "" : "s"}: ${parts.join(", ")}`;
 }
 
@@ -401,7 +405,7 @@ export function automationsText(sum) {
 export function automationLabel(i, now = new Date()) {
   const rel = relativeTime(i.at, now);
   const exit = i.exit !== null && i.exit !== undefined && i.exit !== "" ? ` (exit ${i.exit})` : "";
-  return `${i.name}: ${i.state === "unknown" ? `unknown status${i.status ? ` "${i.status}"` : ""}` : i.state}${rel ? ` ${rel}` : ""}${exit}${i.error ? ` – ${i.error}` : ""}`;
+  return `${i.name}: ${i.state === "unknown" ? `unknown status${i.status ? ` "${i.status}"` : ""}` : i.state === "skipped" ? "skipped (guardrail)" : i.state}${rel ? ` ${rel}` : ""}${exit}${i.error ? ` – ${i.error}` : ""}`;
 }
 
 export const AUTOMATIONS_PREFIX = "Automations: ";
