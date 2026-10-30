@@ -4,13 +4,14 @@ A small, local, single-user CLI kanban. Tickets are markdown files with YAML fro
 
 ## Overview
 
-- No auth, no server, no TUI. Plain commands only, output to stdout.
+- CLI plus an optional local web UI (`kb web`). No auth (see [security model](#security-model)), no TUI. Plain commands, output to stdout.
 - Stack: TypeScript, Node 22+, ESM.
   - `commander` — CLI
   - `yaml` — parsing; the Document API is used for rewrites so formatting and comments from hand edits are preserved
   - `zod` — config validation
   - `vitest` — tests
   - `tsc` — build
+  - Web UI: Node built-in `http` and a vanilla JS frontend — no extra dependencies, no build step for the frontend
 - Binary name: `kb`. Installed via `npm link`.
 
 ## Install
@@ -24,8 +25,10 @@ npm install && npm run build && npm link
 ## Development
 
 ```sh
-npm test
+npm run build && npm test
 ```
+
+`npm run build` runs `tsc` and copies `src/web/public` to `dist/web/public`. The e2e web tests need a built `dist`, so run the build before the tests.
 
 ## Config
 
@@ -91,6 +94,7 @@ Rules:
 | `kb comment <id> "text"` | Append a timestamped comment |
 | `kb fix [--dry-run]` | Assign/repair ids |
 | `kb validate` | Check config and tickets |
+| `kb web [--host <addr>] [--port <n>] [--no-open]` | Start the local web UI |
 
 ### init
 
@@ -221,6 +225,16 @@ Checks: config parse + schema, frontmatter parse errors, missing id, duplicate i
 kb validate
 ```
 
+### web
+
+Starts the local web UI for the board in the current directory (needs `kanban.yaml`). See [Web UI](#web-ui-kb-web).
+
+```sh
+kb web
+kb web --port 8080 --no-open
+kb web --host 0.0.0.0
+```
+
 ## Matching & sorting
 
 - CLI id arguments match `String(id)` exactly first; if none match, numeric ids are compared by value (`kb show 1` finds `"001"`, and `001` finds `id: 1`). If the numeric fallback matches several tickets, it is an ambiguity error listing paths.
@@ -235,13 +249,80 @@ kb validate
 - Writes never fold long strings (`lineWidth: 0`).
 - CRLF: if the frontmatter starts with `---\r\n`, it is re-rendered with CRLF; the body is never modified.
 
+## Web UI (`kb web`)
+
+### Launch
+
+```sh
+kb web [--host <addr>] [--port <n>] [--no-open]
+```
+
+- Requires `kanban.yaml` in the current directory (errors otherwise).
+- `--host` default `127.0.0.1`.
+- `--port` default `4747`; if busy, the next ports are tried, up to 50 times. With an explicit `--port` the port is strict: it errors if busy.
+- Prints `kb web running at <url>`. For a wildcard host (`0.0.0.0`, `::`) the URL uses `localhost` and a `listening on <host>:<port>` line is added.
+- A non-loopback host prints a no-auth warning to stderr.
+- The browser is opened unless `--no-open`.
+- Ctrl-C / SIGTERM shut down cleanly.
+
+### Features
+
+- Board tabs plus an **All** tab. Columns follow the config; the `unsorted` column is shown but is not a drop target.
+- Cards; drag a card to another column of the **same board** to change its `status`. Cross-board drags are ignored.
+- Create dialog: global **New** button, or the per-column **+** (preset status).
+- Detail dialog: name, status, board, labels, properties, body, comments (add comments there). Comment keys have minute granularity (seconds on collision).
+- Filter bar: text, labels, properties, with `!` negation as in `kb ls`. State lives in the URL hash: `#board=..&text=..&l=..&p=..`.
+- Maintenance panel: `validate` results, and `fix` with a dry-run preview before applying. Parse errors are shown only there.
+- Tickets with duplicate ids or no id are read-only and carry badges (use `fix`).
+- Stale-edit banner: edits send the ticket's mtime; if the file changed on disk the UI offers **Reload** or **Overwrite**.
+- Not available in the UI: `init` and `edit`.
+
+### Live updates
+
+- `fs.watch` (recursive) on the board dir, filtered by `glob`; `kanban.yaml` changes count too. `node_modules`, `dist` and `.git` are ignored.
+- Debounced 100 ms, with a 1 s max-wait. Events go out over SSE (`/api/events`); the UI refetches on every event.
+- If the watcher is unavailable there are no live updates (the API still works).
+
+### Security model
+
+There is no auth. Anyone who can reach the server can read and edit tickets. Guards:
+
+- Same-origin: a request whose `Origin` differs from `Host` gets 403; `Sec-Fetch-Site`, if sent, must be `same-origin` or `none`.
+- Writes (non-GET) require `Content-Type: application/json` (else 415).
+- Loopback bind: the `Host` header is validated (421 on mismatch) against DNS rebinding.
+- Non-loopback bind: the Host check is skipped so LAN access works. Only use this on networks you trust.
+- CSP and frame protections (`frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`).
+- `file` for add must stay inside the board dir and end in `.md`. This also applies to CLI `add -f`.
+
+### REST API
+
+JSON in and out. Errors: `{ "error": "...", "code": "..." }`.
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/board` | Board view; query `board`, `text`, `label`, `property` (filters as in `ls`) |
+| `GET /api/tickets/:id` | Ticket detail (ids URL-encoded) |
+| `PATCH /api/tickets/:id` | Core patch fields (`name`, `status`, `board`, `addLabels`, `removeLabels`, `setProps`, `unsetProps`, `body`, `comment`) plus optional `mtime`; stale → 409 `code: "stale"` with `currentMtime` |
+| `POST /api/tickets` | Create (201) |
+| `POST /api/tickets/:id/comments` | Add comment, body `{ text, mtime? }` (201) |
+| `GET /api/validate` | Validation result |
+| `POST /api/fix` | Body `{ dryRun }`, default `true` |
+| `GET /api/events` | SSE stream (`changed` events) |
+
+Status mapping: `not-found` 404; `ambiguous`, `exists`, `stale` 409; `invalid`, `parse` 400; `unsupported` 415; host not allowed 421; `config` 500; body too large (1 MB) 413.
+
+### Frontend
+
+`src/web/public/`: vanilla ES modules, no build step, no dependencies. `index.html`, `style.css`, `app.js` (wiring), `api.js`, `board.js`, `dialog.js`, `filters.js`, `maintenance.js`, `dom.js`, and `logic.js` (pure logic, unit-tested).
+
 ## Architecture
 
-Two layers:
+Three layers:
 
 ```
 src/core/   UI-agnostic domain/service layer (Kanban API, config, tickets, frontmatter, parse helpers, KanbanError)
 src/cli/    thin adapter: commander wiring, flag parsing, output formatting, stdin, $EDITOR, colour/TTY, exit codes
+src/web/    second adapter over the core: http server, REST API, fs watcher + SSE, vanilla frontend in public/
 src/index.ts  public library entry (re-exports core)
 ```
 
@@ -266,7 +347,7 @@ kb.fix({ dryRun: true }); // [{ path, from, to }]
 ```
 
 Boundary rule: nothing in `src/core` may import `commander` or `../cli`, or use `process.stdout`/`stderr`/`exit`/`argv`/`env`
-or `readline`. Enforced by `test/architecture.test.ts`.
+or `readline`. Nothing in `src/core` may import `../web` either. Enforced by `test/architecture.test.ts`.
 
 ## Design decisions
 
@@ -278,17 +359,25 @@ or `readline`. Enforced by `test/architecture.test.ts`.
 - **Global ids across boards** — no ambiguity when addressing a ticket.
 - **Boards discovered from files** — no registry to maintain; the config only overrides columns.
 - **Plain commands over TUI** — simple and scriptable.
-- **No WIP limits, no `rm` (delete the file), no auth** — out of scope for a single-user local tool.
+- **Built-in `http` + vanilla frontend** — no dependencies, no build step for the UI.
+- **SSE + `fs.watch` over polling** — immediate updates, no idle load.
+- **Thin REST over core** — the API only maps HTTP to `Kanban` calls; rules stay in core.
+- **No manual card order** — order is by id, so drag only changes status.
+- **Loopback bind by default, with Host/Origin/Content-Type guards** — no auth, so keep it local; CSRF and DNS rebinding are blocked.
+- **No WIP limits, no `rm` (delete the file), no auth** — out of scope for a single-user local tool (`kb web` relies on its bind/guard model instead).
+- **`add -f` stays inside the board dir** — must be a relative `.md` path under the config dir.
 - **YAML Document API for rewrites** — keeps hand edits (formatting, comments) intact.
 - **Comments as timestamp-keyed map** — ordered, human-editable, no extra schema.
 - **Dropped gray-matter** — a single YAML parser for read and write avoids divergent date/type parsing.
 
 ## Status
 
-Implemented (v1). All commands working; vitest suite passing.
+Implemented: v1 plus the web UI (`kb web`). All commands working; vitest suite passing.
 
 ### Known limitations
 
 - Rewrites preserve YAML comments, key order and body, but whitespace inside frontmatter is normalised by the yaml library (e.g. `key:   value` → `key: value`).
 - `mv`/`set` to a status not in the board's columns only warns (ticket lands in unsorted).
 - `node_modules` is always excluded from the glob scan.
+- Web UI is not tested in real browsers beyond a headless Chrome smoke check (synthetic drag events).
+- The create dialog and the maintenance fix buttons have not been exercised in a browser.
