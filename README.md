@@ -269,7 +269,7 @@ kb web [--host <addr>] [--port <n>] [--no-open]
 
 - Board tabs plus an **All** tab. Columns follow the config; the `unsorted` column is shown but is not a drop target.
 - Cards; drag a card to another column of the **same board** to change its `status`. Cross-board drags are ignored.
-- Create dialog: global **New** button, or the per-column **+** (preset status).
+- Create: the **+** in each column header opens the create dialog with that board and status preset. There is no global "New" button.
 - Detail dialog: name, status, board, labels, properties, body, comments (add comments there). Comment keys have minute granularity (seconds on collision).
 - Filter bar: text, labels, properties, with `!` negation as in `kb ls`. State lives in the URL hash: `#board=..&text=..&l=..&p=..`.
 - **Settings** (header button, badge = issue count):

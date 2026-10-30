@@ -102,7 +102,7 @@ function render() {
   if (total === 0) {
     empty.textContent = hasFilters(state.filters)
       ? "No tickets match the current filters."
-      : "No tickets yet. Use “New” to create the first one.";
+      : "No tickets yet. Use the + in a column header to create one.";
   }
   renderBoards($("boards"), boards, handlers, { showTitles: sel === "all" });
 }
@@ -167,10 +167,6 @@ const handlers = {
   },
 };
 
-$("new-btn").addEventListener("click", () => {
-  const sel = selection();
-  openCreate(dialogCtx(), { board: sel === "all" ? undefined : sel });
-});
 $("settings-btn").addEventListener("click", () => settings.open());
 $("settings-close").addEventListener("click", () => $("settings-dialog").close());
 settings.init(() => load());
