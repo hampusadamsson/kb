@@ -21,6 +21,13 @@ import {
   type Filters,
   type Ticket,
 } from "./tickets.js";
+import {
+  getConfigSnapshot,
+  updateConfigFile,
+  type ConfigSnapshot,
+  type UpdateConfigOptions,
+  type UpdateConfigResult,
+} from "./settings.js";
 import { filenameFor, padId } from "./util.js";
 
 // ---- types ----
@@ -222,6 +229,19 @@ export class Kanban {
     const file = path.join(this.dir, CONFIG_FILE);
     if (fs.existsSync(file)) throw new KanbanError("exists", `${CONFIG_FILE} already exists`);
     fs.writeFileSync(file, STARTER_CONFIG);
+  }
+
+  /** Editable view of kanban.yaml plus its mtime. */
+  getConfig(): ConfigSnapshot {
+    return getConfigSnapshot(this.dir);
+  }
+
+  /**
+   * Replace the board config: validates, rewrites kanban.yaml (keeping comments), migrates tickets
+   * for renamed columns/boards, and refuses to drop a column that tickets still use.
+   */
+  updateConfig(config: unknown, opts: UpdateConfigOptions = {}): UpdateConfigResult {
+    return updateConfigFile(this.dir, config, opts);
   }
 
   /** Read config and scan all tickets. */

@@ -23,6 +23,7 @@ const STATUS: Record<string, number> = {
   exists: 409,
   config: 500,
   parse: 400,
+  stale: 409,
 };
 
 export function errorResponse(e: unknown): ApiResponse {
@@ -150,6 +151,16 @@ const fix: Handler = (kb, req) => {
   return ok({ dryRun, changes: kb.fix({ dryRun }) });
 };
 
+const getConfig: Handler = (kb) => ok(kb.getConfig());
+
+/** PUT body: {config, renames?, mtime?, dryRun?}. dryRun only when exactly true. */
+const putConfig: Handler = (kb, req) => {
+  const b = req.body;
+  if (b.mtime !== undefined && typeof b.mtime !== "number") throw new KanbanError("invalid", "mtime must be a number");
+  const r = kb.updateConfig(b.config, { renames: b.renames, mtime: b.mtime as number | undefined, dryRun: b.dryRun === true });
+  return ok({ dryRun: b.dryRun === true, ...r });
+};
+
 interface Route {
   method: string;
   re: RegExp;
@@ -169,6 +180,8 @@ const routes: Route[] = [
   route("POST", "/api/tickets/:id/comments", comment),
   route("GET", "/api/validate", validate),
   route("POST", "/api/fix", fix),
+  route("GET", "/api/config", getConfig),
+  route("PUT", "/api/config", putConfig),
 ];
 
 /** Pure request handler: no HTTP, just the Kanban core. */

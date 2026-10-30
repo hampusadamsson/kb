@@ -16,7 +16,7 @@
       <div id="tabs" class="tabs" role="tablist" aria-label="Boards"></div>
       <span class="spacer"></span>
       <span id="live" class="live" role="status"><span class="dot" aria-hidden="true"></span><span class="live-text">connecting…</span></span>
-      <button id="maint-btn" type="button" class="btn">Maintenance <span id="maint-badge" class="badge-count" hidden>0</span></button>
+      <button id="settings-btn" type="button" class="btn">Settings <span id="settings-badge" class="badge-count" hidden>0</span></button>
       <button id="new-btn" type="button" class="btn primary">New</button>
     </div>
     <div id="filters" class="filters">
@@ -37,11 +37,11 @@
 
   <dialog id="ticket-dialog" aria-label="Ticket"></dialog>
 
-  <dialog id="maint-dialog" aria-labelledby="maint-title">
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
     <div class="ticket-form">
-      <h2 id="maint-title">Maintenance</h2>
-      <div id="maint-body"></div>
-      <div class="actions"><button id="maint-close" type="button" class="btn">Close</button></div>
+      <h2 id="settings-title">Settings</h2>
+      <div id="settings-body"></div>
+      <div class="actions"><button id="settings-close" type="button" class="btn">Close</button></div>
     </div>
   </dialog>
 

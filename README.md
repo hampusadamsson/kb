@@ -272,7 +272,12 @@ kb web [--host <addr>] [--port <n>] [--no-open]
 - Create dialog: global **New** button, or the per-column **+** (preset status).
 - Detail dialog: name, status, board, labels, properties, body, comments (add comments there). Comment keys have minute granularity (seconds on collision).
 - Filter bar: text, labels, properties, with `!` negation as in `kb ls`. State lives in the URL hash: `#board=..&text=..&l=..&p=..`.
-- Maintenance panel: `validate` results, and `fix` with a dry-run preview before applying. Parse errors are shown only there.
+- **Settings** (header button, badge = issue count):
+  - *Board config* form for `kanban.yaml`: default board name, `glob`, ordered columns (rename inline, reorder, add, remove), and per-board column overrides (add, rename, remove). Saving keeps your YAML comments and unrelated keys.
+  - Renaming a column rewrites `status` on every ticket using it; renaming a board rewrites an explicit `board:`. Before anything is written the UI shows how many ticket files will change (dry run) and asks to confirm.
+  - Removing a column is **blocked** while tickets still use it (the error lists them). Removing a board override is allowed; its tickets fall back to the default columns. Unsorted tickets never block.
+  - Invalid configs (empty/duplicate columns, empty name or glob) are refused and nothing is written. If `kanban.yaml` changes on disk while the form is open, a banner offers **Reload** (and **Overwrite** after a stale save).
+  - *Health*: `validate` results and board warnings; `fix` with a dry-run preview before applying. Parse errors are shown only here.
 - Tickets with duplicate ids or no id are read-only and carry badges (use `fix`).
 - Stale-edit banner: edits send the ticket's mtime; if the file changed on disk the UI offers **Reload** or **Overwrite**.
 - Not available in the UI: `init` and `edit`.
@@ -307,13 +312,15 @@ JSON in and out. Errors: `{ "error": "...", "code": "..." }`.
 | `POST /api/tickets/:id/comments` | Add comment, body `{ text, mtime? }` (201) |
 | `GET /api/validate` | Validation result |
 | `POST /api/fix` | Body `{ dryRun }`, default `true` |
+| `GET /api/config` | `{ config: {name, columns, glob, boards}, mtime }` |
+| `PUT /api/config` | Body `{ config, renames?, mtime?, dryRun? }` → `{ dryRun, changes, configChanged, mtime }`. `renames` is `{ columns: { "": {old: new}, <board>: {old: new} }, boards: {old: new} }`. `dryRun` (only when exactly `true`) reports ticket edits without writing. Stale `mtime` → 409 `code: "stale"`; invalid config or a column still in use → 400 `invalid` |
 | `GET /api/events` | SSE stream (`changed` events) |
 
 Status mapping: `not-found` 404; `ambiguous`, `exists`, `stale` 409; `invalid`, `parse` 400; `unsupported` 415; host not allowed 421; `config` 500; body too large (1 MB) 413.
 
 ### Frontend
 
-`src/web/public/`: vanilla ES modules, no build step, no dependencies. `index.html`, `style.css`, `app.js` (wiring), `api.js`, `board.js`, `dialog.js`, `filters.js`, `maintenance.js`, `dom.js`, and `logic.js` (pure logic, unit-tested).
+`src/web/public/`: vanilla ES modules, no build step, no dependencies. `index.html`, `style.css`, `app.js` (wiring), `api.js`, `board.js`, `dialog.js`, `filters.js`, `settings.js`, `dom.js`, and `logic.js` (pure logic, unit-tested).
 
 ## Architecture
 
@@ -344,6 +351,8 @@ kb.comment(id, "started");
 const { boards } = kb.list({ labels: ["bug"], props: ["!priority:low"] });
 const { errors } = kb.validate();
 kb.fix({ dryRun: true }); // [{ path, from, to }]
+const { config, mtime } = kb.getConfig();
+kb.updateConfig({ ...config, columns: ["todo", "wip", "done"] }, { renames: { columns: { "": { doing: "wip" } } }, mtime });
 ```
 
 Boundary rule: nothing in `src/core` may import `commander` or `../cli`, or use `process.stdout`/`stderr`/`exit`/`argv`/`env`
@@ -380,4 +389,4 @@ Implemented: v1 plus the web UI (`kb web`). All commands working; vitest suite p
 - `mv`/`set` to a status not in the board's columns only warns (ticket lands in unsorted).
 - `node_modules` is always excluded from the glob scan.
 - Web UI is not tested in real browsers beyond a headless Chrome smoke check (synthetic drag events).
-- The create dialog and the maintenance fix buttons have not been exercised in a browser.
+- The create dialog and the Health fix buttons have not been exercised in a browser. The Settings config form was driven in headless Chrome (rename + confirm, blocked removal, external-change banner).

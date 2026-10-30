@@ -4,7 +4,8 @@ export type ErrorCode =
   | "invalid"
   | "exists"
   | "config"
-  | "parse";
+  | "parse"
+  | "stale";
 
 /** Error thrown by the core API; `code` lets a UI tell failure kinds apart. */
 export class KanbanError extends Error {

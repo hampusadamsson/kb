@@ -100,7 +100,15 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .issues li.error { color: var(--err); }
 .issues li.warn { color: var(--fg); }
 .issues .path { margin-right: 8px; color: var(--muted); }
-.issues h3 { margin: 8px 0 4px; font-size: 14px; }
+.section-title { margin: 12px 0 4px; font-size: 14px; }
+.config { display: flex; flex-direction: column; gap: 8px; }
+.col-list { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.col-row { display: flex; gap: 4px; width: 100%; }
+.col-row input { flex: 1; min-width: 0; }
+.board-overrides { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.override { border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.row { align-items: center; }
+.issues h4 { margin: 8px 0 4px; font-size: 13px; }
 .fix-area { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 
 .toasts { position: fixed; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 50; }

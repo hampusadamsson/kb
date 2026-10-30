@@ -5,7 +5,7 @@ import { closeDialog, isOpen as ticketOpen, openCreate, openDetail, refreshOpen 
 import { clear, debounce, h, toast } from "./dom.js";
 import { createFilters } from "./filters.js";
 import { filterQuery, hasFilters, parseHash, serializeHash } from "./logic.js";
-import * as maint from "./maintenance.js";
+import * as settings from "./settings.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -70,7 +70,7 @@ async function load() {
   state.validation = validation;
   $("fatal").hidden = true;
   $("app").hidden = false;
-  maint.setBoardWarnings(data.warnings);
+  settings.setBoardWarnings(data.warnings);
   render();
 }
 
@@ -130,11 +130,11 @@ function renderTabs() {
 function renderBadge() {
   const v = state.validation;
   const n = v ? v.errors.length + v.warnings.length : 0;
-  const badge = $("maint-badge");
+  const badge = $("settings-badge");
   badge.textContent = String(n);
   badge.hidden = n === 0;
   badge.classList.toggle("err", Boolean(v && v.errors.length));
-  $("maint-btn").setAttribute("aria-label", n ? `Maintenance, ${n} issues` : "Maintenance");
+  $("settings-btn").setAttribute("aria-label", n ? `Settings, ${n} issues` : "Settings");
 }
 
 // ---- actions ----
@@ -171,9 +171,9 @@ $("new-btn").addEventListener("click", () => {
   const sel = selection();
   openCreate(dialogCtx(), { board: sel === "all" ? undefined : sel });
 });
-$("maint-btn").addEventListener("click", () => maint.open());
-$("maint-close").addEventListener("click", () => $("maint-dialog").close());
-maint.init(() => load());
+$("settings-btn").addEventListener("click", () => settings.open());
+$("settings-close").addEventListener("click", () => $("settings-dialog").close());
+settings.init(() => load());
 
 // Click on the backdrop closes a dialog only if the click started and ended there.
 $("ticket-dialog").addEventListener("mousedown", (e) => {
@@ -187,7 +187,7 @@ $("ticket-dialog").addEventListener("click", (e) => {
 
 const onChanged = debounce(() => {
   load();
-  if (maint.isOpen()) maint.refresh();
+  if (settings.isOpen()) settings.refresh();
   if (ticketOpen()) refreshOpen();
 }, 100);
 

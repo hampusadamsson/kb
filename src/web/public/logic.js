@@ -127,3 +127,83 @@ export function describeChange(c) {
   const from = c.from === undefined || c.from === null || c.from === "" ? "(none)" : String(c.from);
   return `${c.path}: id ${from} → ${c.to}`;
 }
+
+// ---- settings (kanban.yaml form) ----
+
+const colRows = (cols) => cols.map((c) => ({ orig: c, value: c }));
+
+/** GET /api/config → editable form state. `orig` = name in the file (null for new rows). */
+export function configToForm(c) {
+  return {
+    name: c.name,
+    glob: c.glob,
+    columns: colRows(c.columns),
+    boards: Object.entries(c.boards ?? {}).map(([n, b]) => ({ orig: n, name: n, columns: colRows(b.columns) })),
+  };
+}
+
+/** Rows that were renamed: { oldName: newName } (blank new names are not renames, they are removals). */
+function renamedColumns(rows) {
+  const out = {};
+  for (const r of rows) {
+    const v = r.value.trim();
+    if (r.orig !== null && v !== "" && v !== r.orig) out[r.orig] = v;
+  }
+  return out;
+}
+
+const colValues = (rows) => rows.map((r) => r.value.trim()).filter((v) => v !== "");
+
+/** Form state → PUT /api/config payload parts: { config, renames }. */
+export function formToPayload(f) {
+  const config = { name: f.name.trim(), glob: f.glob.trim(), columns: colValues(f.columns), boards: {} };
+  const renames = { columns: {}, boards: {} };
+  const top = renamedColumns(f.columns);
+  if (Object.keys(top).length) renames.columns[""] = top;
+  for (const b of f.boards) {
+    const name = b.name.trim();
+    config.boards[name] = { columns: colValues(b.columns) };
+    if (b.orig !== null) {
+      if (name !== b.orig) renames.boards[b.orig] = name;
+      const m = renamedColumns(b.columns);
+      if (Object.keys(m).length) renames.columns[b.orig] = m;
+    }
+  }
+  return { config, renames };
+}
+
+/** Has the form changed relative to the loaded config? */
+export const formDirty = (f, loaded) => JSON.stringify(formToPayload(f)) !== JSON.stringify(formToPayload(configToForm(loaded)));
+
+/** Client-side checks that give friendlier errors than the server's; returns a message or "". */
+export function checkForm(f) {
+  const p = formToPayload(f).config;
+  if (!p.name) return "Board name must not be empty.";
+  if (!p.glob) return "Glob must not be empty.";
+  const dup = (a) => a.find((v, i) => a.indexOf(v) !== i);
+  if (p.columns.length === 0) return "Columns must not be empty.";
+  if (dup(p.columns) !== undefined) return `Duplicate column "${dup(p.columns)}".`;
+  const names = f.boards.map((b) => b.name.trim());
+  if (names.some((n) => n === "")) return "Board override names must not be empty.";
+  if (dup(names) !== undefined) return `Duplicate board "${dup(names)}".`;
+  for (const [n, b] of Object.entries(p.boards)) {
+    if (b.columns.length === 0) return `Board "${n}" needs at least one column.`;
+    if (dup(b.columns) !== undefined) return `Board "${n}": duplicate column "${dup(b.columns)}".`;
+  }
+  return "";
+}
+
+/** Move item i of a list by delta (-1/+1); returns a new array. */
+export function moveItem(list, i, delta) {
+  const j = i + delta;
+  if (j < 0 || j >= list.length) return list;
+  const out = [...list];
+  [out[i], out[j]] = [out[j], out[i]];
+  return out;
+}
+
+/** One line per ticket edit in a config save preview. */
+export function describeTicketChange(c) {
+  const to = c.to === undefined ? "(default board)" : c.to;
+  return `${c.path}: ${c.field} ${c.from ?? "(none)"} → ${to}`;
+}

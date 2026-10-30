@@ -94,8 +94,8 @@ class Session {
           h("strong", { text: this.detail.duplicate ? "Read-only: duplicate id" : "Read-only: no id" }),
           h("p", {
             text: this.detail.duplicate
-              ? "Another ticket uses the same id, so edits cannot be routed safely. Fix it from Maintenance → Fix ids…, or edit the files by hand."
-              : "This ticket has no id, so it cannot be addressed. Fix it from Maintenance → Fix ids…, or add an id by hand.",
+              ? "Another ticket uses the same id, so edits cannot be routed safely. Fix it from Settings → Fix ids…, or edit the files by hand."
+              : "This ticket has no id, so it cannot be addressed. Fix it from Settings → Fix ids…, or add an id by hand.",
           }),
         )
       : null;
