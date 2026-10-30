@@ -15,8 +15,12 @@ export function progressFraction(elapsedMs, timeoutMs) {
   return Math.min(1, elapsedMs / timeoutMs);
 }
 
-/** Remaining time text: "mm:ss left" or "timing out". */
+/** True when the run has a timeout (timeoutMs null/0 = none). */
+export const hasTimeout = (timeoutMs) => timeoutMs > 0;
+
+/** Remaining time text: "mm:ss left", "timing out" or "no timeout". */
 export function timeoutText(elapsedMs, timeoutMs) {
+  if (!hasTimeout(timeoutMs)) return "no timeout";
   const left = timeoutMs - elapsedMs;
   return left > 0 ? `${formatElapsed(left)} left` : "timing out";
 }

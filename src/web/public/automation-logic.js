@@ -1,5 +1,5 @@
 // Pure helpers for the Settings → Automations tab (no DOM access).
-import { automationState, effectiveColumn, parseLocal, relativeTime } from "./logic.js";
+import { automationState, effectiveColumn, parseTimeout, timeoutLabel, parseLocal, relativeTime } from "./logic.js";
 
 export const EVENT_OPTIONS = [
   { value: "moved_to", label: "A ticket is moved to…", short: "moves to" },
@@ -78,6 +78,8 @@ export function ruleSummary(r, column = r.column) {
   if (props.length) parts.push(props.map(propText).join(", "));
   const run = oneLine(r.run, 60);
   parts.push(run ? `runs ${run}` : "no script yet");
+  const to = timeoutLabel(parseTimeout(r.timeout).seconds);
+  if (to) parts.push(`timeout ${to}`);
   return parts.join(" · ");
 }
 
@@ -88,6 +90,8 @@ export function ruleIssues(r, rules, cols) {
   if (!name) out.name = "Give the automation a name.";
   else if (rules.some((o) => o !== r && o.name.trim() === name)) out.name = `Another automation on this board is already called "${name}".`;
   if (!r.run.trim()) out.run = "Enter the script to run.";
+  const te = parseTimeout(r.timeout).error;
+  if (te) out.timeout = te;
   const col = effectiveColumn(cols, r.column);
   const have = cols.map((c) => c.value.trim()).filter(Boolean);
   if (!col) out.column = "Choose a column.";

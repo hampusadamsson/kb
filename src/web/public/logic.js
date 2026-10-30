@@ -149,6 +149,7 @@ const ruleRow = (a) => ({
   run: a.run,
   enabled: a.enabled !== false,
   guard: a.guard !== false,
+  timeout: a.timeout === undefined ? "" : String(a.timeout), // field text; "" = none
 });
 
 /** A blank rule for a board whose columns are `cols` (form rows). */
@@ -162,6 +163,7 @@ export const newRule = (cols) => ({
   run: "",
   enabled: true,
   guard: true,
+  timeout: "",
 });
 
 /** GET /api/config → editable form state. `orig` = name in the file (null for new rows). */
@@ -187,6 +189,26 @@ export function effectiveColumn(rows, column) {
   return row ? row.value.trim() : column;
 }
 
+export const MAX_TIMEOUT = 86400;
+
+/** Timeout field text → { seconds, error }: "" = 0 (none); integers 0..86400 only. */
+export function parseTimeout(text) {
+  const s = String(text ?? "").trim();
+  if (s === "") return { seconds: 0, error: "" };
+  if (!/^-?\d+$/.test(s)) return { seconds: 0, error: "Timeout must be a whole number of seconds (0 = no timeout)." };
+  const n = Number(s);
+  if (n < 0 || n > MAX_TIMEOUT) return { seconds: 0, error: `Timeout must be between 0 and ${MAX_TIMEOUT} seconds.` };
+  return { seconds: n, error: "" };
+}
+
+/** "30s", "5m", "2h" (exact units only; 90 s stays "90s"). */
+export function timeoutLabel(seconds) {
+  if (!(seconds > 0)) return "";
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+}
+
 /** Form rule → config automation object (typed prop values preserved when unchanged). */
 function ruleToConfig(r, cols) {
   const when = { [r.event]: effectiveColumn(cols, r.column) };
@@ -201,6 +223,8 @@ function ruleToConfig(r, cols) {
   const out = { name: r.name.trim(), when, run: r.run };
   if (!r.enabled) out.enabled = false;
   if (r.guard === false) out.guard = false; // default on: omitted from YAML
+  const t = parseTimeout(r.timeout).seconds;
+  if (t > 0) out.timeout = t; // 0 / empty = no timeout: omitted from YAML
   return out;
 }
 
@@ -294,6 +318,8 @@ export function checkRules(board, rules, cols) {
     if (seen.has(name)) return `Duplicate automation name "${name}"${where}.`;
     seen.add(name);
     if (!r.run.trim()) return `${who}${where} has an empty script.`;
+    const te = parseTimeout(r.timeout).error;
+    if (te) return `${who}${where}: ${te}`;
     const col = effectiveColumn(cols, r.column);
     if (!col) return `${who}${where} needs a column.`;
     if (!have.includes(col)) return `Cannot remove column "${col}": used by automation "${name}"${where}. Change or remove the rule first.`;
@@ -310,6 +336,8 @@ export const logTitle = (r) => `${r.board}/${r.rule}`;
 /** Test-run request body from a form rule. */
 export function testBody(rule, board) {
   const b = { run: rule.run, event: rule.event };
+  const t = parseTimeout(rule.timeout).seconds;
+  if (t > 0) b.timeout = t;
   if (board) b.board = board;
   return b;
 }

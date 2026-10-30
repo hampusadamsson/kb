@@ -185,7 +185,7 @@ export function automationsTab({ boards, onChange }) {
       { class: "tr-details autos-help" },
       h("summary", { text: "How automations work" }),
       h("p", { class: "muted", text: "When a ticket is moved to (or created in) a column and matches the optional labels and properties, the script runs on this machine in the folder of kanban.yaml. Placeholders such as {{ id }} are replaced by shell-quoted ticket values. The last run is shown on each rule; full history is in the Logs tab." }),
-      h("p", { class: "muted", text: "Changes are saved with Save config below. Test run executes the script for real." }),
+      h("p", { class: "muted", text: "Changes are saved with Save config below. Test run executes the script for real. A runaway script can be stopped from the Live tab." }),
     );
 
   draw();

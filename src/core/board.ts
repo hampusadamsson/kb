@@ -392,6 +392,7 @@ export class Kanban {
           };
           if (r.result.error) data.error = r.result.error;
           if (r.result.error === KILLED_BY_USER) data.killed = true;
+          if (r.result.timedOut) (data.timedOut = true, (data.timeoutSeconds = rule.timeout));
           this.emit("automation.finished", `automation "${rule.name}" ${r.status} on #${String(ticket.id)}`, data, ref);
           try {
             this.onAutomation?.(r);
@@ -412,6 +413,7 @@ export class Kanban {
             result = await runner!.run(command, {
               cwd: this.dir,
               env: { KB_AUTOMATION: "1" },
+              ...(rule.timeout ? { timeoutMs: rule.timeout * 1000 } : {}),
               meta: { board: ticket.board, rule: rule.name, ticketId: String(ticket.id), ticketName: ticket.name, path: rel },
             });
           } catch (e) {

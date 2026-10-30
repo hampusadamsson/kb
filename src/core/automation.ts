@@ -15,6 +15,8 @@ export interface RunResult {
   stdout: string;
   stderr: string;
   error?: string;
+  /** the run was killed because it exceeded its timeout */
+  timedOut?: boolean;
 }
 
 /** Error text of a run terminated by the user (web Kill button). */
@@ -32,7 +34,7 @@ export interface RunMeta {
 }
 
 export interface AutomationRunner {
-  run(command: string, opts: { cwd: string; env: Record<string, string>; meta?: RunMeta }): Promise<RunResult>;
+  run(command: string, opts: { cwd: string; env: Record<string, string>; meta?: RunMeta; timeoutMs?: number }): Promise<RunResult>;
 }
 
 export interface AutomationRecord {
@@ -300,6 +302,8 @@ export interface AutomationLive {
   startedAt: string;
   elapsedMs: number;
   command: string;
+  /** the rule's timeout in seconds; 0 = none */
+  timeoutSeconds: number;
 }
 
 export interface AutomationInfo {
@@ -307,6 +311,8 @@ export interface AutomationInfo {
   board: string;
   enabled: boolean;
   guard: boolean;
+  /** seconds; 0 = no timeout */
+  timeout: number;
   when: Automation["when"];
   run: string;
   /** non-stale running entries */
@@ -344,6 +350,7 @@ export function buildAutomationOverview(
         board,
         enabled: r.enabled !== false,
         guard: r.guard !== false,
+        timeout: r.timeout ?? 0,
         when: r.when,
         run: clipText(r.run),
         running: 0,
@@ -366,7 +373,7 @@ export function buildAutomationOverview(
         if (status === "running") {
           const stale = Number.isNaN(ms) || nowMs - ms > STALE_RUNNING_MS;
           if (stale) status = "stale";
-          else live.push({ rule, board, ticket: { id: t.id, name: t.name, path: t.path }, startedAt: at, elapsedMs: Math.max(0, nowMs - ms), command: info?.run ?? "", ms });
+          else live.push({ rule, board, ticket: { id: t.id, name: t.name, path: t.path }, startedAt: at, elapsedMs: Math.max(0, nowMs - ms), command: info?.run ?? "", timeoutSeconds: info?.timeout ?? 0, ms });
         }
         if (!info) continue;
         if (status === "done" || status === "failed" || status === "skipped" || status === "running" || status === "stale") {

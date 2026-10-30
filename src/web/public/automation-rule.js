@@ -138,6 +138,14 @@ export function ruleCard(r, ctx) {
   // ---- 3 Options ----
   const guard = h("input", { type: "checkbox", id: `${uid}-guard`, checked: r.guard !== false, "aria-describedby": `${uid}-guard-hint`, onchange: (e) => ((r.guard = e.target.checked), ctx.onChange(), updateHead()) });
 
+  const timeoutErr = h("p", { class: "arule-err", id: `${uid}-timeout-err`, hidden: true });
+  const timeoutIn = h("input", {
+    type: "number", id: `${uid}-timeout`, min: "0", max: "86400", step: "1", inputmode: "numeric", placeholder: "0", value: r.timeout ?? "",
+    class: "arule-timeout", "aria-describedby": `${uid}-timeout-hint ${uid}-timeout-err`,
+    oninput: (e) => ((r.timeout = e.target.value === "" && e.target.validity.badInput ? "x" : e.target.value), touched.add("timeout"), ctx.onChange(), validate()),
+    onblur: () => (touched.add("timeout"), validate()),
+  });
+
   // ---- Test ----
   const pick = h("select", { id: `${uid}-pick`, "aria-label": "Ticket for the test run" }, h("option", { value: "", text: "Sample ticket" }));
   const out = h("pre", { class: "mono auto-out", hidden: true, tabIndex: 0, "aria-label": "Test run output" });
@@ -200,6 +208,7 @@ export function ruleCard(r, ctx) {
     set(nameErr, nameIn, "name");
     set(colErr, colSel, "column");
     set(runErr, runTa, "run");
+    set(timeoutErr, timeoutIn, "timeout");
     const bad = unknownVars(r.run);
     varWarn.textContent = bad.length ? `Unknown variable${bad.length > 1 ? "s" : ""}: ${bad.map((v) => `{{ ${v} }}`).join(", ")}. Saving works, but the script will fail to render.` : "";
     varWarn.hidden = !bad.length;
@@ -278,6 +287,8 @@ export function ruleCard(r, ctx) {
       3, "Options",
       h("label", { class: "check", for: `${uid}-guard` }, guard, " Stop after 15 runs per ticket (loop guard)"),
       h("p", { class: "muted hint", id: `${uid}-guard-hint`, text: "Prevents rules from bouncing tickets back and forth forever. Untick to opt out." }),
+      h("div", { class: "field" }, h("label", { for: `${uid}-timeout`, text: "Timeout (seconds)" }), timeoutIn, timeoutErr),
+      h("p", { class: "muted hint", id: `${uid}-timeout-hint`, text: "0 or empty = no timeout. The script is killed when it runs longer." }),
     ),
     h(
       "div",

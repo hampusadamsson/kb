@@ -2,6 +2,7 @@ import path from "node:path";
 import type { AutomationLog } from "../automationLog.js";
 import type { EventLog } from "../eventLog.js";
 import type { AutomationRunner } from "../core/automation.js";
+import { automationSchema } from "../core/config.js";
 import { renderCommand } from "../core/automation.js";
 import { KanbanError, type Kanban, type Patch } from "../core/index.js";
 import type { LiveRuns } from "../liveRuns.js";
@@ -213,6 +214,12 @@ const automationKill: Handler = (_kb, _req, p, ctx) => {
   return ok({ ok: true }, 202);
 };
 
+function parseTimeout(v: unknown): number {
+  const r = automationSchema.shape.timeout.safeParse(v);
+  if (!r.success) throw new KanbanError("invalid", r.error.issues[0].message);
+  return r.data ?? 0;
+}
+
 const SAMPLE_STATUS = "done";
 const MAX_TEST_RUNS = 2;
 let testRuns = 0;
@@ -241,11 +248,12 @@ const automationTest: Handler = async (kb, req, _p, ctx) => {
     event,
     props: obj(s.props, "sample.props") ?? {},
   };
+  const timeout = b.timeout === undefined || b.timeout === null ? 0 : parseTimeout(b.timeout);
   const command = renderCommand(run, vars); // throws invalid on unknown variable
   if (testRuns >= MAX_TEST_RUNS) return fail(429, "busy", "too many test runs in progress; try again shortly");
   testRuns++;
   try {
-    const result = await ctx.runner.run(command, { cwd: kb.dir, env: { KB_AUTOMATION: "1" }, meta: { test: true, board: vars.board } });
+    const result = await ctx.runner.run(command, { cwd: kb.dir, env: { KB_AUTOMATION: "1" }, ...(timeout ? { timeoutMs: timeout * 1000 } : {}), meta: { test: true, board: vars.board } });
     return ok({ command, result });
   } finally {
     testRuns--;

@@ -15,7 +15,8 @@ export interface LiveRunInfo {
   pid: number;
   /** ISO with offset */
   startedAt: string;
-  timeoutMs: number;
+  /** null = no timeout */
+  timeoutMs: number | null;
 }
 
 export interface LiveRun extends LiveRunInfo {

@@ -49,7 +49,8 @@ function killGroup(child: ChildProcess): void {
 const TERM_GRACE_MS = 2000;
 
 export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRuns } = {}): AutomationRunner & { killAll(): void } {
-  const timeoutMs = opts.timeoutMs ?? 30000;
+  /** global override (tests); normally the timeout comes per run from the rule */
+  const defaultTimeoutMs = opts.timeoutMs;
   const registry = opts.registry;
   const live = new Set<ChildProcess>();
   return {
@@ -59,6 +60,8 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
     },
     run(command, o) {
       return new Promise<RunResult>((resolve) => {
+        const t = o.timeoutMs ?? defaultTimeoutMs;
+        const timeoutMs = t !== undefined && t > 0 ? t : undefined;
         const out = new Capture();
         const err = new Capture();
         let done = false;
@@ -104,7 +107,7 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
                 command,
                 pid,
                 startedAt: isoWithOffset(new Date()),
-                timeoutMs,
+                timeoutMs: timeoutMs ?? null,
               },
               () => {
                 if (done || killedByUser) return !done;
@@ -161,10 +164,26 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
               });
             }
           });
-          timer = setTimeout(() => {
-            killGroup(child);
-            finish({ exitCode: null, error: `timeout after ${timeoutMs / 1000}s` });
-          }, timeoutMs);
+          if (timeoutMs !== undefined) {
+            timer = setTimeout(() => {
+              try {
+                if (child.pid) process.kill(-child.pid, "SIGTERM");
+              } catch {
+                // already gone
+              }
+              setTimeout(() => {
+                try {
+                  if (child.pid) {
+                    process.kill(-child.pid, 0);
+                    process.kill(-child.pid, "SIGKILL");
+                  }
+                } catch {
+                  // group is gone
+                }
+              }, TERM_GRACE_MS).unref();
+              finish({ exitCode: null, error: `timed out after ${timeoutMs / 1000}s`, timedOut: true });
+            }, timeoutMs);
+          }
         } catch (e) {
           finish({ exitCode: null, error: (e as Error).message });
         }

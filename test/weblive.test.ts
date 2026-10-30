@@ -46,7 +46,7 @@ describe("live runs API", () => {
     expect((await req("PATCH", "/api/tickets/1", { status: "done" })).status).toBe(200);
     await until(async () => (await req("GET", "/api/automation/runs")).json.runs.length === 1);
     const run = (await req("GET", "/api/automation/runs")).json.runs[0];
-    expect(run).toMatchObject({ kind: "rule", rule: "slow", ticketId: "1", ticketName: "Alpha", command: "sleep 30", timeoutMs: 30000 });
+    expect(run).toMatchObject({ kind: "rule", rule: "slow", ticketId: "1", ticketName: "Alpha", command: "sleep 30", timeoutMs: null });
     expect(run.pid).toBeGreaterThan(0);
     expect(typeof run.elapsedMs).toBe("number");
     expect(run.startedAt).toMatch(/[+-]\d\d:\d\d$|Z$/);

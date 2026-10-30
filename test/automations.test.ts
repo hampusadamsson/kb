@@ -22,6 +22,7 @@ automations:
   - name: off
     when: { created_in: todo }
     run: echo off
+    timeout: 300
     enabled: false
     guard: false
 boards:
@@ -116,9 +117,11 @@ describe("kb automations (dist)", () => {
     expect(lint).toMatchObject({ running: 1, counts: { running: 1, stale: 1 }, enabled: true, when: { moved_to: "review" } });
     expect(lint.lastRun.ticketId).toBe(1);
     const txt = kb("automations", "--all", "--format", "text").stdout;
-    expect(txt).toMatch(/^NAME +BOARD +ON +WHEN +RUNNING +LAST\n/);
-    expect(txt).toMatch(/lint +main +yes +moved_to review +1 +running 1m ago #1/);
-    expect(txt).toMatch(/off +main +no /);
+    expect(txt).toMatch(/^NAME +BOARD +ON +WHEN +TIMEOUT +RUNNING +LAST\n/);
+    expect(txt).toMatch(/lint +main +yes +moved_to review +- +1 +running 1m ago #1/);
+    expect(txt).toMatch(/off +main +no +created_in todo +5m /);
+    expect(lint).toMatchObject({ timeout: 0 });
+    expect(all.automations.find((a: any) => a.name === "off").timeout).toBe(300);
     expect(snap()).toEqual(before);
   });
   it("board filter", () => {

@@ -2,7 +2,7 @@
 import { api } from "./api.js";
 import { h, clear } from "./dom.js";
 import { absoluteTime, relativeTime } from "./logs-logic.js";
-import { announce, formatElapsed, killConfirm, killLabel, progressFraction, runTitle, sortRuns, timeoutText } from "./live-logic.js";
+import { announce, formatElapsed, hasTimeout, killConfirm, killLabel, progressFraction, runTitle, sortRuns, timeoutText } from "./live-logic.js";
 
 let ctx = { openTicket: async () => {}, onChange: () => {} };
 let runs = [];
@@ -76,7 +76,7 @@ function updateTimes() {
     row.querySelector(".live-elapsed").textContent = formatElapsed(e);
     row.querySelector(".live-left").textContent = timeoutText(e, r.timeoutMs);
     const bar = row.querySelector(".live-bar > span");
-    bar.style.width = `${Math.round(progressFraction(e, r.timeoutMs) * 100)}%`;
+    if (bar) bar.style.width = `${Math.round(progressFraction(e, r.timeoutMs) * 100)}%`;
   }
 }
 
@@ -155,7 +155,7 @@ function runRow(r) {
       { class: "live-meta muted" },
       h("span", { title: absoluteTime(r.startedAt), text: `started ${relativeTime(r.startedAt) || r.startedAt}` }),
       h("span", { class: "mono live-elapsed", title: "Elapsed", text: formatElapsed(e) }),
-      h("span", { class: "live-bar", title: `Timeout ${formatElapsed(r.timeoutMs)}`, role: "presentation" }, bar(e, r)),
+      hasTimeout(r.timeoutMs) ? h("span", { class: "live-bar", title: `Timeout ${formatElapsed(r.timeoutMs)}`, role: "presentation" }, bar(e, r)) : null,
       h("span", { class: "mono live-left", text: timeoutText(e, r.timeoutMs) }),
     ),
     h("div", { class: "mono live-cmd", title: r.command, text: r.command }),

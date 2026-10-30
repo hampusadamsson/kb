@@ -18,7 +18,7 @@ describe("shell runner", () => {
     const t0 = Date.now();
     const x = await createShellRunner({ timeoutMs: 200 }).run("sleep 5", { cwd, env: {} });
     expect(x.exitCode).toBeNull();
-    expect(x.error).toBe("timeout after 0.2s");
+    expect(x.error).toBe("timed out after 0.2s");
     expect(Date.now() - t0).toBeLessThan(3000);
   });
   it("caps output", async () => {

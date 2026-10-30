@@ -223,12 +223,36 @@ function planTicketChanges(
 // ---- writing ----
 
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+/** `timeout: 0` is the default and is never written. */
+const normAuto = (rules: Automation[] | undefined): Automation[] =>
+  (rules ?? []).map((r) => {
+    if (r.timeout) return r;
+    const { timeout: _t, ...rest } = r;
+    return rest;
+  });
 const sameAuto = (a: Automation[] | undefined, b: Automation[] | undefined) =>
-  JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+  JSON.stringify(a ?? []) === JSON.stringify(normAuto(b));
 
 function setAutomations(doc: Document, at: string[], rules: Automation[] | undefined): void {
   if (!rules || rules.length === 0) doc.deleteIn(at);
-  else doc.setIn(at, doc.createNode(rules));
+  else {
+    const rs = normAuto(rules);
+    const cur = doc.getIn(at, true);
+    if (!isSeq(cur)) return void doc.setIn(at, doc.createNode(rs));
+    // keep comments: update same-named rules in place, create the others
+    const old = new Map<string, unknown>();
+    for (const it of cur.items) if (isMap(it)) old.set(String(it.get("name")), it);
+    cur.items = rs.map((r) => {
+      const node = old.get(r.name);
+      if (!isMap(node)) return doc.createNode(r);
+      const want = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== undefined));
+      for (const k of node.items.map((p) => String((p.key as Scalar).value ?? p.key))) if (!(k in want)) node.delete(k);
+      for (const [k, v] of Object.entries(want)) {
+        if (JSON.stringify(node.toJSON()[k]) !== JSON.stringify(v)) node.set(k, doc.createNode(v));
+      }
+      return node;
+    });
+  }
 }
 
 function setColumns(doc: Document, at: string[], cols: string[]): void {

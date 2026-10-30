@@ -431,6 +431,7 @@ automations:
     run: echo {{ id }} {{ name }} >> done.log
     enabled: true              # optional, default true; false skips the rule
     guard: true                # optional, default true; false opts out of the loop guardrail
+    timeout: 30                # optional seconds (0..86400); absent or 0 = no timeout
 boards:
   another-board:
     columns: [backlog, active, shipped]
@@ -447,6 +448,7 @@ boards:
 | `run` | Shell script, rendered from the [template](#template-variables) and run with `bash -s`. |
 | `enabled` | Default `true`. With `false` the rule never runs; an `automation.skipped` event (`reason: rule-disabled`) is logged. |
 | `guard` | Default `true`. See [Loop guardrail](#loop-guardrail). |
+| `timeout` | Whole seconds, `0`–`86400`. Default `0` = no timeout (an absent key means the same; `0` is never written back to the file). Per rule, per board, not inherited. Negative, fractional or non-numeric values are rejected. |
 
 Triggers: `kb mv`, `kb set -s`, `kb add` (created in its status), and the web UI/API (drag, PATCH, create). Editing a file by hand or with `kb edit` triggers nothing.
 
@@ -471,7 +473,7 @@ With bare placeholders, hostile ticket text (`'; rm -rf ~`) is passed as one lit
 ### Execution
 
 - The rendered script is piped to `bash -s` stdin, with the config dir as cwd and `KB_AUTOMATION=1` added to the environment.
-- 30 s timeout (the whole process group is killed). stdout/stderr are each capped at 64 KiB.
+- **No timeout by default**: a script runs until it finishes or is killed (Live tab **Kill**, or `kb web` shutdown). Set `timeout: <seconds>` on a rule to limit it: on expiry the process group gets SIGTERM, SIGKILL after 2 s, and the run is `status: failed`, `exit: null`, `error: "timed out after Ns"`; its `automation.finished` event has `timedOut: true` and `timeoutSeconds`. stdout/stderr are each capped at 64 KiB.
 - Non-blocking: the move/add succeeds first and rules run in the background. A failing script never fails the command.
 - CLI: the result is printed immediately, then `kb` waits for running scripts before exiting (a rule with `sleep 15` keeps the command open for 15 s) and prints `warning: automation "<name>" failed (…)` to stderr for failures. The web server is fully async; Ctrl-C kills running scripts.
 - Several matching rules on one event all start together.
@@ -488,7 +490,7 @@ automations:
     at: "2025-06-01T14:32:05"
     exit: 0              # null if killed or not started
     runs: 3              # runs of this rule on this ticket (guardrail counter)
-    error: "timeout after 30s"   # only on errors
+    error: "timed out after 30s"   # only on errors
   ship:
     status: skipped
     at: "2025-06-01T14:40:00"
@@ -517,11 +519,11 @@ There is no depth cap beyond this.
 
 ### Listing automations
 
-`kb automations` shows what is running right now (`--live`, default); `kb automations --all` lists every configured rule with its last run and counts (JSON by default, `--format text` for a table, `-b` for one board). It is derived from the tickets' `automations` frontmatter, so scripts started by `kb web` or by the CLI both show up; entries `running` for more than 5 minutes count as stale (not live; status `stale` in `--all`). It never runs anything or writes files. The Live tab in the web UI shows the server's own runs and can kill them.
+`kb automations` shows what is running right now (`--live`, default); `kb automations --all` lists every configured rule with its `timeout` (seconds, 0 = none; a TIMEOUT column in text), last run and counts (JSON by default, `--format text` for a table, `-b` for one board). It is derived from the tickets' `automations` frontmatter, so scripts started by `kb web` or by the CLI both show up; entries `running` for more than 5 minutes count as stale (not live; status `stale` in `--all`). It never runs anything or writes files. `--live` items carry `timeoutSeconds` (0 = none). The Live tab in the web UI shows the server's own runs and can kill them.
 
 ### Validation
 
-`kb validate` (and saving the config) report as errors: empty or duplicate rule names, empty `run`, unknown template variables, placeholders inside quotes/backticks/heredocs, and a column that is not a column of the rule's board. A ticket whose rule has been `running` for more than 5 minutes (or with an unparseable time) gets a stale-run warning.
+`kb validate` (and saving the config) report as errors: empty or duplicate rule names, empty `run`, an invalid `timeout` (negative, fractional, not a number, above 86400), unknown template variables, placeholders inside quotes/backticks/heredocs, and a column that is not a column of the rule's board. A ticket whose rule has been `running` for more than 5 minutes (or with an unparseable time) gets a stale-run warning.
 
 Renaming a column in Settings rewrites the rules that use it. Removing a column that a rule uses is blocked (the error names the rule).
 
@@ -535,7 +537,7 @@ Renaming a column in Settings rewrites the rules that use it. Removing a column 
 
 ### Settings → Automations
 
-The tab has a board switcher (one button per board with its rule count; rules apply only to the selected board, they are not inherited; order does not matter, every matching rule runs), a collapsible *How automations work* note, and **Add automation**. With six or more rules a filter box appears. Each rule is a collapsible card: an *Enabled* switch, name, a one-line summary (*When a ticket moves to review · labels: bug · runs echo …*), a last-run chip (done/failed/running/skipped + relative time, from the tickets' run history; *disabled*, *never run*, *not saved yet*), **Duplicate** and **Delete**. Delete removes the card at once and offers **Undo** for 12 s; nothing is written until *Save config*. Enter/Space on the header expands the card (`aria-expanded`); new and duplicated rules open with focus in the name, and rules with problems show a red `!` and open with inline errors tied to the fields. The body has *When* (event, column, required labels, property filters; `!x` = not x), *Run* (auto-growing script, variable chips that insert `{{ id }}` etc. at the cursor, a rendered preview with sample values, quoting hint), *Options* (loop guard checkbox *Stop after 15 runs per ticket*) and *Test run*: pick the sample ticket or a real ticket of the board, **Run test** (asks for confirmation, then *really executes* the script with that ticket's values, `POST /api/automation/test`; not logged, touches no ticket) shows pass/fail, exit code, duration and output. An empty board offers two starter templates (*moves to a column*, *is created in a column*) that prefill a rule. Run history is in [Settings → Logs](#settings--logs) (filter *Automations*).
+The tab has a board switcher (one button per board with its rule count; rules apply only to the selected board, they are not inherited; order does not matter, every matching rule runs), a collapsible *How automations work* note, and **Add automation**. With six or more rules a filter box appears. Each rule is a collapsible card: an *Enabled* switch, name, a one-line summary (*When a ticket moves to review · labels: bug · runs echo …*), a last-run chip (done/failed/running/skipped + relative time, from the tickets' run history; *disabled*, *never run*, *not saved yet*), **Duplicate** and **Delete**. Delete removes the card at once and offers **Undo** for 12 s; nothing is written until *Save config*. Enter/Space on the header expands the card (`aria-expanded`); new and duplicated rules open with focus in the name, and rules with problems show a red `!` and open with inline errors tied to the fields. The body has *When* (event, column, required labels, property filters; `!x` = not x), *Run* (auto-growing script, variable chips that insert `{{ id }}` etc. at the cursor, a rendered preview with sample values, quoting hint), *Options* (loop guard checkbox *Stop after 15 runs per ticket*; *Timeout (seconds)*, integer 0–86400, empty/0 = none, shown in the summary as `timeout 30s`; Test run uses the field value) and *Test run*: pick the sample ticket or a real ticket of the board, **Run test** (asks for confirmation, then *really executes* the script with that ticket's values, `POST /api/automation/test`; not logged, touches no ticket) shows pass/fail, exit code, duration and output. An empty board offers two starter templates (*moves to a column*, *is created in a column*) that prefill a rule. Run history is in [Settings → Logs](#settings--logs) (filter *Automations*).
 
 ### Disabling
 
@@ -588,7 +590,7 @@ Example line:
 | `ids.fixed` | `kb fix` / Health fix wrote changes | `changes: [{ path, from, to }]` |
 | `config.updated` | a config change was saved | diff of `columns`, `boards`, `automations` (added/removed/renamed/changed), `ticketsMigrated`, `tickets` (first 50 edits) |
 | `automation.started` | a rule started | `rule`, `event` |
-| `automation.finished` | a rule ended | `rule`, `status` (`done`/`failed`), `exit`, `durationMs`, `command` (clipped), `error?` |
+| `automation.finished` | a rule ended | `rule`, `status` (`done`/`failed`), `exit`, `durationMs`, `command` (clipped), `error?`, `killed?`, `timedOut?` + `timeoutSeconds?` (when the rule's timeout expired) |
 | `automation.skipped` | a matching rule did not run | `rule`, `reason` (`rule-disabled`, `automations-off`, `guardrail`), `event`; guardrail adds `runs`, `limit` |
 
 One `set`/PATCH that changes several things emits one event per kind of change.
@@ -608,9 +610,9 @@ The same data is available from `GET /api/events` (see [REST API](#rest-api)).
 
 ### Settings → Live
 
-The **Live** tab lists automation runs in progress in this `kb web` server (rule runs and Test runs). The tab shows `Live (n)` and a pulsing yellow dot (also on the Settings button) while something runs. Each row shows rule (or *Test run*), board, ticket link (opens the ticket), start time, ticking elapsed `mm:ss`, a timeout progress bar, the command, and an expandable tail (~2 KB) of stdout/stderr. **Kill** asks for confirmation, then sends SIGTERM to the process group and SIGKILL after 2 s. A killed rule run is written to the ticket as `status: failed`, `exit: null`, `error: killed by user`, and its `automation.finished` event has `error: "killed by user"` and `killed: true`. Finished runs are in Logs. With `--no-automation` the tab says automations are disabled.
+The **Live** tab lists automation runs in progress in this `kb web` server (rule runs and Test runs). The tab shows `Live (n)` and a pulsing yellow dot (also on the Settings button) while something runs. Each row shows rule (or *Test run*), board, ticket link (opens the ticket), start time, ticking elapsed `mm:ss`, a timeout progress bar (or *no timeout* when the rule has none), the command, and an expandable tail (~2 KB) of stdout/stderr. **Kill** asks for confirmation, then sends SIGTERM to the process group and SIGKILL after 2 s. A killed rule run is written to the ticket as `status: failed`, `exit: null`, `error: killed by user`, and its `automation.finished` event has `error: "killed by user"` and `killed: true`. Finished runs are in Logs. With `--no-automation` the tab says automations are disabled.
 
-- `GET /api/automation/runs` → `{ runs }` newest first (`runId, kind: rule|test, board?, rule?, ticketId?, ticketName?, path?, command, pid, startedAt, timeoutMs, elapsedMs, output`); disabled → `{ runs: [], disabled: true }`.
+- `GET /api/automation/runs` → `{ runs }` newest first (`runId, kind: rule|test, board?, rule?, ticketId?, ticketName?, path?, command, pid, startedAt, timeoutMs (null = no timeout), elapsedMs, output`); disabled → `{ runs: [], disabled: true }`.
 - `POST /api/automation/runs/:id/kill` → 202 `{ ok: true }`; unknown/finished id → 404 `not-found`. Same-origin guards apply.
 - SSE `runs` event on `/api/stream` when a run starts, finishes or is killed (`changed` is unaffected). The open tab also polls every 2 s for the output tail.
 
@@ -707,7 +709,7 @@ JSON in and out. Errors: `{ "error": "...", "code": "..." }`.
 
 `GET /api/events` query (all optional): `q` (substring search), `type` (event type; repeat the param or comma-separate; a trailing `.*` matches a prefix, e.g. `ticket.*`), `ticket` (ticket id), `board`, `source` (`cli`/`web`/`automation`), `before` (event id cursor: only older events), `limit` (integer 1..200, default 50; otherwise 400 `invalid`). Returns `{ events, nextCursor? }`, newest first; pass `nextCursor` as `before` for the next page. See [Activity log](#activity-log-audit-events).
 
-`/api/automation/test` body: `{ run, event?: "moved_to"|"created_in", board?, sample?: { id, name, body, status, from, to, labels, props } }` → `{ command, result: { exitCode, stdout, stderr, error? } }`. Unknown variable or bad placeholder position → 400 `invalid`; automations disabled → 503 `disabled`; more than 2 test runs in flight → 429 `busy`. Test runs are not logged and touch no ticket.
+`/api/automation/test` body: `{ run, event?: "moved_to"|"created_in", board?, timeout?: seconds (0–86400, default none), sample?: { id, name, body, status, from, to, labels, props } }` → `{ command, result: { exitCode, stdout, stderr, error? } }`. Unknown variable or bad placeholder position → 400 `invalid`; automations disabled → 503 `disabled`; more than 2 test runs in flight → 429 `busy`. Test runs are not logged and touch no ticket.
 
 Status mapping: `not-found` 404; `ambiguous`, `exists`, `stale` 409; `invalid`, `parse` 400; `unsupported` 415; host not allowed 421; `config` 500; body too large (1 MB) 413.
 
@@ -723,7 +725,7 @@ Three layers:
 src/core/   UI-agnostic domain/service layer (Kanban API, config, tickets, frontmatter, parse helpers, KanbanError)
 src/cli/    thin adapter: commander wiring, flag parsing, output formatting, stdin, $EDITOR, colour/TTY, exit codes
 src/web/    second adapter over the core: http server, REST API, fs watcher + SSE, vanilla frontend in public/
-src/runner.ts  bash AutomationRunner (timeout, output caps); outside core, which only knows the interface
+src/runner.ts  bash AutomationRunner (optional per-run timeout, output caps); outside core, which only knows the interface
 src/automationLog.ts  legacy .kb/automation.log writer/reader (rotation)
 src/eventLog.ts  .kb/events.log writer/query (rotation, line clipping)
 src/core/events.ts  audit event model, id/timestamp helpers, config diff (core only emits to an injected sink)

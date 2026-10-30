@@ -9,6 +9,9 @@ export const CONFIG_FILE = "kanban.yaml";
 
 const columnsSchema = z.array(z.string()).min(1, "columns must not be empty");
 
+export const MAX_TIMEOUT_SECONDS = 86400;
+const TIMEOUT_MSG = `timeout must be a whole number of seconds from 0 to ${MAX_TIMEOUT_SECONDS} (0 = no timeout)`;
+
 export const automationSchema = z.object({
   name: z.string(),
   when: z
@@ -25,6 +28,13 @@ export const automationSchema = z.object({
   enabled: z.boolean().optional(),
   /** loop guard (default true): stop after AUTOMATION_RUN_LIMIT runs per ticket; false opts out */
   guard: z.boolean().optional(),
+  /** per-run timeout in whole seconds; 0 or absent = no timeout */
+  timeout: z
+    .number({ error: TIMEOUT_MSG })
+    .int(TIMEOUT_MSG)
+    .min(0, TIMEOUT_MSG)
+    .max(MAX_TIMEOUT_SECONDS, TIMEOUT_MSG)
+    .optional(),
 });
 
 const automationsSchema = z.array(automationSchema).optional();

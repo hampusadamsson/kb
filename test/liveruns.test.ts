@@ -60,7 +60,7 @@ describe("runner + registry", () => {
     const r = createShellRunner({ registry: reg });
     const p = r.run("echo hello; sleep 0.5", { cwd, env: {}, meta: { rule: "R", board: "B", ticketId: "7", ticketName: "T", path: "t.md" } });
     await until(() => reg.list().length === 1 && reg.list()[0].output.includes("hello"));
-    expect(reg.list()[0]).toMatchObject({ kind: "rule", rule: "R", board: "B", ticketId: "7", ticketName: "T", path: "t.md", timeoutMs: 30000 });
+    expect(reg.list()[0]).toMatchObject({ kind: "rule", rule: "R", board: "B", ticketId: "7", ticketName: "T", path: "t.md", timeoutMs: null });
     expect(reg.list()[0].pid).toBeGreaterThan(0);
     await p;
     expect(reg.list()).toEqual([]);
@@ -98,7 +98,7 @@ describe("runner + registry", () => {
   it("timeouts still work", async () => {
     const reg = new LiveRuns();
     const x = await createShellRunner({ timeoutMs: 200, registry: reg }).run("sleep 5", { cwd, env: {} });
-    expect(x.error).toBe("timeout after 0.2s");
+    expect(x.error).toBe("timed out after 0.2s");
     expect(reg.list()).toEqual([]);
   });
   it("killAll clears the registry", async () => {

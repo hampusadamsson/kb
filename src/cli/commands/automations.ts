@@ -17,6 +17,14 @@ export function fmtDuration(ms: number): string {
   return `${Math.floor(s / 86400)}d`;
 }
 
+/** Exact timeout label: "30s", "90s", "5m", "2h". */
+export function fmtTimeout(seconds: number): string {
+  if (!seconds) return "-";
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+}
+
 function table(head: string[], rows: string[][]): string {
   const w = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
   const fmt = (r: string[]) => r.map((c, i) => (i === r.length - 1 ? c : c.padEnd(w[i]))).join("  ").trimEnd();
@@ -49,7 +57,7 @@ export function automations(cwd: string, o: AutomationsOpts = {}): string {
   const nowMs = now().getTime();
   if (!text) {
     const list = ov.rules.map((r) => ({
-      name: r.name, board: r.board, enabled: r.enabled, guard: r.guard, when: r.when, run: r.run,
+      name: r.name, board: r.board, enabled: r.enabled, guard: r.guard, timeout: r.timeout, when: r.when, run: r.run,
       running: r.running, lastRun: r.lastRun, counts: r.counts,
     }));
     return JSON.stringify({ automations: list, count: list.length }, null, 2);
@@ -62,7 +70,7 @@ export function automations(cwd: string, o: AutomationsOpts = {}): string {
     return `${r.lastRun.status}${ago} #${String(r.lastRun.ticketId)}`;
   };
   return table(
-    ["NAME", "BOARD", "ON", "WHEN", "RUNNING", "LAST"],
-    ov.rules.map((r) => [r.name, r.board, r.enabled ? (r.guard ? "yes" : "yes (guard off)") : "no", whenText(r), String(r.running), last(r)]),
+    ["NAME", "BOARD", "ON", "WHEN", "TIMEOUT", "RUNNING", "LAST"],
+    ov.rules.map((r) => [r.name, r.board, r.enabled ? (r.guard ? "yes" : "yes (guard off)") : "no", whenText(r), fmtTimeout(r.timeout), String(r.running), last(r)]),
   );
 }
