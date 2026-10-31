@@ -18,8 +18,30 @@ A small, local, single-user CLI kanban. Tickets are markdown files with YAML fro
 
 Requires Node 22+.
 
+### From a GitHub release
+
+Every `v*` tag publishes a prebuilt tarball with per-file checksums:
+
+```sh
+gh release download --repo hampusadamsson/kb --pattern 'kb-*.tgz'
+sha256sum -c SHA256SUMS.txt          # optional
+npm install -g kb-0.1.0.tgz
+
+kb --version
+```
+
+### From source
+
 ```sh
 npm install && npm run build && npm link
+```
+
+`npm link` puts the `kb` binary on your `PATH` pointing at this checkout, so `npm run build` is enough to pick up changes. Use `npm unlink -g kb` to remove it.
+
+### From npm (once published)
+
+```sh
+npm install -g kb
 ```
 
 ## Quick start
@@ -51,6 +73,7 @@ npm run verify       # format:check + lint + typecheck + build + test
 | `npm run typecheck`  | `tsc --noEmit` over `src` **and** `test`                            |
 | `npm run lint`       | oxlint (`--fix` variant: `npm run lint:fix`)                        |
 | `npm run format`     | Prettier write (`format:check` to verify only)                      |
+| `npm run pack:smoke` | Packs the tarball, installs it in a temp dir and runs `kb`          |
 
 `npm run build` runs `tsc` and copies `src/web/public` to `dist/web/public`. The e2e tests spawn the compiled CLI and the web server; a `vitest` global setup builds `dist` once before the suite, so `npm test` works on a clean checkout. Tests can be run in parallel.
 
@@ -59,7 +82,31 @@ Git hooks (`.husky/`):
 - **pre-commit** — `lint-staged`: oxlint `--fix` + Prettier on staged files.
 - **pre-push** — `typecheck` plus the test files related to the pushed changes.
 
-CI (`.github/workflows/ci.yml`) runs the same `verify` steps on Node 22 for every push to `main` and every PR.
+CI (`.github/workflows/ci.yml`) runs the same `verify` steps on Node 22 and 24 for every push to `main` and every PR.
+
+## Releasing
+
+Releases are cut from `main` with one command:
+
+```sh
+npm run release -- patch    # or minor | major
+```
+
+`scripts/release.mjs` refuses to run on a dirty tree or out-of-date branch, runs `npm run verify`, bumps `package.json` via `npm version`, then pushes the commit and the `v<version>` tag.
+
+The tag triggers `.github/workflows/release.yml`, which:
+
+1. checks the tag matches `package.json` (`v0.2.0` maps to version `0.2.0`),
+2. re-runs `verify`, so a broken build never ships,
+3. runs `npm pack` and writes `SHA256SUMS.txt`,
+4. publishes a **GitHub release** with generated notes plus the `.tgz` and checksums attached,
+5. publishes to **npm** with provenance, only when the `NPM_TOKEN` repo secret is set (a fork or unconfigured repo still gets the GitHub release).
+
+`.github/workflows/build.yml` runs on every push and PR: it builds, runs the packaging smoke test (`npm run pack:smoke` installs the tarball into a temp project and exercises `kb init/add/ls`) and uploads the tarball as a workflow artifact for 30 days. Nothing is published from that workflow.
+
+`npm pack` locally produces the same artifact: `prepack` runs the build and `files` limits the tarball to `dist/`, so no sources or tests ship.
+
+Versioning is semver: minor for new commands/config keys, patch for fixes, major once the CLI or `kanban.yaml` format breaks. GitHub release notes are generated from commit messages, so keep them in the `area: summary` style used so far.
 
 Code style: Prettier (140 cols, double quotes, trailing commas) and `.editorconfig`. Lint rules live in `.oxlintrc.json`; correctness and suspicious categories are errors/warnings, so `npm run lint` must be clean.
 

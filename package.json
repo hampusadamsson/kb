@@ -1,6 +1,7 @@
 {
   "name": "kb",
   "version": "0.1.0",
+  "description": "Local markdown kanban CLI and web UI: tickets are plain .md files, the board is kanban.yaml.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,6 +20,25 @@
   "files": [
     "dist"
   ],
+  "keywords": [
+    "kanban",
+    "cli",
+    "markdown",
+    "tickets",
+    "task-management",
+    "local-first"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hampusadamsson/kb.git"
+  },
+  "homepage": "https://github.com/hampusadamsson/kb#readme",
+  "bugs": {
+    "url": "https://github.com/hampusadamsson/kb/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc && node -e \"fs.cpSync('src/web/public','dist/web/public',{recursive:true})\"",
     "dev": "tsc --watch",
@@ -26,12 +46,16 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.check.json",
-    "lint": "oxlint src test",
-    "lint:fix": "oxlint src test --fix",
-    "format": "prettier --write \"src/**/*.{ts,js,css,html}\" \"test/**/*.ts\" \"*.{json,yml,yaml}\" \".github/**/*.yml\" \".vscode/*.json\"",
-    "format:check": "prettier --check \"src/**/*.{ts,js,css,html}\" \"test/**/*.ts\" \"*.{json,yml,yaml}\" \".github/**/*.yml\" \".vscode/*.json\"",
+    "lint": "oxlint src test scripts",
+    "lint:fix": "oxlint src test scripts --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test",
-    "prepare": "husky"
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "release": "node scripts/release.mjs",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run verify",
+    "prepare": "husky || true"
   },
   "lint-staged": {
     "*.{ts,js,mjs}": [
@@ -54,5 +78,8 @@
     "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
+  },
+  "volta": {
+    "node": "22.20.0"
   }
 }

@@ -4,4 +4,7 @@ coverage
 package-lock.json
 .kb/
 example/
-*.md
+kb_image.png
+
+# README tables are hand-aligned for narrow rendering; Prettier widens them past 140 cols.
+README.md

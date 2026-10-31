@@ -5,20 +5,32 @@
     "correctness": "error",
     "suspicious": "warn"
   },
-  "env": { "node": true, "es2024": true },
+  "env": {
+    "node": true,
+    "es2024": true
+  },
   "rules": {
     "no-console": "off",
     "typescript/no-explicit-any": "off",
     "no-await-in-loop": "off",
     "no-shadow": "off",
-    "no-unused-expressions": ["error", { "allowShortCircuit": false, "allowTernary": false }],
+    "no-unused-expressions": [
+      "error",
+      {
+        "allowShortCircuit": false,
+        "allowTernary": false
+      }
+    ],
     "no-unassigned-vars": "off",
     "no-underscore-dangle": "off"
   },
   "overrides": [
     {
       "files": ["src/web/public/**/*.js"],
-      "env": { "browser": true, "node": false }
+      "env": {
+        "browser": true,
+        "node": false
+      }
     },
     {
       "files": ["test/**/*.ts"],

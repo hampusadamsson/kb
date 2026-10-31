@@ -14,6 +14,7 @@ import { show } from "./commands/show.js";
 import { defaultOpener, runWeb } from "./commands/web.js";
 import { validate } from "./commands/validate.js";
 import { add, comment, defaultIo, edit, mv, set, type AddOpts, type SetOpts, type Io } from "./commands/write.js";
+import { VERSION } from "../version.js";
 
 const ID_DESC = "ticket id: exact, or numeric (7 matches 007)";
 
@@ -56,7 +57,10 @@ async function runAuto(flagOff: boolean, fn: (io: Io) => string): Promise<void> 
 }
 
 export function buildProgram(cwd: () => string = () => process.cwd()): Command {
-  const program = new Command("kb").description("Local markdown kanban CLI.").option("--no-automation", "do not run board automations");
+  const program = new Command("kb")
+    .description("Local markdown kanban CLI.")
+    .version(VERSION, "-v, --version", "print the version")
+    .option("--no-automation", "do not run board automations");
   const off = (o: { automation?: boolean }): boolean => o.automation === false || program.opts().automation === false;
 
   program
