@@ -1,5 +1,9 @@
 # kb
 
+<p align="center">
+  <img src="kb_image.png" alt="kb screenshot" width="773">
+</p>
+
 A small, local, single-user CLI kanban. Tickets are markdown files with YAML frontmatter.
 
 - CLI plus an optional local web UI (`kb web`). No auth (see [security model](#security-model)), no TUI. Plain commands, output to stdout.

@@ -18,7 +18,8 @@
     "node": ">=22"
   },
   "files": [
-    "dist"
+    "dist",
+    "kb_image.png"
   ],
   "keywords": [
     "kanban",
