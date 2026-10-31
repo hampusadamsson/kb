@@ -1,16 +1,23 @@
 name: Release
 
+# Triggered by the v<version> tag that Release Please creates when its release PR is merged.
+# Release Please already created the GitHub release; this workflow attaches the built tarball,
+# checksums and publishes to npm.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build and publish
+        required: true
 
 permissions:
-  contents: write # create the GitHub release
+  contents: write # upload release assets
   id-token: write # npm provenance
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -19,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -29,14 +37,15 @@ jobs:
       - run: npm run verify
 
       - name: Check the tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${tag#v}"
           pkg="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
+          if [ "$version" != "$pkg" ]; then
+            echo "::error::tag $tag does not match package.json version $pkg"
             exit 1
           fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - run: mkdir -p artifacts && npm pack --pack-destination artifacts
       - name: Write checksums
@@ -45,23 +54,21 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kb-${{ github.ref_name }}
+          name: kb-${{ github.event.inputs.tag || github.ref_name }}
           path: |
             artifacts/kb-*.tgz
             artifacts/SHA256SUMS.txt
           if-no-files-found: error
 
-      - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            artifacts/kb-*.tgz
-            artifacts/SHA256SUMS.txt
+      - name: Attach assets to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ env.VERSION }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes --title "$TAG"
+          gh release upload "$TAG" artifacts/kb-*.tgz artifacts/SHA256SUMS.txt --clobber
 
       - name: Publish to npm
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |

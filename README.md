@@ -86,29 +86,67 @@ CI (`.github/workflows/ci.yml`) runs the same `verify` steps on Node 22 and 24 f
 
 Code style: Prettier (140 cols, double quotes, trailing commas) and `.editorconfig`. Lint rules live in `.oxlintrc.json`; correctness and suspicious categories are errors/warnings, so `npm run lint` must be clean.
 
-## Releasing
+## Commits
 
-Releases are cut from `main` with one command:
+Commit messages drive the changelog and the version number, so they follow
+[Conventional Commits](https://www.conventionalcommits.org):
 
-```sh
-npm run release -- patch    # or minor | major
+```
+<type>(<scope>): <summary>
 ```
 
-`scripts/release.mjs` refuses to run on a dirty tree or out-of-date branch, runs `npm run verify`, bumps `package.json` via `npm version`, then pushes the commit and the `v<version>` tag.
+| Type       | Use for                         | Shows in changelog |
+| `feat`     | new behaviour                   | Features           |
+| `fix`      | bug fix                         | Bug Fixes          |
+| `perf`     | performance work                | Performance        |
+| `refactor` | behaviour-neutral restructuring  | Refactors          |
+| `docs`     | documentation                   | Documentation      |
+| `test`     | tests only                      | hidden             |
+| `ci`       | workflows, tooling in CI        | hidden             |
+| `build`    | build/deps                      | hidden             |
+| `chore`    | everything else                 | hidden             |
+| `style`    | formatting only                 | hidden             |
 
-The tag triggers `.github/workflows/release.yml`, which:
+The scope is free-form and matches the area of the codebase: `cli`, `web`, `core`,
+`automation`, `runner`, `docs`, `ci`, … (see `git log` for the ones in use).
 
-1. checks the tag matches `package.json` (`v0.2.0` maps to version `0.2.0`),
-2. re-runs `verify`, so a broken build never ships,
-3. runs `npm pack` and writes `SHA256SUMS.txt`,
-4. publishes a **GitHub release** with generated notes plus the `.tgz` and checksums attached,
-5. publishes to **npm** with provenance, only when the `NPM_TOKEN` repo secret is set (a fork or unconfigured repo still gets the GitHub release).
+`chore(commit-msg)` hook runs `commitlint`; PR titles are checked by
+`.github/workflows/pr-title.yml` because squash merges make the PR title the commit.
+Breaking changes: add `!` after the type/scope (`feat(cli)!: …`) or a
+`BREAKING CHANGE:` footer — that is a major bump.
 
-`.github/workflows/build.yml` runs on every push and PR: it builds, runs the packaging smoke test (`npm run pack:smoke` installs the tarball into a temp project and exercises `kb init/add/ls`) and uploads the tarball as a workflow artifact for 30 days. Nothing is published from that workflow.
+## Releasing
 
-`npm pack` locally produces the same artifact: `prepack` runs the build and `files` limits the tarball to `dist/`, so no sources or tests ship.
+Releases are automated with [Release Please](https://github.com/googleapis/release-please).
+Nobody edits the version by hand.
 
-Versioning is semver: minor for new commands/config keys, patch for fixes, major once the CLI or `kanban.yaml` format breaks. GitHub release notes are generated from commit messages, so keep them in the `area: summary` style used so far.
+1. Merge feature PRs into `main` as usual.
+2. `.github/workflows/release-please.yml` opens (and keeps updating) a
+   **`chore(main): release X.Y.Z`** PR. It bumps `package.json`, updates
+   `CHANGELOG.md`, and the version bump is derived from the commit types since the
+   last release — `feat` → minor, `fix`/`perf`/`refactor` → patch, `!`/`BREAKING CHANGE` → major
+   (`bump-minor-pre-major` is on, so the project stays in `0.x` until 1.0.0).
+3. Review that PR's changelog; merge it when the release should ship.
+4. Merging it creates the `v<version>` tag and the GitHub release, which triggers
+   `.github/workflows/release.yml`: it re-runs `verify`, packs the tarball, writes
+   `SHA256SUMS.txt`, attaches both to the release, and publishes to npm with provenance
+   — the npm step is skipped with a warning when the `NPM_TOKEN` secret is absent.
+
+`release-please-config.json` holds the changelog sections and version rules;
+`.release-please-manifest.json` records the last released version. `bootstrap-sha` pins the
+starting commit, so history before the automation is not replayed.
+
+`.github/workflows/build.yml` runs on every push and PR: it builds, runs the packaging
+smoke test (`npm run pack:smoke` installs the tarball into a temp project and exercises
+`kb init/add/ls`) and uploads the tarball as a workflow artifact for 30 days. Nothing is
+published from that workflow.
+
+`npm pack` locally produces the same artifact: `prepack` runs the build and `files` limits
+the tarball to `dist/`, so no sources or tests ship.
+
+One-time setup in the GitHub repo: enable **Settings → Actions → General → Allow GitHub
+Actions to create and approve pull requests** (Release Please needs it), and add the
+`NPM_TOKEN` secret if you want npm publishing.
 
 ## Everyday CLI usage
 

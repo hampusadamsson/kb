@@ -52,10 +52,10 @@
     "format:check": "prettier --check .",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test",
     "pack:smoke": "node scripts/pack-smoke.mjs",
-    "release": "node scripts/release.mjs",
     "prepack": "npm run build",
     "prepublishOnly": "npm run verify",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "commitlint": "commitlint --from origin/main --to HEAD --verbose"
   },
   "lint-staged": {
     "*.{ts,js,mjs}": [
@@ -70,6 +70,8 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^5.0.5",
     "husky": "^9.1.7",
