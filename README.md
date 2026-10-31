@@ -110,7 +110,7 @@ Commit messages drive the changelog and the version number, so they follow
 The scope is free-form and matches the area of the codebase: `cli`, `web`, `core`,
 `automation`, `runner`, `docs`, `ci`, … (see `git log` for the ones in use).
 
-`chore(commit-msg)` hook runs `commitlint`; PR titles are checked by
+The `commit-msg` hook runs `commitlint`; PR titles are checked by
 `.github/workflows/pr-title.yml` because squash merges make the PR title the commit.
 Breaking changes: add `!` after the type/scope (`feat(cli)!: …`) or a
 `BREAKING CHANGE:` footer — that is a major bump.
@@ -127,10 +127,15 @@ Nobody edits the version by hand.
    last release — `feat` → minor, `fix`/`perf`/`refactor` → patch, `!`/`BREAKING CHANGE` → major
    (`bump-minor-pre-major` is on, so the project stays in `0.x` until 1.0.0).
 3. Review that PR's changelog; merge it when the release should ship.
-4. Merging it creates the `v<version>` tag and the GitHub release, which triggers
-   `.github/workflows/release.yml`: it re-runs `verify`, packs the tarball, writes
-   `SHA256SUMS.txt`, attaches both to the release, and publishes to npm with provenance
-   — the npm step is skipped with a warning when the `NPM_TOKEN` secret is absent.
+4. Merging it creates the `v<version>` tag and the GitHub release. The same workflow then
+   calls `.github/workflows/release.yml` for that tag: it re-runs `verify`, packs the
+   tarball, writes `SHA256SUMS.txt`, attaches both to the release, and publishes to npm
+   with provenance — the npm step is skipped with a warning when `NPM_TOKEN` is absent.
+
+The publish step is chained (`needs` + `workflow_call`) rather than triggered by
+`push: tags`, because tags created with `GITHUB_TOKEN` do not trigger further workflows —
+a `push: tags` trigger would silently never fire. `release.yml` can still be dispatched by
+hand with a tag to rebuild or republish an existing release.
 
 `release-please-config.json` holds the changelog sections and version rules;
 `.release-please-manifest.json` records the last released version. `bootstrap-sha` pins the

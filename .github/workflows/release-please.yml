@@ -1,5 +1,8 @@
 name: Release Please
 
+# Release Please keeps a release PR open on main (bump + CHANGELOG). Merging it creates the
+# v<version> tag and the GitHub release. The tag is created with GITHUB_TOKEN, which does not
+# trigger other workflows, so the publish job is chained here instead of relying on `push: tags`.
 on:
   push:
     branches: [main]
@@ -16,11 +19,23 @@ concurrency:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
     steps:
-      # Opens/updates a "chore(main): release X.Y.Z" PR from conventional commits.
-      # Merging that PR creates the v<version> tag and the GitHub release, which
-      # triggers release.yml to build the tarball and publish to npm.
-      - uses: googleapis/release-please-action@v4
+      - id: release
+        uses: googleapis/release-please-action@v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag }}
+    permissions:
+      contents: write
+      id-token: write
+    secrets: inherit
