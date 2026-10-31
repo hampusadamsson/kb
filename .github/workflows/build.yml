@@ -22,10 +22,10 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node scripts/pack-smoke.mjs
-      - run: npm pack --pack-destination dist
+      - run: npm pack --pack-destination artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: kb-npm-tarball
-          path: dist/kb-*.tgz
+          path: artifacts/kb-*.tgz
           if-no-files-found: error
           retention-days: 30

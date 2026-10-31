@@ -17,3 +17,6 @@ coverage/
 !.vscode/extensions.json
 !.vscode/settings.json
 *.tsbuildinfo
+
+# workflow output
+artifacts/
