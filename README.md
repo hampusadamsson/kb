@@ -84,6 +84,8 @@ Git hooks (`.husky/`):
 
 CI (`.github/workflows/ci.yml`) runs the same `verify` steps on Node 22 and 24 for every push to `main` and every PR.
 
+Code style: Prettier (140 cols, double quotes, trailing commas) and `.editorconfig`. Lint rules live in `.oxlintrc.json`; correctness and suspicious categories are errors/warnings, so `npm run lint` must be clean.
+
 ## Releasing
 
 Releases are cut from `main` with one command:
@@ -107,8 +109,6 @@ The tag triggers `.github/workflows/release.yml`, which:
 `npm pack` locally produces the same artifact: `prepack` runs the build and `files` limits the tarball to `dist/`, so no sources or tests ship.
 
 Versioning is semver: minor for new commands/config keys, patch for fixes, major once the CLI or `kanban.yaml` format breaks. GitHub release notes are generated from commit messages, so keep them in the `area: summary` style used so far.
-
-Code style: Prettier (140 cols, double quotes, trailing commas) and `.editorconfig`. Lint rules live in `.oxlintrc.json`; correctness and suspicious categories are errors/warnings, so `npm run lint` must be clean.
 
 ## Everyday CLI usage
 
