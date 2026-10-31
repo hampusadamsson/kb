@@ -1,5 +1,9 @@
 name: Build
 
+# Builds the installable artifacts for every push/PR through package.yml and, on main, attaches
+# them to a rolling pre-release so there is a stable download URL for the latest build:
+#   kb-<version>.tgz            npm tarball  ->  npm install -g ./kb-<version>.tgz
+#   kb-<version>-<os>-<arch>    standalone binary -> ./kb, no Node needed
 on:
   push:
     branches: [main]
@@ -10,22 +14,55 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write # rolling pre-release
+
 jobs:
-  build:
+  package:
+    uses: ./.github/workflows/package.yml
+    permissions:
+      contents: read
+
+  snapshot:
+    if: github.event_name != 'pull_request' && github.repository == 'hampusadamsson/kb'
+    needs: package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: node scripts/pack-smoke.mjs
-      - run: mkdir -p artifacts && npm pack --pack-destination artifacts
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kb-npm-tarball
-          path: artifacts/kb-*.tgz
-          if-no-files-found: error
-          retention-days: 30
+          path: artifacts
+          merge-multiple: true
+      - name: Write install notes
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          {
+            echo "Automated build of \`${{ github.sha }}\` (version $version)."
+            echo
+            echo "### npm tarball"
+            echo '```sh'
+            echo "npm install -g ./kb-${version}.tgz"
+            echo '```'
+            echo
+            echo "### Standalone binary"
+            echo '```sh'
+            echo "chmod +x kb-${version}-<os>-<arch>"
+            echo "mv kb-${version}-<os>-<arch> ~/.local/bin/kb"
+            echo '```'
+            echo
+            echo "Verify with \`sha256sum -c SHA256SUMS-<os>-<arch>.txt\`."
+          } > artifacts/INSTALL.md
+      - name: Publish rolling pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="build-${{ github.run_number }}"
+          gh release create "$tag" artifacts/* \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Build ${{ github.run_number }} ($(git rev-parse --short HEAD))" \
+            --notes-file artifacts/INSTALL.md
+          # keep only the newest five builds
+          gh release list --limit 100 --json tagName,isPrerelease \
+            --jq '.[] | select(.isPrerelease) | .tagName' | tail -n +6 \
+            | xargs -r -n1 gh release delete --yes --cleanup-tag

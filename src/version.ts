@@ -1,17 +1,7 @@
-// Reads the package version once at startup. Works from src/ (tsx/vitest) and dist/ (published package),
-// since both live one level below the package root.
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+// Package version, inlined at bundle time. Importing package.json keeps every consumer honest:
+// tsc emits a JSON import (dist/version.js sits one level below the package root, so ../package.json
+// resolves for both the npm package and a checked-out build), and esbuild inlines the value into
+// the single-executable bundle.
+import pkg from "../package.json" with { type: "json" };
 
-const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
-
-/** "0.0.0" when package.json cannot be read (e.g. an exotic bundling setup). */
-export const VERSION: string = (() => {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(PKG, "utf8")) as { version?: string };
-    return pkg.version ?? "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
-})();
+export const VERSION: string = (pkg as { version?: string }).version ?? "0.0.0";

@@ -18,5 +18,6 @@ coverage/
 !.vscode/settings.json
 *.tsbuildinfo
 
-# workflow output
+# workflow / local packaging output
 artifacts/
+build/

@@ -24,7 +24,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  package:
+    uses: ./.github/workflows/package.yml
+    permissions:
+      contents: read
+
+  publish:
+    needs: package
     runs-on: ubuntu-latest
     env:
       TAG: ${{ inputs.tag }}
@@ -32,14 +38,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
-      - run: npm ci
-      - run: npm run verify
 
       - name: Check the tag matches package.json
         run: |
@@ -51,25 +54,20 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - run: mkdir -p artifacts && npm pack --pack-destination artifacts
-      - name: Write checksums
-        working-directory: artifacts
-        run: sha256sum kb-*.tgz > SHA256SUMS.txt
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: kb-${{ inputs.tag }}
-          path: |
-            artifacts/kb-*.tgz
-            artifacts/SHA256SUMS.txt
-          if-no-files-found: error
+          path: artifacts
+          merge-multiple: true
+      - name: Combine checksums
+        working-directory: artifacts
+        run: cat SHA256SUMS-*.txt > SHA256SUMS.txt
 
       - name: Attach assets to the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes --title "$TAG"
-          gh release upload "$TAG" artifacts/kb-*.tgz artifacts/SHA256SUMS.txt --clobber
+          gh release upload "$TAG" artifacts/* --clobber
 
       - name: Publish to npm
         env:

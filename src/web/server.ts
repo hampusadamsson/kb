@@ -1,7 +1,5 @@
-import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { createKanban } from "../core/index.js";
 import type { AutomationLog } from "../automationLog.js";
 import { createEventLog, type EventLog } from "../eventLog.js";
@@ -9,6 +7,7 @@ import type { AutomationRunner } from "../core/automation.js";
 import { pidAlive } from "../killRun.js";
 import type { LiveRuns } from "../liveRuns.js";
 import { errorResponse, handleApi } from "./api.js";
+import { isDir, PUBLIC_DIR, readPublic } from "./assets.js";
 import { EventHub } from "./watch.js";
 
 export interface ServerOptions {
@@ -39,7 +38,6 @@ export interface RunningServer {
 const DEFAULT_PORT = 4747;
 const PORT_TRIES = 50;
 const MAX_BODY = 1024 * 1024;
-const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "public");
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -138,25 +136,26 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathna
     return sendJson(res, 400, { error: "bad path", code: "invalid" });
   }
   if (rel.includes("\0")) return sendJson(res, 400, { error: "bad path", code: "invalid" });
-  let file = path.resolve(PUBLIC_DIR, "." + rel);
-  if (file !== PUBLIC_DIR && !file.startsWith(PUBLIC_DIR + path.sep)) {
+  let target = path.resolve(PUBLIC_DIR, "." + rel);
+  if (target !== PUBLIC_DIR && !target.startsWith(PUBLIC_DIR + path.sep)) {
     return sendJson(res, 404, { error: "not found", code: "not-found" });
   }
-  try {
-    if (fs.statSync(file).isDirectory()) file = path.join(file, "index.html");
-    const data = fs.readFileSync(file);
-    res.writeHead(200, {
-      "Content-Type": TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
-      "Cache-Control": "no-store",
-      "Content-Security-Policy": CSP,
-      "X-Content-Type-Options": "nosniff",
-      "X-Frame-Options": "DENY",
-      "Content-Length": data.length,
-    });
-    res.end(req.method === "HEAD" ? undefined : data);
-  } catch {
+  let key = path.relative(PUBLIC_DIR, target).split(path.sep).join("/");
+  if (key === "" || isDir(target)) key = key === "" ? "index.html" : `${key}/index.html`;
+  const data = readPublic(key);
+  if (!data) {
     sendJson(res, 404, { error: "not found", code: "not-found" });
+    return;
   }
+  res.writeHead(200, {
+    "Content-Type": TYPES[path.extname(key).toLowerCase()] ?? "application/octet-stream",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": CSP,
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Content-Length": data.length,
+  });
+  res.end(req.method === "HEAD" ? undefined : data);
 }
 
 function listen(server: http.Server, host: string, port: number): Promise<void> {

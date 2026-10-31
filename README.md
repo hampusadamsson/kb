@@ -16,18 +16,45 @@ A small, local, single-user CLI kanban. Tickets are markdown files with YAML fro
 
 ## Install
 
-Requires Node 22+.
+Two artifacts are published for every release: an npm tarball (needs Node 22+) and a
+standalone binary (needs nothing). Both are on the [releases page][releases], which also has a
+rolling `build-<n>` pre-release for the latest `main`.
 
-### From a GitHub release
+[releases]: https://github.com/hampusadamsson/kb/releases
 
-Every `v*` tag publishes a prebuilt tarball with per-file checksums:
+### Standalone binary (no Node required)
+
+macOS/Linux, no npm, no dependency install:
+
+```sh
+gh release download --repo hampusadamsson/kb --pattern 'kb-*-linux-x64'
+sha256sum -c SHA256SUMS.txt          # optional
+chmod +x kb-*-linux-x64
+mv kb-*-linux-x64 ~/.local/bin/kb    # or /usr/local/bin/kb
+
+kb --version
+```
+
+Pick the file matching your platform: `linux-x64`, `linux-arm64`, `darwin-x64` (Intel),
+`darwin-arm64` (Apple silicon). The binary embeds the CLI **and** the web UI, so `kb web`
+works with no other files around. It is a [Node SEA][sea] build, so it is ~140 MB — that is
+the bundled Node runtime.
+
+[sea]: https://nodejs.org/api/single-executable-applications.html
+
+### npm tarball
 
 ```sh
 gh release download --repo hampusadamsson/kb --pattern 'kb-*.tgz'
-sha256sum -c SHA256SUMS.txt          # optional
-npm install -g kb-0.1.0.tgz
+npm install -g ./kb-0.1.0.tgz
 
 kb --version
+```
+
+### From npm (once published)
+
+```sh
+npm install -g kb
 ```
 
 ### From source
@@ -36,13 +63,20 @@ kb --version
 npm install && npm run build && npm link
 ```
 
-`npm link` puts the `kb` binary on your `PATH` pointing at this checkout, so `npm run build` is enough to pick up changes. Use `npm unlink -g kb` to remove it.
+`npm link` puts the `kb` binary on your `PATH` pointing at this checkout, so `npm run build` is
+enough to pick up changes. Use `npm unlink -g kb` to remove it. `npm run install:local` does
+both steps in one go.
 
-### From npm (once published)
+### Building the standalone binary yourself
 
 ```sh
-npm install -g kb
+npm run build:sea        # -> build/kb
+npm run build:sea:smoke  # exercises the binary: cli + embedded web UI
 ```
+
+`scripts/build-sea.mjs` bundles the CLI with esbuild, embeds `src/web/public` as SEA assets,
+and injects the blob into a copy of the running Node binary. Requires Node 22+ and works on
+macOS and Linux (Windows needs a different inject step and is not wired up).
 
 ## Quick start
 
@@ -74,6 +108,8 @@ npm run verify       # format:check + lint + typecheck + build + test
 | `npm run lint`       | oxlint (`--fix` variant: `npm run lint:fix`)                        |
 | `npm run format`     | Prettier write (`format:check` to verify only)                      |
 | `npm run pack:smoke` | Packs the tarball, installs it in a temp dir and runs `kb`          |
+| `npm run build:sea`  | Builds the standalone binary into `build/kb`                        |
+| `npm run build:sea:smoke` | Runs the standalone binary: CLI, then the embedded web UI       |
 
 `npm run build` runs `tsc` and copies `src/web/public` to `dist/web/public`. The e2e tests spawn the compiled CLI and the web server; a `vitest` global setup builds `dist` once before the suite, so `npm test` works on a clean checkout. Tests can be run in parallel.
 
@@ -141,10 +177,14 @@ hand with a tag to rebuild or republish an existing release.
 `.release-please-manifest.json` records the last released version. `bootstrap-sha` pins the
 starting commit, so history before the automation is not replayed.
 
-`.github/workflows/build.yml` runs on every push and PR: it builds, runs the packaging
-smoke test (`npm run pack:smoke` installs the tarball into a temp project and exercises
-`kb init/add/ls`) and uploads the tarball as a workflow artifact for 30 days. Nothing is
-published from that workflow.
+`.github/workflows/package.yml` is the reusable packager that both build and release call: it
+produces the npm tarball (verified by `npm run pack:smoke`, which installs it into a temp
+project and exercises `kb init/add/ls`) and one standalone binary per platform (`linux-x64`,
+`linux-arm64`, `darwin-x64`, `darwin-arm64`), each verified by `npm run build:sea:smoke`.
+
+`.github/workflows/build.yml` runs that on every push and PR. On `main` it also publishes a
+rolling `build-<n>` pre-release holding all artifacts (newest five kept), so the latest build
+is downloadable without waiting for a tagged release. Nothing is pushed to npm from there.
 
 `npm pack` locally produces the same artifact: `prepack` runs the build and `files` limits
 the tarball to `dist/`, so no sources or tests ship.
