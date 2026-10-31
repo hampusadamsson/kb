@@ -17,7 +17,9 @@ function tmp(init = true): string {
   return d;
 }
 function io() {
-  const out: string[] = [], err: string[] = [], opened: string[] = [];
+  const out: string[] = [],
+    err: string[] = [],
+    opened: string[] = [];
   const i: WebIO = { out: (s) => out.push(s), err: (s) => err.push(s), opener: (u) => opened.push(u) };
   return { i, out, err, opened };
 }
@@ -115,7 +117,10 @@ describe("kb web e2e", () => {
       child.stdout.on("data", (d: Buffer) => {
         out += d;
         const m = /running at (http:\/\/\S+)/.exec(out);
-        if (m) { clearTimeout(t); resolve(m[1]); }
+        if (m) {
+          clearTimeout(t);
+          resolve(m[1]);
+        }
       });
       child.on("exit", () => reject(new Error("exited early: " + out)));
     });

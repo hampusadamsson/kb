@@ -16,14 +16,26 @@ export function complete(cwd: string, kind: string, arg?: string): string[] {
           const t = withId.find((x) => String(x.id) === arg);
           return t ? columnsFor(config, t.board) : [];
         }
-        return uniq(createKanban({ dir: cwd }).boards().flatMap((b) => columnsFor(config, b)));
+        return uniq(
+          createKanban({ dir: cwd })
+            .boards()
+            .flatMap((b) => columnsFor(config, b)),
+        );
       }
       case "boards":
         return createKanban({ dir: cwd }).boards();
       case "labels":
         return uniq(tickets.flatMap((t) => t.labels)).sort();
       case "propkeys":
-        return uniq(tickets.flatMap((t) => Object.keys(t.props))).sort().map((k) => `${k}:`);
+        return uniq(tickets.flatMap((t) => Object.keys(t.props)))
+          .sort()
+          .map((k) => `${k}:`);
+      case "rules":
+        return uniq(
+          createKanban({ dir: cwd })
+            .automationOverview()
+            .rules.map((r) => r.name),
+        ).sort();
       default:
         return [];
     }

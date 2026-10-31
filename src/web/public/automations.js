@@ -39,7 +39,9 @@ export function automationsTab({ boards, onChange }) {
           },
           h("span", { text: `${b.name()}${i === 0 ? " (default)" : ""}` }),
           h("span", { class: "autos-count", text: String(b.rules.length), "aria-label": ruleCount(b.rules.length) }),
-          bad ? h("span", { class: "arule-mark", title: "Has automations that need attention", "aria-label": "needs attention", text: "!" }) : null,
+          bad
+            ? h("span", { class: "arule-mark", title: "Has automations that need attention", "aria-label": "needs attention", text: "!" })
+            : null,
         );
       }),
     );
@@ -122,9 +124,17 @@ export function automationsTab({ boards, onChange }) {
       if (focus) cards.get(r)?.focusName();
     };
 
-    const addBtn = h("button", { type: "button", class: "btn primary autos-add", text: "Add automation", onclick: () => add(newRule(b.cols), true) });
+    const addBtn = h("button", {
+      type: "button",
+      class: "btn primary autos-add",
+      text: "Add automation",
+      onclick: () => add(newRule(b.cols), true),
+    });
     const search = h("input", {
-      type: "search", class: "autos-search", placeholder: "Filter automations…", "aria-label": "Filter automations",
+      type: "search",
+      class: "autos-search",
+      placeholder: "Filter automations…",
+      "aria-label": "Filter automations",
       oninput: (e) => ((q = e.target.value), drawList()),
     });
     const bar = h("div", { class: "autos-bar" }, h("div", { class: "autos-bar-info" }), search, addBtn);
@@ -141,12 +151,20 @@ export function automationsTab({ boards, onChange }) {
         "div",
         { class: "autos-empty" },
         h("h4", { text: `No automations on ${b.name()} yet` }),
-        h("p", { class: "muted", text: "An automation runs a shell script when a ticket is moved to a column or created in one. Start from a template or build your own." }),
+        h("p", {
+          class: "muted",
+          text: "An automation runs a shell script when a ticket is moved to a column or created in one. Start from a template or build your own.",
+        }),
         h(
           "div",
           { class: "autos-starters" },
           STARTERS.map((s) =>
-            h("button", { type: "button", class: "autos-starter", onclick: () => add(starterRule(s, b.cols, b.rules, newRule), true) }, h("strong", { text: s.title }), h("span", { class: "muted", text: s.detail })),
+            h(
+              "button",
+              { type: "button", class: "autos-starter", onclick: () => add(starterRule(s, b.cols, b.rules, newRule), true) },
+              h("strong", { text: s.title }),
+              h("span", { class: "muted", text: s.detail }),
+            ),
           ),
         ),
         h("button", { type: "button", class: "btn primary", text: "Add automation", onclick: () => add(newRule(b.cols), true) }),
@@ -170,7 +188,10 @@ export function automationsTab({ boards, onChange }) {
     }
 
     view.append(
-      h("p", { class: "muted hint", text: "Rules apply only to this board; they are not inherited from other boards. Order does not matter: every matching rule runs." }),
+      h("p", {
+        class: "muted hint",
+        text: "Rules apply only to this board; they are not inherited from other boards. Order does not matter: every matching rule runs.",
+      }),
       bar,
       undoBox,
       listBox,
@@ -184,8 +205,14 @@ export function automationsTab({ boards, onChange }) {
       "details",
       { class: "tr-details autos-help" },
       h("summary", { text: "How automations work" }),
-      h("p", { class: "muted", text: "When a ticket is moved to (or created in) a column and matches the optional labels and properties, the script runs on this machine in the folder of kanban.yaml. Placeholders such as {{ id }} are replaced by shell-quoted ticket values. The last run is shown on each rule; full history is in the Logs tab." }),
-      h("p", { class: "muted", text: "Changes are saved with Save config below. Test run executes the script for real. A runaway script can be stopped from the Live tab." }),
+      h("p", {
+        class: "muted",
+        text: "When a ticket is moved to (or created in) a column and matches the optional labels and properties, the script runs on this machine in the folder of kanban.yaml. Placeholders such as {{ id }} are replaced by shell-quoted ticket values. The last run is shown on each rule; full history is in the Logs tab.",
+      }),
+      h("p", {
+        class: "muted",
+        text: "Changes are saved with Save config below. Test run executes the script for real. A runaway script can be stopped from the Live tab.",
+      }),
     );
 
   draw();

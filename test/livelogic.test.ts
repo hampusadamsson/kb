@@ -32,7 +32,9 @@ describe("live-logic", () => {
     expect(L.runTitle(r)).toBe("build");
     expect(L.runTitle({ kind: "test" })).toBe("Test run");
     expect(L.killLabel(r)).toBe("Kill automation build on #7");
-    expect(L.killConfirm(r)).toBe('Kill automation "build" on #7? The process and its children are terminated; the ticket is marked failed.');
+    expect(L.killConfirm(r)).toBe(
+      'Kill automation "build" on #7? The process and its children are terminated; the ticket is marked failed.',
+    );
     expect(L.liveLabel(0)).toBe("Live");
     expect(L.liveLabel(2)).toBe("Live (2)");
   });

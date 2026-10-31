@@ -29,12 +29,7 @@ export const automationSchema = z.object({
   /** loop guard (default true): stop after AUTOMATION_RUN_LIMIT runs per ticket; false opts out */
   guard: z.boolean().optional(),
   /** per-run timeout in whole seconds; 0 or absent = no timeout */
-  timeout: z
-    .number({ error: TIMEOUT_MSG })
-    .int(TIMEOUT_MSG)
-    .min(0, TIMEOUT_MSG)
-    .max(MAX_TIMEOUT_SECONDS, TIMEOUT_MSG)
-    .optional(),
+  timeout: z.number({ error: TIMEOUT_MSG }).int(TIMEOUT_MSG).min(0, TIMEOUT_MSG).max(MAX_TIMEOUT_SECONDS, TIMEOUT_MSG).optional(),
 });
 
 const automationsSchema = z.array(automationSchema).optional();
@@ -62,14 +57,9 @@ export const ticketRuleSchema = z
     props: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     has: z.array(z.string().min(1, "has: empty key")).optional(),
   })
-  .refine(
-    (r) =>
-      r.glob !== undefined ||
-      r.prefix !== undefined ||
-      Object.keys(r.props ?? {}).length > 0 ||
-      (r.has ?? []).length > 0,
-    { message: "a rule needs at least one condition (glob, prefix, props or has)" },
-  );
+  .refine((r) => r.glob !== undefined || r.prefix !== undefined || Object.keys(r.props ?? {}).length > 0 || (r.has ?? []).length > 0, {
+    message: "a rule needs at least one condition (glob, prefix, props or has)",
+  });
 
 export const ticketRulesSchema = z.object({
   baseline: z.boolean().default(true),
@@ -102,7 +92,10 @@ export function parseTicketRules(raw: unknown): TicketRules {
     list.forEach((rule, i) => {
       const res = ticketRuleSchema.safeParse(rule);
       if (res.success) return;
-      const nm = rule && typeof rule === "object" && typeof (rule as { name?: unknown }).name === "string" ? ` "${(rule as { name: string }).name}"` : "";
+      const nm =
+        rule && typeof rule === "object" && typeof (rule as { name?: unknown }).name === "string"
+          ? ` "${(rule as { name: string }).name}"`
+          : "";
       problems.push(issueText(res.error.issues, `tickets.${kind}[${i}]${nm}: `));
     });
   }
@@ -171,7 +164,10 @@ function ruleMatches(r: TicketRule, rel: string, data: Record<string, unknown> |
 }
 
 const HARD_EXCLUDED = new Set(["node_modules", ".kb"]);
-const hardExcluded = (rel: string) => toPosix(rel).split("/").some((s) => HARD_EXCLUDED.has(s));
+const hardExcluded = (rel: string) =>
+  toPosix(rel)
+    .split("/")
+    .some((s) => HARD_EXCLUDED.has(s));
 
 const includeApplies = (r: TicketRule, rel: string, topGlob: string | undefined) =>
   r.glob !== undefined || topGlob === undefined || globMatches(rel, topGlob);
@@ -205,10 +201,7 @@ export function isTicketFile(
   if ((rules.exclude ?? []).some((r) => ruleMatches(r, relPath, data))) return false;
   const inTop = topGlob === undefined || globMatches(relPath, topGlob);
   if ((rules.baseline ?? true) && inTop && data?.type === "ticket") return true;
-  return (
-    relPath.endsWith(".md") &&
-    (rules.include ?? []).some((r) => includeApplies(r, relPath, topGlob) && ruleMatches(r, relPath, data))
-  );
+  return relPath.endsWith(".md") && (rules.include ?? []).some((r) => includeApplies(r, relPath, topGlob) && ruleMatches(r, relPath, data));
 }
 
 /** Globs the scan walks: the top-level glob plus every include rule's glob. */
@@ -224,9 +217,7 @@ const configSchema = z.object({
   glob: z.string().default("*.md"),
   tickets: ticketRulesSchema.optional(),
   automations: automationsSchema,
-  boards: z
-    .record(z.string(), z.object({ columns: columnsSchema, automations: automationsSchema }))
-    .optional(),
+  boards: z.record(z.string(), z.object({ columns: columnsSchema, automations: automationsSchema })).optional(),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -252,9 +243,7 @@ export function loadConfig(cwd: string): Config {
   }
   const result = configSchema.safeParse(data);
   if (!result.success) {
-    const issues = result.error.issues
-      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
-      .join("; ");
+    const issues = result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
     throw new KanbanError("config", `${CONFIG_FILE}: invalid config: ${issues}`);
   }
   return result.data;

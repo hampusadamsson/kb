@@ -50,7 +50,12 @@ describe("toScalar", () => {
 
 describe("buildPatch", () => {
   const orig = any.snapshot({
-    name: "A", status: "todo", board: "main", body: "b", labels: ["x", "y"], props: { p: 1, q: "z" },
+    name: "A",
+    status: "todo",
+    board: "main",
+    body: "b",
+    labels: ["x", "y"],
+    props: { p: 1, q: "z" },
   });
   it("is empty when unchanged", () => {
     expect(any.buildPatch(orig, structuredClone(orig))).toEqual({});
@@ -79,19 +84,37 @@ describe("buildPatch", () => {
 
 describe("misc", () => {
   it("buildCreate", () => {
-    expect(
-      any.buildCreate({ name: " N ", status: "todo", board: "", body: "", labels: ["a"], props: { n: "5" } }, " hi "),
-    ).toEqual({ name: "N", status: "todo", labels: ["a"], properties: { n: 5 }, comment: "hi" });
+    expect(any.buildCreate({ name: " N ", status: "todo", board: "", body: "", labels: ["a"], props: { n: "5" } }, " hi ")).toEqual({
+      name: "N",
+      status: "todo",
+      labels: ["a"],
+      properties: { n: 5 },
+      comment: "hi",
+    });
   });
   it("rowsToProps drops blank keys", () => {
-    expect(any.rowsToProps([{ k: " a ", v: "1" }, { k: "", v: "x" }])).toEqual({ a: "1" });
+    expect(
+      any.rowsToProps([
+        { k: " a ", v: "1" },
+        { k: "", v: "x" },
+      ]),
+    ).toEqual({ a: "1" });
   });
   it("statusOptions keeps unknown current", () => {
     expect(any.statusOptions(["a", "b"], "zz")).toEqual(["a", "b", "zz"]);
     expect(any.statusOptions(["a", "b"], "a")).toEqual(["a", "b"]);
   });
   it("sortedComments oldest first; describeChange", () => {
-    expect(any.sortedComments({ b: "2", a: "1" })).toEqual([["a", "1"], ["b", "2"]]);
+    expect(any.sortedComments({ b: "2", a: "1" })).toEqual([
+      ["a", "1"],
+      ["b", "2"],
+    ]);
+    expect(any.commentEntries({ "2026-10-30T15:18": "later", "2026-10-30T10:00:00": "first" }, new Date(2026, 9, 30, 15, 20))).toEqual([
+      { key: "2026-10-30T10:00:00", text: "first", abs: "2026-10-30 10:00:00", rel: "5 h ago" },
+      { key: "2026-10-30T15:18", text: "later", abs: "2026-10-30 15:18:00", rel: "2 min ago" },
+    ]);
+    expect(any.commentEntries(undefined)).toEqual([]);
+    expect(any.commentEntries({ hand: 5 }, new Date(2026, 9, 30, 15, 20))).toEqual([{ key: "hand", text: "5", abs: "", rel: "" }]);
     expect(any.describeChange({ path: "x.md", from: undefined, to: "003" })).toBe("x.md: id (none) → 003");
     expect(any.describeChange({ path: "x.md", from: 1, to: "001" })).toBe("x.md: id 1 → 001");
   });
@@ -136,12 +159,24 @@ describe("settings form logic", async () => {
   it("checkForm reports friendly errors", () => {
     const base = () => L.configToForm(cfg);
     expect(L.checkForm(base())).toBe("");
-    let f = base(); f.name = " "; expect(L.checkForm(f)).toMatch(/name/);
-    f = base(); f.glob = ""; expect(L.checkForm(f)).toMatch(/Glob/);
-    f = base(); f.columns = []; expect(L.checkForm(f)).toMatch(/Columns/);
-    f = base(); f.columns[0].value = "doing"; expect(L.checkForm(f)).toMatch(/Duplicate column "doing"/);
-    f = base(); f.boards.push({ orig: null, name: "other", columns: [{ orig: null, value: "z" }] }); expect(L.checkForm(f)).toMatch(/Duplicate board/);
-    f = base(); f.boards[0].columns = []; expect(L.checkForm(f)).toMatch(/at least one column/);
+    let f = base();
+    f.name = " ";
+    expect(L.checkForm(f)).toMatch(/name/);
+    f = base();
+    f.glob = "";
+    expect(L.checkForm(f)).toMatch(/Glob/);
+    f = base();
+    f.columns = [];
+    expect(L.checkForm(f)).toMatch(/Columns/);
+    f = base();
+    f.columns[0].value = "doing";
+    expect(L.checkForm(f)).toMatch(/Duplicate column "doing"/);
+    f = base();
+    f.boards.push({ orig: null, name: "other", columns: [{ orig: null, value: "z" }] });
+    expect(L.checkForm(f)).toMatch(/Duplicate board/);
+    f = base();
+    f.boards[0].columns = [];
+    expect(L.checkForm(f)).toMatch(/at least one column/);
   });
 
   it("moveItem and describeTicketChange", () => {
@@ -157,7 +192,10 @@ describe("automation form logic", async () => {
   const L = await import("../src/web/public/logic.js");
   const rule = { name: "r", when: { moved_to: "done", labels: ["bug"], props: { n: 1, k: "v" } }, run: "echo {{ id }}" };
   const cfg = () => ({
-    name: "default", glob: "*.md", columns: ["todo", "done"], automations: [structuredClone(rule)],
+    name: "default",
+    glob: "*.md",
+    columns: ["todo", "done"],
+    automations: [structuredClone(rule)],
     boards: { b: { columns: ["x", "y"], automations: [{ name: "q", when: { created_in: "x" }, run: "true", enabled: false }] } },
   });
 
@@ -185,15 +223,25 @@ describe("automation form logic", async () => {
     let f = L.configToForm(cfg());
     f.columns[1].value = "";
     expect(L.checkForm(f)).toMatch(/Cannot remove column "done": used by automation "r"/);
-    f = L.configToForm(cfg()); f.automations[0].name = " "; expect(L.checkForm(f)).toMatch(/no name/);
-    f = L.configToForm(cfg()); f.automations[0].run = " "; expect(L.checkForm(f)).toMatch(/empty script/);
-    f = L.configToForm(cfg()); f.automations.push({ ...L.newRule(f.columns), name: "r", run: "x" }); expect(L.checkForm(f)).toMatch(/Duplicate automation name "r"/);
-    f = L.configToForm(cfg()); f.automations[0].column = "nope"; expect(L.checkForm(f)).toMatch(/"nope"/);
+    f = L.configToForm(cfg());
+    f.automations[0].name = " ";
+    expect(L.checkForm(f)).toMatch(/no name/);
+    f = L.configToForm(cfg());
+    f.automations[0].run = " ";
+    expect(L.checkForm(f)).toMatch(/empty script/);
+    f = L.configToForm(cfg());
+    f.automations.push({ ...L.newRule(f.columns), name: "r", run: "x" });
+    expect(L.checkForm(f)).toMatch(/Duplicate automation name "r"/);
+    f = L.configToForm(cfg());
+    f.automations[0].column = "nope";
+    expect(L.checkForm(f)).toMatch(/"nope"/);
   });
 
   it("test helpers", () => {
     expect(L.testBody({ run: "x", event: "created_in" }, "b")).toEqual({ run: "x", event: "created_in", board: "b" });
-    expect(L.describeTestRun({ command: "echo 1", result: { exitCode: 0, stdout: "1\n", stderr: "" } })).toBe("$ echo 1\nexit: 0\n--- stdout ---\n1");
+    expect(L.describeTestRun({ command: "echo 1", result: { exitCode: 0, stdout: "1\n", stderr: "" } })).toBe(
+      "$ echo 1\nexit: 0\n--- stdout ---\n1",
+    );
     expect(L.describeAutomations({ r: { status: "done", at: "T" } })).toEqual(["r: done at T"]);
     expect(L.describeAutomations(undefined)).toEqual([]);
   });
@@ -266,10 +314,16 @@ describe("automation status helpers", () => {
     expect(sum.worst).toBe("skipped");
   });
   it("form round-trip keeps guard (default on, omitted; false preserved)", () => {
-    const cfg = { name: "d", glob: "*.md", columns: ["todo", "done"], boards: {}, automations: [
-      { name: "a", when: { moved_to: "done" }, run: "x" },
-      { name: "b", when: { moved_to: "done" }, run: "y", guard: false },
-    ] };
+    const cfg = {
+      name: "d",
+      glob: "*.md",
+      columns: ["todo", "done"],
+      boards: {},
+      automations: [
+        { name: "a", when: { moved_to: "done" }, run: "x" },
+        { name: "b", when: { moved_to: "done" }, run: "y", guard: false },
+      ],
+    };
     const f = any.configToForm(cfg);
     expect(f.automations.map((r: any) => r.guard)).toEqual([true, false]);
     expect(any.formToPayload(f).config).toEqual({ ...cfg, tickets: { baseline: true, include: [], exclude: [] } });
@@ -279,7 +333,13 @@ describe("automation status helpers", () => {
     expect(any.dirtyTabs(f, cfg).automations).toBe(true);
   });
   it("runningText lists running rule names (no cap)", () => {
-    const s = any.summarizeAutomations({ a: { status: "running" }, b: { status: "done" }, c: { status: "running" }, d: { status: "running" }, e: { status: "running" } });
+    const s = any.summarizeAutomations({
+      a: { status: "running" },
+      b: { status: "done" },
+      c: { status: "running" },
+      d: { status: "running" },
+      e: { status: "running" },
+    });
     expect(any.runningText(s)).toBe("running: a, c, d, e");
     expect(s.worstFirst).toHaveLength(5);
     expect(any.runningText(any.summarizeAutomations({ a: { status: "done" } }))).toBe("");

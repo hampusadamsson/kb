@@ -122,10 +122,7 @@ describe("getConfig / updateConfig", () => {
   });
 
   it("renames a board override: key and tickets follow", () => {
-    kb.updateConfig(
-      { ...cfg(), boards: { ops: { columns: ["backlog", "active"] } } },
-      { renames: { boards: { other: "ops" } } },
-    );
+    kb.updateConfig({ ...cfg(), boards: { ops: { columns: ["backlog", "active"] } } }, { renames: { boards: { other: "ops" } } });
     expect(Object.keys(cfg().boards)).toEqual(["ops"]);
     expect(read("3.md")).toContain("board: ops");
     expect(kb.get("3").column).toBe("backlog");
@@ -183,107 +180,101 @@ describe("getConfig / updateConfig", () => {
     expect(code(() => kb.getConfig())).toBe("config");
   });
 
-describe("automations in config", () => {
-  const rule = (o: object = {}) => ({ name: "r", when: { moved_to: "doing" }, run: "echo {{id}}", ...o });
-  const withAuto = () => {
-    kb.updateConfig({
-      ...cfg(),
-      automations: [rule()],
-      boards: { other: { columns: ["backlog", "active"], automations: [rule({ name: "o", when: { created_in: "active" } })] } },
+  describe("automations in config", () => {
+    const rule = (o: object = {}) => ({ name: "r", when: { moved_to: "doing" }, run: "echo {{id}}", ...o });
+    const withAuto = () => {
+      kb.updateConfig({
+        ...cfg(),
+        automations: [rule()],
+        boards: { other: { columns: ["backlog", "active"], automations: [rule({ name: "o", when: { created_in: "active" } })] } },
+      });
+    };
+
+    it("round-trips and preserves comments", () => {
+      withAuto();
+      const y = read("kanban.yaml");
+      expect(y).toContain("# my board");
+      expect(y).toContain("# the main board");
+      expect(cfg().automations).toEqual([rule()]);
+      expect(cfg().boards.other.automations?.[0].name).toBe("o");
+      expect(kb.updateConfig(cfg())).toMatchObject({ configChanged: false });
     });
-  };
 
-  it("round-trips and preserves comments", () => {
-    withAuto();
-    const y = read("kanban.yaml");
-    expect(y).toContain("# my board");
-    expect(y).toContain("# the main board");
-    expect(cfg().automations).toEqual([rule()]);
-    expect(cfg().boards.other.automations?.[0].name).toBe("o");
-    expect(kb.updateConfig(cfg())).toMatchObject({ configChanged: false });
-  });
+    it("omits automations key when none", () => {
+      expect("automations" in cfg()).toBe(false);
+      expect("automations" in cfg().boards.other).toBe(false);
+    });
 
-  it("omits automations key when none", () => {
-    expect("automations" in cfg()).toBe(false);
-    expect("automations" in cfg().boards.other).toBe(false);
-  });
+    it("rewrites a renamed column in rules", () => {
+      withAuto();
+      kb.updateConfig({ ...cfg(), columns: ["todo", "wip", "done"] }, { renames: { columns: { "": { doing: "wip" } } } });
+      expect(cfg().automations?.[0].when.moved_to).toBe("wip");
+      expect(read("2.md")).toContain("status: wip");
+    });
 
-  it("rewrites a renamed column in rules", () => {
-    withAuto();
-    kb.updateConfig(
-      { ...cfg(), columns: ["todo", "wip", "done"] },
-      { renames: { columns: { "": { doing: "wip" } } } },
-    );
-    expect(cfg().automations?.[0].when.moved_to).toBe("wip");
-    expect(read("2.md")).toContain("status: wip");
-  });
+    it("rewrites on a board override rename", () => {
+      withAuto();
+      kb.updateConfig(
+        { ...cfg(), boards: { other: { columns: ["backlog", "live"], automations: cfg().boards.other.automations } } },
+        { renames: { columns: { other: { active: "live" } } } },
+      );
+      expect(cfg().boards.other.automations?.[0].when.created_in).toBe("live");
+    });
 
-  it("rewrites on a board override rename", () => {
-    withAuto();
-    kb.updateConfig(
-      { ...cfg(), boards: { other: { columns: ["backlog", "live"], automations: cfg().boards.other.automations } } },
-      { renames: { columns: { other: { active: "live" } } } },
-    );
-    expect(cfg().boards.other.automations?.[0].when.created_in).toBe("live");
-  });
+    describe("rejects invalid automations", () => {
+      const bad: [string, object[]][] = [
+        ["duplicate", [rule(), rule()]],
+        ["empty name", [rule({ name: " " })]],
+        ["empty run", [rule({ run: " " })]],
+        ["unknown template", [rule({ run: "echo {{ bogus }}" })]],
+        ["bad column", [rule({ when: { moved_to: "nope" } })]],
+        ["in quotes", [rule({ run: 'echo "{{ name }}"' })]],
+      ];
+      it.each(bad)("%s", (_n, rules) => {
+        const next = { ...cfg(), automations: rules } as never;
+        const before = read("kanban.yaml");
+        expect(code(() => kb.updateConfig(next))).toBe("invalid");
+        expect(code(() => kb.updateConfig(next, { dryRun: true }))).toBe("invalid");
+        expect(read("kanban.yaml")).toBe(before);
+      });
+      it("column must belong to its own board", () => {
+        const next = { ...cfg(), boards: { other: { columns: ["backlog"], automations: [rule()] } } };
+        expect(msg(() => kb.updateConfig(next))).toContain('board "other"');
+      });
+    });
 
-  describe("rejects invalid automations", () => {
-    const bad: [string, object[]][] = [
-      ["duplicate", [rule(), rule()]],
-      ["empty name", [rule({ name: " " })]],
-      ["empty run", [rule({ run: " " })]],
-      ["unknown template", [rule({ run: "echo {{ bogus }}" })]],
-      ["bad column", [rule({ when: { moved_to: "nope" } })]],
-      ["in quotes", [rule({ run: 'echo "{{ name }}"' })]],
-    ];
-    it.each(bad)("%s", (_n, rules) => {
-      const next = { ...cfg(), automations: rules } as never;
+    it("blocks removing a column used by a rule", () => {
+      withAuto();
+      const m = msg(() => kb.updateConfig({ ...cfg(), columns: ["todo", "done"] }));
+      expect(m).toContain('cannot remove column "doing": used by automation "r" on board "default"');
+      expect(m).toContain("in use by 1 ticket");
+      expect(code(() => kb.updateConfig({ ...cfg(), columns: ["todo", "done"] }, { dryRun: true }))).toBe("invalid");
+      const m2 = msg(() =>
+        kb.updateConfig({ ...cfg(), boards: { other: { columns: ["backlog"], automations: cfg().boards.other.automations } } }),
+      );
+      expect(m2).toContain('cannot remove column "active": used by automation "o" on board "other"');
+    });
+
+    it("allows removal once the rule is removed; dryRun writes nothing", () => {
+      withAuto();
       const before = read("kanban.yaml");
-      expect(code(() => kb.updateConfig(next))).toBe("invalid");
-      expect(code(() => kb.updateConfig(next, { dryRun: true }))).toBe("invalid");
+      const { automations: _a, ...rest } = cfg();
+      const r = kb.updateConfig({ ...rest, columns: ["todo", "done"] }, { dryRun: true, renames: { columns: { "": { doing: "done" } } } });
+      expect(r.configChanged).toBe(true);
       expect(read("kanban.yaml")).toBe(before);
     });
-    it("column must belong to its own board", () => {
-      const next = { ...cfg(), boards: { other: { columns: ["backlog"], automations: [rule()] } } };
-      expect(msg(() => kb.updateConfig(next))).toContain('board "other"');
+
+    it("board rename keeps its automations", () => {
+      withAuto();
+      kb.updateConfig({ ...cfg(), boards: { two: cfg().boards.other } }, { renames: { boards: { other: "two" } } });
+      expect(cfg().boards.two.automations?.[0].name).toBe("o");
+    });
+
+    it("rejects bad shapes", () => {
+      expect(code(() => kb.updateConfig({ ...cfg(), automations: [{ name: "x" }] }))).toBe("invalid");
+      expect(code(() => kb.updateConfig({ ...cfg(), automations: [rule({ when: {} })] }))).toBe("invalid");
+      expect(code(() => kb.updateConfig({ ...cfg(), automations: [rule({ when: { moved_to: "a", created_in: "b" } })] }))).toBe("invalid");
+      expect(code(() => kb.updateConfig({ ...cfg(), automations: "x" }))).toBe("invalid");
     });
   });
-
-  it("blocks removing a column used by a rule", () => {
-    withAuto();
-    const m = msg(() => kb.updateConfig({ ...cfg(), columns: ["todo", "done"] }));
-    expect(m).toContain('cannot remove column "doing": used by automation "r" on board "default"');
-    expect(m).toContain("in use by 1 ticket");
-    expect(code(() => kb.updateConfig({ ...cfg(), columns: ["todo", "done"] }, { dryRun: true }))).toBe("invalid");
-    const m2 = msg(() =>
-      kb.updateConfig({ ...cfg(), boards: { other: { columns: ["backlog"], automations: cfg().boards.other.automations } } }),
-    );
-    expect(m2).toContain('cannot remove column "active": used by automation "o" on board "other"');
-  });
-
-  it("allows removal once the rule is removed; dryRun writes nothing", () => {
-    withAuto();
-    const before = read("kanban.yaml");
-    const { automations: _a, ...rest } = cfg();
-    const r = kb.updateConfig({ ...rest, columns: ["todo", "done"] }, { dryRun: true, renames: { columns: { "": { doing: "done" } } } });
-    expect(r.configChanged).toBe(true);
-    expect(read("kanban.yaml")).toBe(before);
-  });
-
-  it("board rename keeps its automations", () => {
-    withAuto();
-    kb.updateConfig(
-      { ...cfg(), boards: { two: cfg().boards.other } },
-      { renames: { boards: { other: "two" } } },
-    );
-    expect(cfg().boards.two.automations?.[0].name).toBe("o");
-  });
-
-  it("rejects bad shapes", () => {
-    expect(code(() => kb.updateConfig({ ...cfg(), automations: [{ name: "x" }] }))).toBe("invalid");
-    expect(code(() => kb.updateConfig({ ...cfg(), automations: [rule({ when: {} })] }))).toBe("invalid");
-    expect(code(() => kb.updateConfig({ ...cfg(), automations: [rule({ when: { moved_to: "a", created_in: "b" } })] }))).toBe("invalid");
-    expect(code(() => kb.updateConfig({ ...cfg(), automations: "x" }))).toBe("invalid");
-  });
-});
 });

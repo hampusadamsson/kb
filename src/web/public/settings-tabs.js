@@ -32,7 +32,13 @@ export function tabList(initial, getActive, select) {
           },
           it.running ? h("span", { class: "sdot running tab-run", "aria-hidden": "true" }) : null,
           h("span", { text: it.label }),
-          it.issues ? h("span", { class: `badge-count${it.level === "error" ? " err" : ""}`, "aria-label": `${it.issues} issues`, text: String(it.issues) }) : null,
+          it.issues
+            ? h("span", {
+                class: `badge-count${it.level === "error" ? " err" : ""}`,
+                "aria-label": `${it.issues} issues`,
+                text: String(it.issues),
+              })
+            : null,
           it.dirty ? h("span", { class: "dirty", title: "Unsaved changes", "aria-label": "unsaved changes", text: "•" }) : null,
         ),
       );
@@ -40,7 +46,11 @@ export function tabList(initial, getActive, select) {
     if (focused) document.getElementById(focused)?.focus();
   };
   el.addEventListener("keydown", (e) => {
-    const to = nextTab(items.map((i) => i.id), getActive(), e.key);
+    const to = nextTab(
+      items.map((i) => i.id),
+      getActive(),
+      e.key,
+    );
     if (to === null) return;
     e.preventDefault();
     select(to);
@@ -57,4 +67,5 @@ export function tabList(initial, getActive, select) {
 }
 
 /** Tabpanel element for tab `id`. */
-export const tabPanel = (id) => h("div", { class: "set-panel", role: "tabpanel", id: panelId(id), "aria-labelledby": tabId(id), tabIndex: 0 });
+export const tabPanel = (id) =>
+  h("div", { class: "set-panel", role: "tabpanel", id: panelId(id), "aria-labelledby": tabId(id), tabIndex: 0 });

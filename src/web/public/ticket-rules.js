@@ -1,7 +1,17 @@
 // Settings → Config: "What is a ticket?" editor (tickets rules) with a live preview.
 import { api } from "./api.js";
 import { h, clear, chipInput, debounce } from "./dom.js";
-import { checkTickets, newTicketRule, noTicketsWarning, presetRule, PRESETS, previewText, summarizeRule, ticketsToConfig, checkRule } from "./ticket-rules-logic.js";
+import {
+  checkTickets,
+  newTicketRule,
+  noTicketsWarning,
+  presetRule,
+  PRESETS,
+  previewText,
+  summarizeRule,
+  ticketsToConfig,
+  checkRule,
+} from "./ticket-rules-logic.js";
 
 const KINDS = {
   include: { title: "Also treat as tickets (include)", add: "+ Add include rule", empty: "No include rules." },
@@ -65,7 +75,12 @@ export function ticketRulesSection({ t, onChange, changed, error }) {
   const baseline = h(
     "label",
     { class: "check tr-baseline" },
-    h("input", { type: "checkbox", id: "tickets-baseline", checked: t.baseline, onchange: (e) => ((t.baseline = e.target.checked), edited()) }),
+    h("input", {
+      type: "checkbox",
+      id: "tickets-baseline",
+      checked: t.baseline,
+      onchange: (e) => ((t.baseline = e.target.checked), edited()),
+    }),
     " Files with ",
     h("code", { text: "type: ticket" }),
     " are tickets (baseline)",
@@ -109,7 +124,11 @@ function showResult(box, r) {
         "details",
         { class: "tr-details" },
         h("summary", { text: `${title} (${n})` }),
-        h("ul", { class: "mono" }, shown.map((p) => h("li", { text: p }))),
+        h(
+          "ul",
+          { class: "mono" },
+          shown.map((p) => h("li", { text: p })),
+        ),
         n > shown.length ? h("p", { class: "muted", text: `… and ${n - shown.length} more` }) : null,
       ),
     );
@@ -128,7 +147,9 @@ function listBox(kind, rules, edited, redraw) {
     "div",
     { class: "tr-quick", role: "group", "aria-label": `Quick add ${kind} rule` },
     h("span", { class: "muted", text: "Quick add:" }),
-    PRESETS[kind].map((p) => h("button", { type: "button", class: "btn small", text: p.label, onclick: () => add(presetRule(kind, p.id)) })),
+    PRESETS[kind].map((p) =>
+      h("button", { type: "button", class: "btn small", text: p.label, onclick: () => add(presetRule(kind, p.id)) }),
+    ),
   );
   const cards = h("div", { class: "tr-cards", "data-tr-list": kind });
   if (!rules.length) cards.append(h("p", { class: "muted", text: k.empty }));
@@ -142,7 +163,13 @@ function listBox(kind, rules, edited, redraw) {
     ),
   );
   addBtn.classList.add("tr-add");
-  return h("div", { class: "tr-list", "data-tr-list": kind }, h("h4", { text: k.title }), cards, h("div", { class: "row tr-actions" }, addBtn, quick));
+  return h(
+    "div",
+    { class: "tr-list", "data-tr-list": kind },
+    h("h4", { text: k.title }),
+    cards,
+    h("div", { class: "row tr-actions" }, addBtn, quick),
+  );
 }
 
 function card(kind, r, i, edited, remove) {
@@ -161,7 +188,14 @@ function card(kind, r, i, edited, remove) {
       "div",
       { class: "field" },
       h("span", { class: "lbl", text: label }),
-      h("input", { type: "text", "data-tr": key, value: r[key], placeholder, "aria-label": `${label} (${title})`, oninput: (e) => ((r[key] = e.target.value), change()) }),
+      h("input", {
+        type: "text",
+        "data-tr": key,
+        value: r[key],
+        placeholder,
+        "aria-label": `${label} (${title})`,
+        oninput: (e) => ((r[key] = e.target.value), change()),
+      }),
       help ? h("span", { class: "muted hint", text: help }) : null,
     );
 
@@ -173,18 +207,48 @@ function card(kind, r, i, edited, remove) {
         h(
           "div",
           { class: "row" },
-          h("input", { type: "text", placeholder: "property", "aria-label": `Property key (${title})`, value: p.key, oninput: (e) => ((p.key = e.target.value), change()) }),
-          h("input", { type: "text", placeholder: "value (!x = not x)", "aria-label": `Property value (${title})`, value: p.value, oninput: (e) => ((p.value = e.target.value), change()) }),
-          h("button", { type: "button", class: "btn small danger", text: "×", "aria-label": `Remove property (${title})`, onclick: () => (r.props.splice(j, 1), change(), drawProps()) }),
+          h("input", {
+            type: "text",
+            placeholder: "property",
+            "aria-label": `Property key (${title})`,
+            value: p.key,
+            oninput: (e) => ((p.key = e.target.value), change()),
+          }),
+          h("input", {
+            type: "text",
+            placeholder: "value (!x = not x)",
+            "aria-label": `Property value (${title})`,
+            value: p.value,
+            oninput: (e) => ((p.value = e.target.value), change()),
+          }),
+          h("button", {
+            type: "button",
+            class: "btn small danger",
+            text: "×",
+            "aria-label": `Remove property (${title})`,
+            onclick: () => (r.props.splice(j, 1), change(), drawProps()),
+          }),
         ),
       ),
     );
-    propRows.append(h("button", { type: "button", class: "btn small", text: "+ Add property", onclick: () => (r.props.push({ key: "", value: "" }), change(), drawProps(true)) }));
+    propRows.append(
+      h("button", {
+        type: "button",
+        class: "btn small",
+        text: "+ Add property",
+        onclick: () => (r.props.push({ key: "", value: "" }), change(), drawProps(true)),
+      }),
+    );
     if (focusLast) propRows.querySelectorAll("input")[r.props.length * 2 - 2]?.focus();
   };
   drawProps();
 
-  const chips = chipInput({ label: `Has property (${title})`, placeholder: "key, Enter (!key = must not exist)", values: r.has, onChange: (v) => ((r.has = v), change()) });
+  const chips = chipInput({
+    label: `Has property (${title})`,
+    placeholder: "key, Enter (!key = must not exist)",
+    values: r.has,
+    onChange: (v) => ((r.has = v), change()),
+  });
   refresh();
 
   return h(
@@ -193,7 +257,14 @@ function card(kind, r, i, edited, remove) {
     h(
       "div",
       { class: "row" },
-      h("input", { type: "text", "data-tr": "name", placeholder: "Rule name (optional)", "aria-label": `Rule name (${title})`, value: r.name, oninput: (e) => ((r.name = e.target.value), change()) }),
+      h("input", {
+        type: "text",
+        "data-tr": "name",
+        placeholder: "Rule name (optional)",
+        "aria-label": `Rule name (${title})`,
+        value: r.name,
+        oninput: (e) => ((r.name = e.target.value), change()),
+      }),
       h("button", { type: "button", class: "btn small danger", text: "Remove", "aria-label": `Remove ${title}`, onclick: remove }),
     ),
     text("Folder / path glob", "glob", "tasks/**/*.md", "relative to this folder"),

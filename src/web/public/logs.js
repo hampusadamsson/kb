@@ -1,7 +1,20 @@
 // Settings → Logs: audit event table (search, filters, pagination, live prepend).
 import { api } from "./api.js";
 import { h, clear, debounce, toast } from "./dom.js";
-import { SOURCE_FILTERS, TYPE_FILTERS, absoluteTime, appendPage, buildQuery, countText, dataEntries, isUnfiltered, mergeById, noMatchText, pillClass, relativeTime } from "./logs-logic.js";
+import {
+  SOURCE_FILTERS,
+  TYPE_FILTERS,
+  absoluteTime,
+  appendPage,
+  buildQuery,
+  countText,
+  dataEntries,
+  isUnfiltered,
+  mergeById,
+  noMatchText,
+  pillClass,
+  relativeTime,
+} from "./logs-logic.js";
 
 let ctx = { boardNames: () => [], openTicket: async () => {} };
 let st = null; // per-mount state
@@ -15,7 +28,19 @@ export const isMounted = () => Boolean(st && document.body.contains(st.root));
 
 export function mount(panel) {
   const filters = { q: "", type: "all", source: "all", board: "all" };
-  st = { root: panel, filters, events: [], cursor: undefined, loading: false, error: "", loaded: false, expanded: new Set(), stale: false, seq: 0, missing: new Set() };
+  st = {
+    root: panel,
+    filters,
+    events: [],
+    cursor: undefined,
+    loading: false,
+    error: "",
+    loaded: false,
+    expanded: new Set(),
+    stale: false,
+    seq: 0,
+    missing: new Set(),
+  };
   const s = st;
 
   const sel = (label, key, opts) =>
@@ -36,7 +61,11 @@ export function mount(panel) {
     "div",
     { class: "logs-bar" },
     search,
-    sel("Event type", "type", TYPE_FILTERS.map((f) => [f.value, f.label])),
+    sel(
+      "Event type",
+      "type",
+      TYPE_FILTERS.map((f) => [f.value, f.label]),
+    ),
     sel("Source", "source", [["all", "All sources"], ...SOURCE_FILTERS.map((x) => [x, x])]),
     boards.length > 2 ? sel("Board", "board", boards) : null,
   );
@@ -142,9 +171,18 @@ function ticketCell(e, s) {
 
 function detailRow(e, id) {
   const dl = h("dl", { class: "logs-data" });
-  dl.append(h("dt", { text: "id" }), h("dd", { class: "mono", text: e.id }), h("dt", { text: "timestamp" }), h("dd", { class: "mono", text: e.ts }));
+  dl.append(
+    h("dt", { text: "id" }),
+    h("dd", { class: "mono", text: e.id }),
+    h("dt", { text: "timestamp" }),
+    h("dd", { class: "mono", text: e.ts }),
+  );
   if (e.path) dl.append(h("dt", { text: "path" }), h("dd", { class: "mono", text: e.path }));
-  for (const d of dataEntries(e.data)) dl.append(h("dt", { text: d.key }), h("dd", {}, d.pre ? h("pre", { class: "mono auto-out", text: d.value }) : h("span", { class: "mono", text: d.value })));
+  for (const d of dataEntries(e.data))
+    dl.append(
+      h("dt", { text: d.key }),
+      h("dd", {}, d.pre ? h("pre", { class: "mono auto-out", text: d.value }) : h("span", { class: "mono", text: d.value })),
+    );
   return h("tr", { class: "logs-detail", id }, h("td", { colSpan: 6 }, dl));
 }
 
@@ -191,7 +229,10 @@ function draw() {
   const keep = s.root.scrollTop;
   clear(s.body);
   if (s.error) {
-    s.body.append(h("p", { class: "form-error", role: "alert", text: s.error }), h("button", { type: "button", class: "btn", text: "Retry", onclick: () => reload() }));
+    s.body.append(
+      h("p", { class: "form-error", role: "alert", text: s.error }),
+      h("button", { type: "button", class: "btn", text: "Retry", onclick: () => reload() }),
+    );
     return;
   }
   if (!s.loaded) {
@@ -200,19 +241,43 @@ function draw() {
   }
   if (!s.events.length) {
     const none = isUnfiltered(s.filters);
-    s.body.append(h("p", { class: "muted", text: none ? "No events yet. Moving cards, editing tickets and automation runs show up here." : noMatchText(s.filters) }));
+    s.body.append(
+      h("p", {
+        class: "muted",
+        text: none ? "No events yet. Moving cards, editing tickets and automation runs show up here." : noMatchText(s.filters),
+      }),
+    );
     return;
   }
   const tbody = h("tbody");
   for (const e of s.events) row(e, s, tbody);
-  const head = h("tr", {}, ["Time", "Event", "Ticket", "Board", "Source", "Summary"].map((t) => h("th", { scope: "col", text: t })));
+  const head = h(
+    "tr",
+    {},
+    ["Time", "Event", "Ticket", "Board", "Source", "Summary"].map((t) => h("th", { scope: "col", text: t })),
+  );
   s.body.append(
-    h("table", { class: "logs-table" }, h("caption", { class: "sr-only", text: "Audit event log, newest first" }), h("thead", {}, head), tbody),
+    h(
+      "table",
+      { class: "logs-table" },
+      h("caption", { class: "sr-only", text: "Audit event log, newest first" }),
+      h("thead", {}, head),
+      tbody,
+    ),
     h(
       "div",
       { class: "logs-foot" },
       h("span", { class: "muted", role: "status", text: countText(s.events.length) + (s.cursor ? "" : " · No more events") }),
-      s.cursor ? h("button", { type: "button", class: "btn", id: "logs-more", disabled: s.loading, text: s.loading ? "Loading…" : "Load more", onclick: more }) : null,
+      s.cursor
+        ? h("button", {
+            type: "button",
+            class: "btn",
+            id: "logs-more",
+            disabled: s.loading,
+            text: s.loading ? "Loading…" : "Load more",
+            onclick: more,
+          })
+        : null,
       s.events.length > 50 ? h("button", { type: "button", class: "btn", text: "Newest", onclick: () => reload() }) : null,
     ),
   );

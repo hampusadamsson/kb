@@ -16,10 +16,29 @@
   "engines": {
     "node": ">=22"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc && node -e \"fs.cpSync('src/web/public','dist/web/public',{recursive:true})\"",
+    "dev": "tsc --watch",
     "test": "vitest run",
-    "dev": "tsc --watch"
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "lint": "oxlint src test",
+    "lint:fix": "oxlint src test --fix",
+    "format": "prettier --write \"src/**/*.{ts,js,css,html}\" \"test/**/*.ts\" \"*.{json,yml,yaml}\" \".github/**/*.yml\" \".vscode/*.json\"",
+    "format:check": "prettier --check \"src/**/*.{ts,js,css,html}\" \"test/**/*.ts\" \"*.{json,yml,yaml}\" \".github/**/*.yml\" \".vscode/*.json\"",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,js,mjs}": [
+      "oxlint --fix",
+      "prettier --write"
+    ],
+    "*.{css,html,json,md,yaml,yml}": "prettier --write"
   },
   "dependencies": {
     "commander": "^15.0.0",
@@ -28,6 +47,11 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "^5.0.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "oxlint": "^1.90.0",
+    "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

@@ -1,49 +1,65 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="dark">
-  <title>kb</title>
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/style.css">
-  <script type="module" src="/app.js"></script>
-</head>
-<body>
-  <header class="top">
-    <div class="top-row">
-      <h1 id="title">kb</h1>
-      <div id="tabs" class="tabs" role="tablist" aria-label="Boards"></div>
-      <span class="spacer"></span>
-      <button id="filters-toggle" type="button" class="btn only-narrow" aria-expanded="false" aria-controls="filters">Filters <span id="filters-count" class="badge-count" hidden>0</span></button>
-      <span id="live" class="live" role="status"><span class="dot" aria-hidden="true"></span><span class="live-text">connecting…</span></span>
-      <button id="settings-btn" type="button" class="btn">Settings <span id="settings-run" class="sdot running" title="Automations running" hidden></span> <span id="settings-badge" class="badge-count" hidden>0</span></button>
-    </div>
-    <div id="filters" class="filters">
-      <label class="f"><span>Text</span><input id="f-text" type="search" placeholder="search"></label>
-      <div class="f"><span>Labels</span><div id="f-labels"></div></div>
-      <div class="f"><span>Properties</span><div id="f-props"></div></div>
-      <button id="f-clear" type="button" class="btn small" hidden>Clear</button>
-    </div>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>kb</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="top-row">
+        <h1 id="title">kb</h1>
+        <div id="tabs" class="tabs" role="tablist" aria-label="Boards"></div>
+        <span class="spacer"></span>
+        <button id="filters-toggle" type="button" class="btn only-narrow" aria-expanded="false" aria-controls="filters">
+          Filters <span id="filters-count" class="badge-count" hidden>0</span>
+        </button>
+        <span id="live" class="live" role="status"
+          ><span class="dot" aria-hidden="true"></span><span class="live-text">connecting…</span></span
+        >
+        <button id="settings-btn" type="button" class="btn">
+          Settings <span id="settings-run" class="sdot running" title="Automations running" hidden></span>
+          <span id="settings-badge" class="badge-count" hidden>0</span>
+        </button>
+      </div>
+      <div id="filters" class="filters">
+        <label class="f"><span>Text</span><input id="f-text" type="search" placeholder="search" /></label>
+        <div class="f">
+          <span>Labels</span>
+          <div id="f-labels"></div>
+        </div>
+        <div class="f">
+          <span>Properties</span>
+          <div id="f-props"></div>
+        </div>
+        <button id="f-clear" type="button" class="btn small" hidden>Clear</button>
+      </div>
+    </header>
 
-  <main>
-    <div id="fatal" class="fatal" role="alert" hidden></div>
-    <div id="app" hidden>
-      <p id="empty" class="empty" hidden></p>
-      <div id="boards" class="boards"></div>
-    </div>
-  </main>
+    <main>
+      <div id="fatal" class="fatal" role="alert" hidden></div>
+      <div id="app" hidden>
+        <p id="empty" class="empty" hidden></p>
+        <div id="boards" class="boards"></div>
+      </div>
+    </main>
 
-  <dialog id="ticket-dialog" aria-label="Ticket"></dialog>
+    <dialog id="ticket-dialog" aria-label="Ticket"></dialog>
 
-  <dialog id="settings-dialog" aria-labelledby="settings-title">
-    <div class="ticket-form">
-      <div class="dlg-head"><h2 id="settings-title">Settings</h2><button id="settings-close" type="button" class="btn small" aria-label="Close settings" title="Close">×</button></div>
-      <div id="settings-body"></div>
-    </div>
-  </dialog>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <div class="ticket-form">
+        <div class="dlg-head">
+          <h2 id="settings-title">Settings</h2>
+          <button id="settings-close" type="button" class="btn small" aria-label="Close settings" title="Close">×</button>
+        </div>
+        <div id="settings-body"></div>
+      </div>
+    </dialog>
 
-  <div id="toasts" class="toasts" aria-live="polite" role="status"></div>
-</body>
+    <div id="toasts" class="toasts" aria-live="polite" role="status"></div>
+  </body>
 </html>

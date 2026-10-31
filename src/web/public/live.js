@@ -2,7 +2,19 @@
 import { api } from "./api.js";
 import { h, clear } from "./dom.js";
 import { absoluteTime, relativeTime } from "./logs-logic.js";
-import { announce, formatElapsed, hasTimeout, killConfirm, killLabel, progressFraction, runTitle, sortRuns, timeoutText } from "./live-logic.js";
+import {
+  announce,
+  externalNote,
+  formatElapsed,
+  hasTimeout,
+  isExternal,
+  killConfirm,
+  killLabel,
+  progressFraction,
+  runTitle,
+  sortRuns,
+  timeoutText,
+} from "./live-logic.js";
 
 let ctx = { openTicket: async () => {}, onChange: () => {} };
 let runs = [];
@@ -122,7 +134,15 @@ function bar(e, r) {
   return s;
 }
 
-const sig = () => JSON.stringify([disabled, error, runs.map((r) => [r.runId, expanded.has(r.runId) ? r.output : 0]), [...killing], [...killErrors], [...missing]]);
+const sig = () =>
+  JSON.stringify([
+    disabled,
+    error,
+    runs.map((r) => [r.runId, expanded.has(r.runId) ? r.output : 0]),
+    [...killing],
+    [...killErrors],
+    [...missing],
+  ]);
 let drawn = "";
 
 function runRow(r) {
@@ -130,6 +150,7 @@ function runRow(r) {
   const open = expanded.has(r.runId);
   const oid = `live-out-${r.runId}`;
   const isKilling = killing.has(r.runId);
+  const external = isExternal(r);
   return h(
     "li",
     { class: "live-row", "data-run": r.runId },
@@ -140,6 +161,7 @@ function runRow(r) {
       h("strong", { class: "live-title", text: runTitle(r) }),
       r.board ? h("span", { class: "pill", text: r.board }) : null,
       ticketLink(r),
+      external ? h("span", { class: "pill", title: externalNote(), text: "other process" }) : null,
       h("span", { class: "spacer" }),
       h("button", {
         type: "button",
@@ -155,24 +177,39 @@ function runRow(r) {
       { class: "live-meta muted" },
       h("span", { title: absoluteTime(r.startedAt), text: `started ${relativeTime(r.startedAt) || r.startedAt}` }),
       h("span", { class: "mono live-elapsed", title: "Elapsed", text: formatElapsed(e) }),
-      hasTimeout(r.timeoutMs) ? h("span", { class: "live-bar", title: `Timeout ${formatElapsed(r.timeoutMs)}`, role: "presentation" }, bar(e, r)) : null,
+      hasTimeout(r.timeoutMs)
+        ? h("span", { class: "live-bar", title: `Timeout ${formatElapsed(r.timeoutMs)}`, role: "presentation" }, bar(e, r))
+        : null,
       h("span", { class: "mono live-left", text: timeoutText(e, r.timeoutMs) }),
     ),
     h("div", { class: "mono live-cmd", title: r.command, text: r.command }),
     killErrors.has(r.runId) ? h("p", { class: "form-error", role: "alert", text: killErrors.get(r.runId) }) : null,
-    h("button", {
-      type: "button",
-      class: "link-btn live-toggle",
-      "aria-expanded": String(open),
-      "aria-controls": oid,
-      text: open ? "Hide output" : "Show output",
-      onclick: () => {
-        if (open) expanded.delete(r.runId);
-        else expanded.add(r.runId);
-        draw();
-      },
-    }),
-    open ? h("pre", { class: "mono auto-out live-out", id: oid, tabIndex: 0, "aria-label": "Latest output", text: r.output || "(no output yet)" }) : null,
+    // Output only exists for runs this server started; hide the toggle rather than show an empty pane.
+    external
+      ? h("p", { class: "muted live-ext-note", text: externalNote() })
+      : [
+          h("button", {
+            type: "button",
+            class: "link-btn live-toggle",
+            "aria-expanded": String(open),
+            "aria-controls": oid,
+            text: open ? "Hide output" : "Show output",
+            onclick: () => {
+              if (open) expanded.delete(r.runId);
+              else expanded.add(r.runId);
+              draw();
+            },
+          }),
+          open
+            ? h("pre", {
+                class: "mono auto-out live-out",
+                id: oid,
+                tabIndex: 0,
+                "aria-label": "Latest output",
+                text: r.output || "(no output yet)",
+              })
+            : null,
+        ],
   );
 }
 
@@ -184,7 +221,10 @@ function draw() {
   clear(st.body);
   if (error) st.body.append(h("p", { class: "form-error", role: "alert", text: error }));
   if (disabled) st.body.append(h("p", { class: "muted", text: "Automations are disabled (--no-automation)." }));
-  else if (!runs.length && !error) st.body.append(h("p", { class: "muted", text: "No automations are running. Runs appear here while they execute; finished runs are in Logs." }));
+  else if (!runs.length && !error)
+    st.body.append(
+      h("p", { class: "muted", text: "No automations are running. Runs appear here while they execute; finished runs are in Logs." }),
+    );
   else if (runs.length) st.body.append(h("ul", { class: "live-list", "aria-label": "Running automations" }, runs.map(runRow)));
   st.root.scrollTop = keep;
 }

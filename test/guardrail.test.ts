@@ -11,8 +11,7 @@ import { startServer } from "../src/web/server.js";
 let dir: string;
 let evs: KbEvent[];
 const runner: AutomationRunner = { run: async () => ({ exitCode: 0, stdout: "", stderr: "" }) };
-const cfg = (guard = "") =>
-  `columns: [todo, done]\nautomations:\n  - name: r\n    when: { moved_to: done }\n    run: "true"\n${guard}`;
+const cfg = (guard = "") => `columns: [todo, done]\nautomations:\n  - name: r\n    when: { moved_to: done }\n    run: "true"\n${guard}`;
 const mk = () => createKanban({ dir, runner, events: { emit: (e) => void evs.push(e) } });
 const autos = (f: string) => (readFile(path.join(dir, f)).doc.toJS() as any).automations;
 const file = () => fs.readdirSync(dir).find((f) => f.endsWith(".md"))!;
@@ -107,10 +106,17 @@ describe("loop guardrail", () => {
 
   it("API PATCH resetAutomations", async () => {
     fs.writeFileSync(path.join(dir, "kanban.yaml"), cfg());
-    fs.writeFileSync(path.join(dir, "1.md"), `---\ntype: ticket\nid: 1\nname: A\nstatus: todo\nautomations:\n  r: { status: done, runs: 3 }\n---\nb\n`);
+    fs.writeFileSync(
+      path.join(dir, "1.md"),
+      `---\ntype: ticket\nid: 1\nname: A\nstatus: todo\nautomations:\n  r: { status: done, runs: 3 }\n---\nb\n`,
+    );
     const srv = await startServer({ dir, port: 0 });
     try {
-      const r = await fetch(srv.url + "/api/tickets/1", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ resetAutomations: true }) });
+      const r = await fetch(srv.url + "/api/tickets/1", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ resetAutomations: true }),
+      });
       expect(r.status).toBe(200);
       expect(autos("1.md")).toBeUndefined();
     } finally {
@@ -120,7 +126,10 @@ describe("loop guardrail", () => {
 
   it("CLI kb set --reset-automations", () => {
     fs.writeFileSync(path.join(dir, "kanban.yaml"), cfg());
-    fs.writeFileSync(path.join(dir, "1.md"), `---\ntype: ticket\nid: 1\nname: A\nstatus: todo\nautomations:\n  r: { status: done, runs: 3 }\n---\nb\n`);
+    fs.writeFileSync(
+      path.join(dir, "1.md"),
+      `---\ntype: ticket\nid: 1\nname: A\nstatus: todo\nautomations:\n  r: { status: done, runs: 3 }\n---\nb\n`,
+    );
     const main = path.resolve(import.meta.dirname, "../dist/cli/main.js");
     const r = spawnSync("node", [main, "set", "1", "--reset-automations"], { cwd: dir, encoding: "utf8" });
     expect(r.status).toBe(0);

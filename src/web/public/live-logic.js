@@ -36,14 +36,21 @@ export function sortRuns(runs) {
 /** Display name of a run. */
 export const runTitle = (r) => (r.kind === "test" ? "Test run" : r.rule || "Automation");
 
+/** True when the run belongs to another process, so its output tail is unavailable. */
+export const isExternal = (r) => r.external === true;
+
 /** Accessible label of the Kill button. */
-export const killLabel = (r) => (r.kind === "test" ? "Kill test run" : `Kill automation ${r.rule ?? ""} on #${r.ticketId ?? "?"}`.replace("  ", " "));
+export const killLabel = (r) =>
+  r.kind === "test" ? "Kill test run" : `Kill automation ${r.rule ?? ""} on #${r.ticketId ?? "?"}`.replace("  ", " ");
 
 /** Confirm text before killing. */
 export const killConfirm = (r) =>
   r.kind === "test"
     ? "Kill this test run? The process and its children are terminated."
     : `Kill automation "${r.rule}" on #${r.ticketId}? The process and its children are terminated; the ticket is marked failed.`;
+
+/** Extra hint for runs started outside this server. */
+export const externalNote = () => "Started by another process (kb CLI or an earlier kb web); its output is not captured here.";
 
 /** Tab label with count. */
 export const liveLabel = (n) => (n ? `Live (${n})` : "Live");

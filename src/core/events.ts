@@ -55,7 +55,7 @@ export function isoWithOffset(d: Date): string {
 let counter = 0;
 /** Sortable unique id: time (base36, fixed width) - counter - random suffix (cross-process tie-break). */
 export function newEventId(d: Date): string {
-  counter = (counter + 1) % (36 ** 3);
+  counter = (counter + 1) % 36 ** 3;
   const rand = Math.floor(Math.random() * 36 ** 3);
   return `${d.getTime().toString(36).padStart(9, "0")}-${counter.toString(36).padStart(3, "0")}${rand.toString(36).padStart(3, "0")}`;
 }
@@ -105,15 +105,27 @@ export function diffTicketRules(old: Config, next: Config): TicketRulesDiff | un
   const o = ticketRules(old);
   const n = ticketRules(next);
   if (JSON.stringify(o) === JSON.stringify(n)) return undefined;
-  return { baselineChanged: o.baseline !== n.baseline, include: diffRuleList(o.include, n.include), exclude: diffRuleList(o.exclude, n.exclude) };
+  return {
+    baselineChanged: o.baseline !== n.baseline,
+    include: diffRuleList(o.include, n.include),
+    exclude: diffRuleList(o.exclude, n.exclude),
+  };
 }
 
 export interface ConfigDiff {
   /** present only when the ticket rules changed (event data key: ticketRules; `tickets` is the migrated-ticket list) */
   ticketRules?: TicketRulesDiff;
-  columns: { added: { board: string; name: string }[]; removed: { board: string; name: string }[]; renamed: { board: string; from: string; to: string }[] };
+  columns: {
+    added: { board: string; name: string }[];
+    removed: { board: string; name: string }[];
+    renamed: { board: string; from: string; to: string }[];
+  };
   boards: { added: string[]; removed: string[]; renamed: { from: string; to: string }[] };
-  automations: { added: { board: string; name: string }[]; removed: { board: string; name: string }[]; changed: { board: string; name: string }[] };
+  automations: {
+    added: { board: string; name: string }[];
+    removed: { board: string; name: string }[];
+    changed: { board: string; name: string }[];
+  };
 }
 
 export function diffConfig(old: Config, next: Config, rawRenames: unknown): ConfigDiff {
@@ -143,7 +155,8 @@ export function diffConfig(old: Config, next: Config, rawRenames: unknown): Conf
     matched.add(oldName);
     if (oldName !== name) d.boards.renamed.push({ from: oldName, to: name });
     const cr: Record<string, string> = {};
-    for (const [f, t] of Object.entries(rec(colRen[oldName === old.name ? "" : oldName] ?? colRen[oldName] ?? colRen[name]))) if (typeof t === "string") cr[f] = t;
+    for (const [f, t] of Object.entries(rec(colRen[oldName === old.name ? "" : oldName] ?? colRen[oldName] ?? colRen[name])))
+      if (typeof t === "string") cr[f] = t;
     const renamedFrom = new Set<string>();
     for (const c of n.columns) {
       if (o.columns.includes(c)) continue;

@@ -33,8 +33,24 @@ export interface RunMeta {
   test?: boolean;
 }
 
+/** Where the spawned process landed (reported by the runner right after spawn). */
+export interface RunSpawn {
+  pid: number;
+  /** process group id; equal to pid for detached runs */
+  pgid: number;
+}
+
+export interface RunOptions {
+  cwd: string;
+  env: Record<string, string>;
+  meta?: RunMeta;
+  timeoutMs?: number;
+  /** called once the child exists, so the owner can record a killable pid */
+  onSpawn?: (spawn: RunSpawn) => void;
+}
+
 export interface AutomationRunner {
-  run(command: string, opts: { cwd: string; env: Record<string, string>; meta?: RunMeta; timeoutMs?: number }): Promise<RunResult>;
+  run(command: string, opts: RunOptions): Promise<RunResult>;
 }
 
 export interface AutomationRecord {
@@ -67,9 +83,7 @@ export function totalRuns(automations: unknown): number {
   return Object.values(automations).reduce<number>((n, e) => n + entryRuns(e), 0);
 }
 
-export const KNOWN_VARS = [
-  "id", "name", "body", "board", "status", "from", "to", "path", "labels", "event",
-] as const;
+export const KNOWN_VARS = ["id", "name", "body", "board", "status", "from", "to", "path", "labels", "event"] as const;
 
 const VAR_RE = /\{\{\s*([^{}\s]+)\s*\}\}/g;
 
@@ -80,8 +94,7 @@ export function templateVars(template: string): string[] {
   return out;
 }
 
-const isKnown = (v: string): boolean =>
-  (KNOWN_VARS as readonly string[]).includes(v) || (v.startsWith("props.") && v.length > 6);
+const isKnown = (v: string): boolean => (KNOWN_VARS as readonly string[]).includes(v) || (v.startsWith("props.") && v.length > 6);
 
 export function unknownVars(template: string): string[] {
   return templateVars(template).filter((v) => !isKnown(v));
@@ -142,7 +155,10 @@ export function placeholderContextProblems(template: string): PlaceholderProblem
     if (top.kind === "dq") {
       if (c === '"') stack.pop();
       else if (c === "`") stack.push({ kind: "bt", depth: 0, paren: false });
-      else if (c === "$" && t[i + 1] === "(") (stack.push({ kind: "code", depth: 0, paren: true }), i++);
+      else if (c === "$" && t[i + 1] === "(") {
+        stack.push({ kind: "code", depth: 0, paren: true });
+        i++;
+      }
       i++;
       continue;
     }
@@ -155,8 +171,10 @@ export function placeholderContextProblems(template: string): PlaceholderProblem
     if (c === "'") stack.push({ kind: "sq", depth: 0, paren: false });
     else if (c === '"') stack.push({ kind: "dq", depth: 0, paren: false });
     else if (c === "`") stack.push({ kind: "bt", depth: 0, paren: false });
-    else if (c === "$" && t[i + 1] === "(") (stack.push({ kind: "code", depth: 0, paren: true }), i++);
-    else if (c === "(") top.depth++;
+    else if (c === "$" && t[i + 1] === "(") {
+      stack.push({ kind: "code", depth: 0, paren: true });
+      i++;
+    } else if (c === "(") top.depth++;
     else if (c === ")") {
       if (top.depth > 0) top.depth--;
       else if (top.paren) stack.pop();
@@ -238,10 +256,7 @@ export function renderCommand(template: string, vars: Record<string, unknown>): 
     if (name.startsWith("props.")) {
       const props = vars.props;
       const key = name.slice(6);
-      const v =
-        props && typeof props === "object" && Object.hasOwn(props, key)
-          ? (props as Record<string, unknown>)[key]
-          : undefined;
+      const v = props && typeof props === "object" && Object.hasOwn(props, key) ? (props as Record<string, unknown>)[key] : undefined;
       return shellQuote(str(v));
     }
     const v = Object.hasOwn(vars, name) ? vars[name] : undefined;
@@ -304,6 +319,12 @@ export interface AutomationLive {
   command: string;
   /** the rule's timeout in seconds; 0 = none */
   timeoutSeconds: number;
+  /** OS process id, when the owner recorded it (needed to kill from another process) */
+  pid?: number;
+  /** process group id of the detached run */
+  pgid?: number;
+  /** hostname the run started on; absent on entries written by older versions */
+  host?: string;
 }
 
 export interface AutomationInfo {
@@ -332,12 +353,40 @@ function atMs(at: unknown): number {
   return ms;
 }
 
+/** Liveness probe for a recorded run: `true` when the process is still running. */
+export type AliveProbe = (pid: number) => boolean;
+
+/** A positive integer from frontmatter (pids may be written as strings). */
+function posInt(v: unknown): number | undefined {
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v) ? Number(v) : NaN;
+  return Number.isInteger(n) && n > 0 && n <= Number.MAX_SAFE_INTEGER ? n : undefined;
+}
+
+/**
+ * Is a `running` entry dead? A recorded pid on this host is authoritative: a live process is never
+ * stale, however long it has run (agent runs last for hours). Without a probe — or for an entry
+ * recorded on another host, where the pid is meaningless — fall back to the age threshold.
+ */
+export function isStaleRun(
+  ent: Record<string, unknown>,
+  ms: number,
+  nowMs: number,
+  probe: { isAlive?: AliveProbe; localHost?: string } = {},
+): boolean {
+  const pid = posInt(ent.pid);
+  const host = typeof ent.host === "string" && ent.host ? ent.host : undefined;
+  const sameHost = host === undefined || probe.localHost === undefined || host === probe.localHost;
+  if (pid !== undefined && probe.isAlive && sameHost) return !probe.isAlive(pid);
+  return Number.isNaN(ms) || nowMs - ms > STALE_RUNNING_MS;
+}
+
 /** Rule definitions plus runtime data from ticket `automations` frontmatter. Pure. */
 export function buildAutomationOverview(
   config: Config,
   tickets: Ticket[],
   boards: string[],
   nowMs: number,
+  probe: { isAlive?: AliveProbe; localHost?: string } = {},
 ): AutomationOverview {
   const rules: AutomationInfo[] = [];
   const live: (AutomationLive & { ms: number })[] = [];
@@ -371,9 +420,25 @@ export function buildAutomationOverview(
         const at = ent.at instanceof Date ? ent.at.toISOString() : ent.at === undefined ? "" : String(ent.at);
         const info = infos.get(rule);
         if (status === "running") {
-          const stale = Number.isNaN(ms) || nowMs - ms > STALE_RUNNING_MS;
+          const stale = isStaleRun(ent, ms, nowMs, probe);
           if (stale) status = "stale";
-          else live.push({ rule, board, ticket: { id: t.id, name: t.name, path: t.path }, startedAt: at, elapsedMs: Math.max(0, nowMs - ms), command: info?.run ?? "", timeoutSeconds: info?.timeout ?? 0, ms });
+          else {
+            const pid = posInt(ent.pid);
+            const pgid = posInt(ent.pgid) ?? pid;
+            const host = typeof ent.host === "string" && ent.host ? ent.host : undefined;
+            live.push({
+              rule,
+              board,
+              ticket: { id: t.id, name: t.name, path: t.path },
+              startedAt: at,
+              elapsedMs: Math.max(0, nowMs - ms),
+              command: info?.run ?? "",
+              timeoutSeconds: info?.timeout ?? 0,
+              ...(pid ? { pid, pgid } : {}),
+              ...(host ? { host } : {}),
+              ms,
+            });
+          }
         }
         if (!info) continue;
         if (status === "done" || status === "failed" || status === "skipped" || status === "running" || status === "stale") {

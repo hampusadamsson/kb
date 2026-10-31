@@ -33,18 +33,21 @@ describe("validate automations", () => {
     expect(m[0]).toContain("nope");
   });
   it("created_in unknown column on another board", () => {
-    const y = "columns: [todo]\nboards:\n  o:\n    columns: [a]\n    automations:\n      - { name: z, when: { created_in: todo }, run: ls }\n";
+    const y =
+      "columns: [todo]\nboards:\n  o:\n    columns: [a]\n    automations:\n      - { name: z, when: { created_in: todo }, run: ls }\n";
     const m = msgs(check(y));
     expect(m[0]).toContain('board "o"');
   });
   it("duplicate, blank name, blank run", () => {
     const m = msgs(
-      check(rules(
-        "{ name: a, when: { moved_to: done }, run: ls }",
-        "{ name: a, when: { moved_to: done }, run: ls }",
-        "{ name: ' ', when: { moved_to: done }, run: ls }",
-        "{ name: b, when: { moved_to: done }, run: ' ' }",
-      )),
+      check(
+        rules(
+          "{ name: a, when: { moved_to: done }, run: ls }",
+          "{ name: a, when: { moved_to: done }, run: ls }",
+          "{ name: ' ', when: { moved_to: done }, run: ls }",
+          "{ name: b, when: { moved_to: done }, run: ' ' }",
+        ),
+      ),
     );
     expect(m.some((x) => x.includes("duplicate") && x.includes('"a"'))).toBe(true);
     expect(m.some((x) => x.includes("empty name"))).toBe(true);
@@ -71,7 +74,10 @@ describe("validate placeholder context", () => {
 
 describe("stale running", () => {
   const tk = (status: string, at: Date) =>
-    w("1.md", `---\ntype: ticket\nid: "001"\nname: T\nstatus: todo\nautomations:\n  r:\n    status: ${status}\n    at: "${stamp(at)}"\n---\n`);
+    w(
+      "1.md",
+      `---\ntype: ticket\nid: "001"\nname: T\nstatus: todo\nautomations:\n  r:\n    status: ${status}\n    at: "${stamp(at)}"\n---\n`,
+    );
   const run = () => {
     w("kanban.yaml", "columns: [todo, done]\n");
     return createKanban({ dir, now: () => NOW }).validate();

@@ -5,6 +5,7 @@ import type { AutomationRunner } from "../core/automation.js";
 import { automationSchema } from "../core/config.js";
 import { renderCommand } from "../core/automation.js";
 import { KanbanError, type Kanban, type Patch } from "../core/index.js";
+import { killRun, pidAlive } from "../killRun.js";
 import type { LiveRuns } from "../liveRuns.js";
 import { duplicateKeys, toDetail, toView } from "./view.js";
 
@@ -45,6 +46,8 @@ export interface ApiContext {
   log?: AutomationLog;
   events?: EventLog;
   live?: LiveRuns;
+  /** config dir, for cross-process kill markers */
+  dir?: string;
 }
 
 type Handler = (kb: Kanban, req: ApiRequest, params: string[], ctx: ApiContext) => ApiResponse | Promise<ApiResponse>;
@@ -190,7 +193,10 @@ const events: Handler = (_kb, req, _p, ctx) => {
     if (!/^\d+$/.test(l) || Number(l) < 1 || Number(l) > 200) throw new KanbanError("invalid", "limit must be an integer 1..200");
     limit = Number(l);
   }
-  const types = q.getAll("type").flatMap((t) => t.split(",")).filter(Boolean);
+  const types = q
+    .getAll("type")
+    .flatMap((t) => t.split(","))
+    .filter(Boolean);
   const r = ctx.events?.query({
     q: q.get("q") || undefined,
     type: types.length ? types : undefined,
@@ -206,11 +212,77 @@ const events: Handler = (_kb, req, _p, ctx) => {
 /** LEGACY: superseded by GET /api/events (automation.finished); kept for back-compat. */
 const automationLog: Handler = (_kb, _req, _p, ctx) => ok({ runs: ctx.log?.recent(20) ?? [] });
 
-const automationRuns: Handler = (_kb, _req, _p, ctx) =>
-  !ctx.runner || !ctx.live ? ok({ runs: [], disabled: true }) : ok({ runs: ctx.live.list() });
+/**
+ * Runs that only exist in ticket frontmatter: started by another process (a `kb mv` in a terminal,
+ * an earlier `kb web`). They have no output tail (stdout lives in the owner's memory) and are killed
+ * through their persisted pid. `external: true` marks them for the UI.
+ */
+function externalRuns(kb: Kanban, own: { rule?: string; ticketId?: string }[]): ExternalRun[] {
+  const seen = new Set(own.map((r) => `${r.rule ?? ""}\u0000${r.ticketId ?? ""}`));
+  return (
+    kb
+      .automationOverview()
+      .live.filter((l) => !seen.has(`${l.rule}\u0000${String(l.ticket.id)}`))
+      // A recorded pid that no longer exists means the run died without the owner cleaning up (crash,
+      // killed by someone else). Leave it to `prune` rather than showing a dead row forever.
+      .filter((l) => l.pid === undefined || pidAlive(l.pid))
+      .map((l) => ({
+        runId: `ticket:${l.board}:${String(l.ticket.id)}:${l.rule}`,
+        kind: "rule" as const,
+        board: l.board,
+        rule: l.rule,
+        ticketId: String(l.ticket.id),
+        ticketName: l.ticket.name,
+        path: l.ticket.path,
+        command: l.command,
+        pid: l.pid ?? -1,
+        startedAt: l.startedAt,
+        timeoutMs: l.timeoutSeconds ? l.timeoutSeconds * 1000 : null,
+        elapsedMs: l.elapsedMs,
+        output: "",
+        external: true,
+        /** board + national key for pairing back to the overview on kill */
+        live: l,
+      }))
+  );
+}
 
-const automationKill: Handler = (_kb, _req, p, ctx) => {
-  if (!ctx.live || !ctx.live.kill(p[0])) return fail(404, "not-found", `no running automation ${p[0]}`);
+interface ExternalRun {
+  runId: string;
+  kind: "rule";
+  board: string;
+  rule: string;
+  ticketId: string;
+  ticketName: string;
+  path: string;
+  command: string;
+  pid: number;
+  startedAt: string;
+  timeoutMs: number | null;
+  elapsedMs: number;
+  output: string;
+  external: true;
+  live: import("../core/automation.js").AutomationLive;
+}
+
+const automationRuns: Handler = (kb, _req, _p, ctx) => {
+  if (!ctx.runner || !ctx.live) return ok({ runs: [], disabled: true });
+  const own = ctx.live.list();
+  const extra = externalRuns(kb, own).map(({ live: _l, ...r }) => r);
+  return ok({ runs: [...own, ...extra] });
+};
+
+const automationKill: Handler = async (kb, _req, p, ctx) => {
+  const id = p[0];
+  if (ctx.live?.kill(id)) return ok({ ok: true }, 202);
+  // Not ours: it may be a run owned by another process, addressed by its synthetic runId.
+  const target = id.startsWith("ticket:") ? externalRuns(kb, []).find((r) => r.runId === id)?.live : undefined;
+  if (!target) return fail(404, "not-found", `no running automation ${id}`);
+  const r = await killRun(
+    { pid: target.pid, pgid: target.pgid, host: target.host, elapsedMs: target.elapsedMs },
+    { root: ctx.dir ?? kb.dir, waitMs: 1000 },
+  );
+  if (!r.ok) return fail(409, "kill-failed", r.reason);
   return ok({ ok: true }, 202);
 };
 
@@ -253,7 +325,12 @@ const automationTest: Handler = async (kb, req, _p, ctx) => {
   if (testRuns >= MAX_TEST_RUNS) return fail(429, "busy", "too many test runs in progress; try again shortly");
   testRuns++;
   try {
-    const result = await ctx.runner.run(command, { cwd: kb.dir, env: { KB_AUTOMATION: "1" }, ...(timeout ? { timeoutMs: timeout * 1000 } : {}), meta: { test: true, board: vars.board } });
+    const result = await ctx.runner.run(command, {
+      cwd: kb.dir,
+      env: { KB_AUTOMATION: "1" },
+      ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
+      meta: { test: true, board: vars.board },
+    });
     return ok({ command, result });
   } finally {
     testRuns--;

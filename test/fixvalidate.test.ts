@@ -49,7 +49,8 @@ describe("validate", () => {
       "error: labels.md: labels is not a list",
       "error: comments.md: comments is not a map",
       "error: broken.md:",
-    ]) expect(r.out).toContain(m);
+    ])
+      expect(r.out).toContain(m);
     expect(r.out).toContain("8 errors, 0 warnings");
   });
   it("board warning only", () => {
@@ -71,7 +72,7 @@ describe("fix", () => {
   it("filename prefix", () => {
     put("042-foo.md", tk("status: todo\n"));
     expect(fix(dir)).toBe("042-foo.md: id (none) -> 042");
-    expect(read("042-foo.md")).toBe(tk("id: \"042\"\nstatus: todo\n"));
+    expect(read("042-foo.md")).toBe(tk('id: "042"\nstatus: todo\n'));
   });
   it("prefix taken / no prefix", () => {
     put("a.md", tk("id: 7\nstatus: todo\n"));

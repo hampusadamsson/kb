@@ -2,21 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
-import {
-  createKanban,
-  isTicketFile,
-  loadConfig,
-  scan,
-  scanGlobs,
-  type KbEvent,
-  type TicketRulesInput,
-} from "../src/core/index.js";
+import { spawnSync } from "node:child_process";
+import { createKanban, isTicketFile, loadConfig, scan, scanGlobs, type KbEvent, type TicketRulesInput } from "../src/core/index.js";
 import { handleApi } from "../src/web/api.js";
 
 const T = { type: "ticket" };
-const is = (rules: TicketRulesInput, rel: string, data?: Record<string, unknown>, top?: string) =>
-  isTicketFile(rules, rel, data, top);
+const is = (rules: TicketRulesInput, rel: string, data?: Record<string, unknown>, top?: string) => isTicketFile(rules, rel, data, top);
 
 describe("isTicketFile", () => {
   it("baseline", () => {
@@ -80,7 +71,10 @@ describe("isTicketFile", () => {
     expect(is({ baseline: false, include: [{ prefix: "T-" }] }, "1.md", T)).toBe(false);
   });
   it("scanGlobs", () => {
-    expect(scanGlobs({ glob: "*.md", tickets: { baseline: true, exclude: [], include: [{ glob: "t/**" }, { prefix: "x" }] } })).toEqual(["*.md", "t/**"]);
+    expect(scanGlobs({ glob: "*.md", tickets: { baseline: true, exclude: [], include: [{ glob: "t/**" }, { prefix: "x" }] } })).toEqual([
+      "*.md",
+      "t/**",
+    ]);
   });
 });
 
@@ -158,7 +152,10 @@ describe("invalid yaml", () => {
     write("_x.md", "---\ntype: ticket\na: [\n---\n");
     write("decl.md", "---\ntype: ticket\na: [\n---\n");
     write("note.md", "---\na: [\n---\n");
-    const d = createKanban({ dir }).load().diagnostics.map((x) => x.path).sort();
+    const d = createKanban({ dir })
+      .load()
+      .diagnostics.map((x) => x.path)
+      .sort();
     expect(d).toEqual(["decl.md", "inc/bad.md"]);
   });
 });
@@ -215,7 +212,9 @@ describe("settings", () => {
   it("invalid glob", () => {
     cfg();
     const kb = createKanban({ dir });
-    expect(() => kb.updateConfig({ ...kb.getConfig().config, tickets: { include: [{ name: "x", glob: "[" }] } })).toThrow(/include\[0\] "x"/);
+    expect(() => kb.updateConfig({ ...kb.getConfig().config, tickets: { include: [{ name: "x", glob: "[" }] } })).toThrow(
+      /include\[0\] "x"/,
+    );
   });
 });
 
@@ -243,11 +242,23 @@ describe("previewTicketRules", () => {
 describe("validate", () => {
   it("warns on baseline false without include; errors on invalid glob in file", () => {
     cfg("tickets:\n  baseline: false\n");
-    expect(createKanban({ dir }).validate().warnings.some((w) => /no tickets can exist/.test(w.message))).toBe(true);
+    expect(
+      createKanban({ dir })
+        .validate()
+        .warnings.some((w) => /no tickets can exist/.test(w.message)),
+    ).toBe(true);
     cfg('tickets:\n  include:\n    - { name: a, glob: "[" }\n');
-    expect(createKanban({ dir }).validate().errors.some((e) => /invalid glob/.test(e.message))).toBe(true);
+    expect(
+      createKanban({ dir })
+        .validate()
+        .errors.some((e) => /invalid glob/.test(e.message)),
+    ).toBe(true);
     cfg("tickets:\n  include:\n    - { name: a, prefix: x }\n    - { name: a, prefix: y }\n");
-    expect(createKanban({ dir }).validate().warnings.some((w) => /duplicate rule name/.test(w.message))).toBe(true);
+    expect(
+      createKanban({ dir })
+        .validate()
+        .warnings.some((w) => /duplicate rule name/.test(w.message)),
+    ).toBe(true);
   });
 });
 
@@ -306,9 +317,8 @@ describe("api", () => {
 
 describe("cli e2e", () => {
   it("kb ls with include rule", () => {
-    execFileSync("npx", ["tsc"], { cwd: process.cwd() });
     cfg('tickets:\n  include:\n    - { glob: "tasks/*.md", props: { kind: task } }\n');
-    write("tasks/a.md", "---\nkind: task\nid: \"7\"\nstatus: doing\n---\n");
+    write("tasks/a.md", '---\nkind: task\nid: "7"\nstatus: doing\n---\n');
     write("tasks/b.md", "---\nkind: other\n---\n");
     const r = spawnSync("node", [path.resolve("dist/cli/main.js"), "ls", "--format", "text"], { cwd: dir, encoding: "utf8" });
     expect(r.stdout).toContain("a");

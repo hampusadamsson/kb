@@ -17,8 +17,7 @@ const forbidden: [string, RegExp][] = [
 ];
 
 describe("architecture: src/core is UI-agnostic", () => {
-  const files = fs.readdirSync(coreDir, { recursive: true, encoding: "utf8" })
-    .filter((f) => f.endsWith(".ts"));
+  const files = fs.readdirSync(coreDir, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts"));
   it("finds core files", () => expect(files.length).toBeGreaterThan(0));
   for (const f of files) {
     it(`${f} has no UI dependencies`, () => {

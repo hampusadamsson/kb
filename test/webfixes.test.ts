@@ -173,7 +173,7 @@ describe("headers", () => {
     expect(r.headers.get("x-frame-options")).toBe("DENY");
     const csp = r.headers.get("content-security-policy")!;
     for (const d of ["frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'"]) expect(csp).toContain(d);
-    expect((await r.text())).toContain('rel="icon"');
+    expect(await r.text()).toContain('rel="icon"');
     expect((await fetch(srv.url + "/api/board")).headers.get("x-content-type-options")).toBe("nosniff");
   });
 });

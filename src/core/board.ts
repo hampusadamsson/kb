@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Document, isSeq, Scalar, YAMLMap } from "yaml";
 import {
@@ -10,7 +11,7 @@ import {
   type AutomationOverview,
   AUTOMATION_RUN_LIMIT,
   entryRuns,
-  STALE_RUNNING_MS,
+  isStaleRun,
   totalRuns,
   type AutomationEvent,
   type AutomationRecord,
@@ -41,6 +42,7 @@ import {
   type KbEventSource,
 } from "./events.js";
 import { addComment, commentKey, idScalar, keyOf, readFile, render, updateFile } from "./frontmatter.js";
+import { consumeKilled } from "../killMarker.js";
 import {
   duplicates,
   findById,
@@ -176,16 +178,27 @@ export interface KanbanOptions {
   events?: EventSink;
   /** who triggers the operations (default "unknown") */
   source?: KbEventSource;
+  /**
+   * Liveness probe for pids recorded in `automations` frontmatter. Core stays process-agnostic:
+   * the CLI/web pass one so a long-running (or hung) run is not mistaken for a dead one.
+   */
+  isAlive?: (pid: number) => boolean;
 }
 
 // ---- helpers ----
 
 export function hasChanges(p: Patch): boolean {
   return !!(
-    p.name !== undefined || p.status !== undefined || p.board !== undefined ||
-    p.addLabels?.length || p.removeLabels?.length ||
-    (p.setProps && Object.keys(p.setProps).length) || p.unsetProps?.length ||
-    p.body !== undefined || p.comment !== undefined || p.resetAutomations === true
+    p.name !== undefined ||
+    p.status !== undefined ||
+    p.board !== undefined ||
+    p.addLabels?.length ||
+    p.removeLabels?.length ||
+    (p.setProps && Object.keys(p.setProps).length) ||
+    p.unsetProps?.length ||
+    p.body !== undefined ||
+    p.comment !== undefined ||
+    p.resetAutomations === true
   );
 }
 
@@ -275,10 +288,12 @@ export class Kanban {
   private readonly inflight = new Set<Promise<void>>();
   private readonly sink?: EventSink;
   private readonly source: KbEventSource;
+  private readonly isAlive?: (pid: number) => boolean;
 
   constructor(opts: KanbanOptions) {
     this.sink = opts.events;
     this.source = opts.source ?? "unknown";
+    this.isAlive = opts.isAlive;
     this.dir = opts.dir;
     this.now = opts.now ?? (() => new Date());
     this.runner = opts.runner;
@@ -287,7 +302,12 @@ export class Kanban {
   }
 
   /** Emit an audit event. Never throws. */
-  private emit(type: KbEvent["type"], summary: string, data: Record<string, unknown>, ref: Partial<Pick<KbEvent, "board" | "ticketId" | "ticketName" | "path">> = {}): void {
+  private emit(
+    type: KbEvent["type"],
+    summary: string,
+    data: Record<string, unknown>,
+    ref: Partial<Pick<KbEvent, "board" | "ticketId" | "ticketName" | "path">> = {},
+  ): void {
     if (!this.sink) return;
     try {
       const d = this.now();
@@ -348,7 +368,12 @@ export class Kanban {
         if (!matchRule({ ...rule, enabled: true }, event, ticket)) continue;
         if (off || rule.enabled === false) {
           const reason = rule.enabled === false ? "rule-disabled" : "automations-off";
-          this.emit("automation.skipped", `automation "${rule.name}" skipped on #${String(ticket.id)} (${reason})`, { rule: rule.name, reason, event }, ref);
+          this.emit(
+            "automation.skipped",
+            `automation "${rule.name}" skipped on #${String(ticket.id)} (${reason})`,
+            { rule: rule.name, reason, event },
+            ref,
+          );
           continue;
         }
         // Loop guard (default on). KB_AUTOMATION=1 already stops CLI loops from scripts; this mainly
@@ -358,7 +383,12 @@ export class Kanban {
           if (runs >= AUTOMATION_RUN_LIMIT) {
             const reason = `guardrail: ${AUTOMATION_RUN_LIMIT} automation runs on this ticket`;
             this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "skipped", at: commentKey(this.now(), true), reason });
-            this.emit("automation.skipped", `automation "${rule.name}" skipped on #${String(ticket.id)} (guardrail: ${runs} runs)`, { rule: rule.name, reason: "guardrail", runs, limit: AUTOMATION_RUN_LIMIT, event }, ref);
+            this.emit(
+              "automation.skipped",
+              `automation "${rule.name}" skipped on #${String(ticket.id)} (guardrail: ${runs} runs)`,
+              { rule: rule.name, reason: "guardrail", runs, limit: AUTOMATION_RUN_LIMIT, event },
+              ref,
+            );
             continue;
           }
         }
@@ -392,7 +422,10 @@ export class Kanban {
           };
           if (r.result.error) data.error = r.result.error;
           if (r.result.error === KILLED_BY_USER) data.killed = true;
-          if (r.result.timedOut) (data.timedOut = true, (data.timeoutSeconds = rule.timeout));
+          if (r.result.timedOut) {
+            data.timedOut = true;
+            data.timeoutSeconds = rule.timeout;
+          }
           this.emit("automation.finished", `automation "${rule.name}" ${r.status} on #${String(ticket.id)}`, data, ref);
           try {
             this.onAutomation?.(r);
@@ -407,6 +440,7 @@ export class Kanban {
           finish(rec(rule.run, { exitCode: null, stdout: "", stderr: "", error: (e as Error).message }));
           continue;
         }
+        let pid: number | undefined;
         const p: Promise<void> = (async () => {
           let result: RunResult;
           try {
@@ -415,9 +449,24 @@ export class Kanban {
               env: { KB_AUTOMATION: "1" },
               ...(rule.timeout ? { timeoutMs: rule.timeout * 1000 } : {}),
               meta: { board: ticket.board, rule: rule.name, ticketId: String(ticket.id), ticketName: ticket.name, path: rel },
+              // Record the pid so `kb automations kill` can reach this run from another process.
+              onSpawn: (s) => {
+                pid = s.pid;
+                this.writeAutomationStatus(rel, ticket.id, rule.name, {
+                  status: "running",
+                  at: startedAt,
+                  pid: s.pid,
+                  pgid: s.pgid,
+                  host: os.hostname(),
+                });
+              },
             });
           } catch (e) {
             result = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
+          }
+          // Killed from another process (kb automations kill): record it like the web Kill button.
+          if (result.exitCode === null && result.error && result.error !== KILLED_BY_USER && pid && consumeKilled(this.dir, pid)) {
+            result = { ...result, error: KILLED_BY_USER };
           }
           finish(rec(command, result));
         })()
@@ -521,12 +570,26 @@ export class Kanban {
     if (opts.board !== undefined && !all.includes(opts.board)) {
       throw new KanbanError("not-found", `unknown board "${opts.board}" (boards: ${all.join(", ")})`);
     }
-    return buildAutomationOverview(config, tickets, opts.board !== undefined ? [opts.board] : all, this.now().getTime());
+    return buildAutomationOverview(config, tickets, opts.board !== undefined ? [opts.board] : all, this.now().getTime(), {
+      isAlive: this.isAlive,
+      localHost: os.hostname(),
+    });
   }
 
-  /** Find a ticket by id (exact, or numeric match). */
-  get(idArg: string): Ticket {
-    return findById(this.load().tickets, idArg);
+  /**
+   * Find a ticket by id (exact, or numeric match).
+   * `board` limits the search; omit it (or pass "all") to search every board.
+   */
+  get(idArg: string, opts: { board?: string } = {}): Ticket {
+    const { config, tickets } = this.load();
+    const board = opts.board === "all" ? undefined : opts.board;
+    if (board !== undefined && board !== config.name) {
+      const known = orderedBoards(tickets, config);
+      if (!known.includes(board)) {
+        throw new KanbanError("not-found", `unknown board "${board}" (boards: ${known.join(", ")})`);
+      }
+    }
+    return findById(tickets, idArg, board);
   }
 
   /** Absolute file path of a ticket. */
@@ -649,7 +712,12 @@ export class Kanban {
     if (this.sink) this.emitUpdate(config, t, patch, oldBody, body, extra, unset);
     if (this.sink && patch.resetAutomations) {
       const tid = String(t.id ?? "?");
-      this.emit("ticket.automations-reset", `#${tid} automation history reset`, { hadHistory: hadAutos }, { board: t.board, ticketId: tid, ticketName: t.name, path: t.path });
+      this.emit(
+        "ticket.automations-reset",
+        `#${tid} automation history reset`,
+        { hadHistory: hadAutos },
+        { board: t.board, ticketId: tid, ticketName: t.name, path: t.path },
+      );
     }
     if (patch.status !== undefined && patch.status !== t.status) {
       this.dispatch(config, t.path, { type: "moved_to", from: t.status, to: patch.status });
@@ -676,7 +744,12 @@ export class Kanban {
       this.emit("ticket.board", `#${tid} board ${t.board} → ${patch.board}`, { from: t.board, to: patch.board }, ref);
     }
     if (patch.status !== undefined && patch.status !== t.status) {
-      this.emit("ticket.moved", `#${tid} moved ${t.status ?? "(none)"} → ${patch.status}`, { from: t.status ?? null, to: patch.status }, ref);
+      this.emit(
+        "ticket.moved",
+        `#${tid} moved ${t.status ?? "(none)"} → ${patch.status}`,
+        { from: t.status ?? null, to: patch.status },
+        ref,
+      );
     }
     if (patch.name !== undefined && patch.name !== t.name) {
       this.emit("ticket.renamed", `#${tid} renamed "${t.name}" → "${patch.name}"`, { from: t.name, to: patch.name }, ref);
@@ -701,7 +774,12 @@ export class Kanban {
       this.emit("ticket.props", `#${tid} props ${bits.join(" ")}`, { set, unset: unsetKeys, old }, ref);
     }
     if (patch.body !== undefined && newBody !== oldBody) {
-      this.emit("ticket.body", `#${tid} body changed (${oldBody.length} → ${newBody.length} chars)`, { changed: true, fromLength: oldBody.length, toLength: newBody.length }, ref);
+      this.emit(
+        "ticket.body",
+        `#${tid} body changed (${oldBody.length} → ${newBody.length} chars)`,
+        { changed: true, fromLength: oldBody.length, toLength: newBody.length },
+        ref,
+      );
     }
     if (patch.comment !== undefined) {
       this.emit("ticket.comment", `#${tid} comment: ${clipText(patch.comment, 80)}`, { text: clipText(patch.comment) }, ref);
@@ -797,7 +875,8 @@ export class Kanban {
         const { status, at } = e as { status?: unknown; at?: unknown };
         if (status !== "running") continue;
         const ms = at instanceof Date ? at.getTime() : typeof at === "string" ? new Date(at).getTime() : NaN;
-        if (Number.isNaN(ms) || nowMs - ms > STALE_RUNNING_MS) {
+        // A live process is not stale, however long it has run; without a usable pid fall back to age.
+        if (isStaleRun(e as Record<string, unknown>, ms, nowMs, { isAlive: this.isAlive, localHost: os.hostname() })) {
           warn(t.path, `automation "${rule}" on board "${t.board}" has been running since ${String(at)} (stale?)`);
         }
       }

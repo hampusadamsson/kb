@@ -25,7 +25,14 @@ const until = async (f: () => boolean, ms = 5000) => {
 };
 
 describe("LiveRuns registry", () => {
-  const info = { runId: "a", kind: "rule" as const, command: "x".repeat(900), pid: 1, startedAt: new Date().toISOString(), timeoutMs: 1000 };
+  const info = {
+    runId: "a",
+    kind: "rule" as const,
+    command: "x".repeat(900),
+    pid: 1,
+    startedAt: new Date().toISOString(),
+    timeoutMs: 1000,
+  };
   it("adds, lists newest first, removes, notifies", () => {
     const reg = new LiveRuns();
     let n = 0;
@@ -58,9 +65,21 @@ describe("runner + registry", () => {
   it("registers meta + output while running and removes at end", async () => {
     const reg = new LiveRuns();
     const r = createShellRunner({ registry: reg });
-    const p = r.run("echo hello; sleep 0.5", { cwd, env: {}, meta: { rule: "R", board: "B", ticketId: "7", ticketName: "T", path: "t.md" } });
+    const p = r.run("echo hello; sleep 0.5", {
+      cwd,
+      env: {},
+      meta: { rule: "R", board: "B", ticketId: "7", ticketName: "T", path: "t.md" },
+    });
     await until(() => reg.list().length === 1 && reg.list()[0].output.includes("hello"));
-    expect(reg.list()[0]).toMatchObject({ kind: "rule", rule: "R", board: "B", ticketId: "7", ticketName: "T", path: "t.md", timeoutMs: null });
+    expect(reg.list()[0]).toMatchObject({
+      kind: "rule",
+      rule: "R",
+      board: "B",
+      ticketId: "7",
+      ticketName: "T",
+      path: "t.md",
+      timeoutMs: null,
+    });
     expect(reg.list()[0].pid).toBeGreaterThan(0);
     await p;
     expect(reg.list()).toEqual([]);
@@ -115,10 +134,18 @@ describe("runner + registry", () => {
 describe("killed run in the core", () => {
   it("records failed / exit null / killed by user and event data.killed", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-live-"));
-    fs.writeFileSync(path.join(dir, "kanban.yaml"), "columns: [todo, done]\nautomations:\n  - name: slow\n    when: { moved_to: done }\n    run: sleep 30\n");
+    fs.writeFileSync(
+      path.join(dir, "kanban.yaml"),
+      "columns: [todo, done]\nautomations:\n  - name: slow\n    when: { moved_to: done }\n    run: sleep 30\n",
+    );
     const reg = new LiveRuns();
     const evs: KbEvent[] = [];
-    const kb = createKanban({ dir, runner: createShellRunner({ registry: reg }), events: { emit: (e) => void evs.push(e) }, source: "web" });
+    const kb = createKanban({
+      dir,
+      runner: createShellRunner({ registry: reg }),
+      events: { emit: (e) => void evs.push(e) },
+      source: "web",
+    });
     const t = kb.add({ name: "T" });
     kb.update(String(t.id), { status: "done" });
     await until(() => reg.list().length === 1);

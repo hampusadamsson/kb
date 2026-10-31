@@ -43,7 +43,14 @@ describe("web api", () => {
     expect(r.json.columns.other).toEqual(["backlog", "active"]);
     const todo = r.json.boards[0].columns[0].tickets;
     expect(todo.map((t: any) => t.id)).toEqual([1, 2]);
-    expect(todo[0]).toMatchObject({ name: "Alpha", labels: ["bug"], props: { priority: "high" }, hasId: true, duplicate: false, readOnly: false });
+    expect(todo[0]).toMatchObject({
+      name: "Alpha",
+      labels: ["bug"],
+      props: { priority: "high" },
+      hasId: true,
+      duplicate: false,
+      readOnly: false,
+    });
     expect(todo[0].raw).toBeUndefined();
     expect(typeof todo[0].mtime).toBe("number");
 
@@ -75,7 +82,11 @@ describe("web api", () => {
 
   it("patches tickets", async () => {
     const r = await call("PATCH", "/api/tickets/1", {
-      status: "doing", addLabels: ["new"], removeLabels: ["bug"], setProps: { priority: "low" }, body: "changed",
+      status: "doing",
+      addLabels: ["new"],
+      removeLabels: ["bug"],
+      setProps: { priority: "low" },
+      body: "changed",
     });
     expect(r.status).toBe(200);
     const d = (await call("GET", "/api/tickets/1")).json;
@@ -189,10 +200,12 @@ describe("static files", () => {
     }
     // raw (non-normalised) request path
     const status = await new Promise<number>((resolve, reject) => {
-      http.get({ host: srv.host, port: srv.port, path: "/../../package.json" }, (res) => {
-        res.resume();
-        resolve(res.statusCode ?? 0);
-      }).on("error", reject);
+      http
+        .get({ host: srv.host, port: srv.port, path: "/../../package.json" }, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        })
+        .on("error", reject);
     });
     expect([400, 404]).toContain(status);
   });
@@ -294,9 +307,22 @@ describe("web frontend assets", () => {
   });
   it("serves modules and css with correct content types", async () => {
     const types: Record<string, string> = {
-      "/app.js": "text/javascript", "/api.js": "text/javascript", "/logic.js": "text/javascript",
-      "/board.js": "text/javascript", "/dialog.js": "text/javascript", "/dom.js": "text/javascript",
-      "/filters.js": "text/javascript", "/settings.js": "text/javascript", "/settings-tabs.js": "text/javascript", "/ticket-rules.js": "text/javascript", "/ticket-rules-logic.js": "text/javascript", "/logs.js": "text/javascript", "/logs-logic.js": "text/javascript", "/live.js": "text/javascript", "/live-logic.js": "text/javascript", "/style.css": "text/css",
+      "/app.js": "text/javascript",
+      "/api.js": "text/javascript",
+      "/logic.js": "text/javascript",
+      "/board.js": "text/javascript",
+      "/dialog.js": "text/javascript",
+      "/dom.js": "text/javascript",
+      "/filters.js": "text/javascript",
+      "/settings.js": "text/javascript",
+      "/settings-tabs.js": "text/javascript",
+      "/ticket-rules.js": "text/javascript",
+      "/ticket-rules-logic.js": "text/javascript",
+      "/logs.js": "text/javascript",
+      "/logs-logic.js": "text/javascript",
+      "/live.js": "text/javascript",
+      "/live-logic.js": "text/javascript",
+      "/style.css": "text/css",
     };
     for (const [p, t] of Object.entries(types)) {
       const r = await fetch(srv.url + p);
@@ -309,7 +335,7 @@ describe("web frontend assets", () => {
 describe("mobile guards", () => {
   const pub = (f: string) => fs.readFileSync(path.join(import.meta.dirname, "../src/web/public", f), "utf8");
   it("index.html has a responsive viewport meta with viewport-fit=cover", () => {
-    expect(pub("index.html")).toMatch(/<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
+    expect(pub("index.html")).toMatch(/<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"\s*\/?>/);
   });
   it("style.css keeps the mobile breakpoints and touch rules", () => {
     const css = pub("style.css");

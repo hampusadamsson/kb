@@ -230,8 +230,7 @@ const normAuto = (rules: Automation[] | undefined): Automation[] =>
     const { timeout: _t, ...rest } = r;
     return rest;
   });
-const sameAuto = (a: Automation[] | undefined, b: Automation[] | undefined) =>
-  JSON.stringify(a ?? []) === JSON.stringify(normAuto(b));
+const sameAuto = (a: Automation[] | undefined, b: Automation[] | undefined) => JSON.stringify(a ?? []) === JSON.stringify(normAuto(b));
 
 function setAutomations(doc: Document, at: string[], rules: Automation[] | undefined): void {
   if (!rules || rules.length === 0) doc.deleteIn(at);
@@ -269,8 +268,14 @@ function setColumns(doc: Document, at: string[], cols: string[]): void {
 /** Apply the new config to the parsed kanban.yaml (comments and unrelated keys are kept). */
 function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRen: Record<string, string>): boolean {
   let changed = false;
-  if (next.name !== old.name) (doc.set("name", next.name), (changed = true));
-  if (next.glob !== old.glob) (doc.set("glob", next.glob), (changed = true));
+  if (next.name !== old.name) {
+    doc.set("name", next.name);
+    changed = true;
+  }
+  if (next.glob !== old.glob) {
+    doc.set("glob", next.glob);
+    changed = true;
+  }
   const oldT = ticketRules(old);
   const newT = next.tickets ?? oldT;
   if (JSON.stringify(oldT) !== JSON.stringify(newT)) {
@@ -278,7 +283,10 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
     else doc.set("tickets", doc.createNode(compactRules(newT)));
     changed = true;
   }
-  if (!same(next.columns, old.columns)) (setColumns(doc, ["columns"], next.columns), (changed = true));
+  if (!same(next.columns, old.columns)) {
+    setColumns(doc, ["columns"], next.columns);
+    changed = true;
+  }
 
   // renamed board overrides keep their position in the file
   const keyAfter = (k: string) => (boardRen[k] !== undefined && boardRen[k] in next.boards ? boardRen[k] : k);
@@ -286,7 +294,10 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
   if (isMap(boardsNode)) {
     for (const pair of boardsNode.items) {
       const k = String((pair.key as Scalar).value ?? pair.key);
-      if (keyAfter(k) !== k) (pair.key = new Scalar(keyAfter(k)), (changed = true));
+      if (keyAfter(k) !== k) {
+        pair.key = new Scalar(keyAfter(k));
+        changed = true;
+      }
     }
   }
   const before: Record<string, string[]> = {};
@@ -311,9 +322,15 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
     }
   }
   for (const name of Object.keys(before)) {
-    if (!(name in next.boards)) (doc.deleteIn(["boards", name]), (changed = true));
+    if (!(name in next.boards)) {
+      doc.deleteIn(["boards", name]);
+      changed = true;
+    }
   }
-  if (Object.keys(next.boards).length === 0 && doc.has("boards")) (doc.delete("boards"), (changed = true));
+  if (Object.keys(next.boards).length === 0 && doc.has("boards")) {
+    doc.delete("boards");
+    changed = true;
+  }
   return changed;
 }
 
@@ -384,7 +401,10 @@ export function updateConfigFile(dir: string, raw: unknown, opts: UpdateConfigOp
     for (const kind of ["include", "exclude"] as const) {
       next.tickets[kind].forEach((r, i) => {
         if (r.glob !== undefined && !isValidGlob(r.glob)) {
-          throw new KanbanError("invalid", `invalid tickets: tickets.${kind}[${i}]${r.name ? ` "${r.name}"` : ""}: invalid glob "${r.glob}"`);
+          throw new KanbanError(
+            "invalid",
+            `invalid tickets: tickets.${kind}[${i}]${r.name ? ` "${r.name}"` : ""}: invalid glob "${r.glob}"`,
+          );
         }
       });
     }

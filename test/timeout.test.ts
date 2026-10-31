@@ -42,7 +42,7 @@ describe("schema", () => {
 });
 
 describe("yaml round trip", () => {
-  const base = "# top\ncolumns: [todo, done]\nautomations:\n  - name: r # keep\n    when: { moved_to: done }\n    run: \"true\"\n";
+  const base = '# top\ncolumns: [todo, done]\nautomations:\n  - name: r # keep\n    when: { moved_to: done }\n    run: "true"\n';
   it("writes only > 0, removes 0, keeps comments", () => {
     fs.writeFileSync(path.join(dir, "kanban.yaml"), base);
     const k = createKanban({ dir });
@@ -101,12 +101,17 @@ describe("runner", () => {
 
 describe("dispatch", () => {
   it("passes the rule's timeout and emits timedOut data", async () => {
-    fs.writeFileSync(path.join(dir, "kanban.yaml"), "columns: [todo, done]\nautomations:\n  - name: a\n    when: { moved_to: done }\n    run: x\n    timeout: 7\n  - name: b\n    when: { moved_to: done }\n    run: y\n");
+    fs.writeFileSync(
+      path.join(dir, "kanban.yaml"),
+      "columns: [todo, done]\nautomations:\n  - name: a\n    when: { moved_to: done }\n    run: x\n    timeout: 7\n  - name: b\n    when: { moved_to: done }\n    run: y\n",
+    );
     const seen: Record<string, unknown> = {};
     const runner: AutomationRunner = {
       run: async (cmd, o) => {
         seen[cmd] = o.timeoutMs;
-        return cmd === "'x'" || cmd === "x" ? { exitCode: null, stdout: "", stderr: "", error: "timed out after 7s", timedOut: true } : { exitCode: 0, stdout: "", stderr: "" };
+        return cmd === "'x'" || cmd === "x"
+          ? { exitCode: null, stdout: "", stderr: "", error: "timed out after 7s", timedOut: true }
+          : { exitCode: 0, stdout: "", stderr: "" };
       },
     };
     const evs: KbEvent[] = [];
@@ -116,14 +121,24 @@ describe("dispatch", () => {
     await k.settled();
     expect(seen).toEqual({ x: 7000, y: undefined });
     const fin = evs.filter((e) => e.type === "automation.finished");
-    expect(fin.find((e) => (e.data as any).rule === "a")!.data).toMatchObject({ status: "failed", exit: null, error: "timed out after 7s", timedOut: true, timeoutSeconds: 7 });
+    expect(fin.find((e) => (e.data as any).rule === "a")!.data).toMatchObject({
+      status: "failed",
+      exit: null,
+      error: "timed out after 7s",
+      timedOut: true,
+      timeoutSeconds: 7,
+    });
     expect((fin.find((e) => (e.data as any).rule === "b")!.data as any).timedOut).toBeUndefined();
   });
 });
 
 describe("test endpoint", () => {
   const call = async (body: unknown) => {
-    const r = await fetch(srv!.url + "/api/automation/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const r = await fetch(srv!.url + "/api/automation/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
     return { status: r.status, json: (await r.json()) as any };
   };
   beforeEach(() => fs.writeFileSync(path.join(dir, "kanban.yaml"), "columns: [todo, done]\n"));
@@ -161,7 +176,16 @@ describe("ui helpers", () => {
     expect(L.checkRules("b", [{ ...r, timeout: "5" }], cols)).toBe("");
   });
   it("form round trip omits 0/empty, keeps value", () => {
-    const f = L.configToForm({ name: "m", glob: "*.md", columns: ["done"], automations: [{ name: "a", when: { moved_to: "done" }, run: "x", timeout: 30 }, { name: "b", when: { moved_to: "done" }, run: "x" }], boards: {} });
+    const f = L.configToForm({
+      name: "m",
+      glob: "*.md",
+      columns: ["done"],
+      automations: [
+        { name: "a", when: { moved_to: "done" }, run: "x", timeout: 30 },
+        { name: "b", when: { moved_to: "done" }, run: "x" },
+      ],
+      boards: {},
+    });
     expect(f.automations.map((r: any) => r.timeout)).toEqual(["30", ""]);
     const p = L.formToPayload(f) as any;
     expect(p.config.automations.map((r: any) => r.timeout)).toEqual([30, undefined]);

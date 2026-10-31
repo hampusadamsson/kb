@@ -116,6 +116,11 @@ export function buildCreate(v, comment) {
 /** Comments object → [key, text] sorted oldest first. */
 export const sortedComments = (c) => Object.entries(c ?? {}).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 
+/** Comments object → display rows oldest first: {key, text, abs, rel} (abs/rel are "" when the key is not a time). */
+export function commentEntries(c, now = new Date()) {
+  return sortedComments(c).map(([key, text]) => ({ key, text: String(text ?? ""), abs: absoluteTime(key), rel: relativeTime(key, now) }));
+}
+
 /** Status columns to offer for a board; includes the current value if it isn't a column. */
 export function statusOptions(columns, current) {
   const opts = [...columns];
@@ -240,7 +245,6 @@ function renamedColumns(rows) {
   return out;
 }
 
-
 /** Form state → PUT /api/config payload parts: { config, renames }. */
 export function formToPayload(f) {
   const config = { name: f.name.trim(), glob: f.glob.trim(), columns: colValues(f.columns), boards: {} };
@@ -283,7 +287,10 @@ export function checkForm(f) {
   }
   const tErr = checkTickets(f.tickets ?? ticketsToForm(undefined));
   if (tErr) return tErr;
-  const targets = [{ board: p.name, rules: f.automations ?? [], cols: f.columns }, ...f.boards.map((b) => ({ board: b.name.trim(), rules: b.automations ?? [], cols: b.columns }))];
+  const targets = [
+    { board: p.name, rules: f.automations ?? [], cols: f.columns },
+    ...f.boards.map((b) => ({ board: b.name.trim(), rules: b.automations ?? [], cols: b.columns })),
+  ];
   for (const t of targets) {
     const err = checkRules(t.board, t.rules, t.cols);
     if (err) return `${AUTOMATIONS_PREFIX}${err}`;
@@ -394,7 +401,9 @@ const dayStart = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 /** Absolute local time "YYYY-MM-DD HH:MM:SS" (or "" if unparsable). */
 export function absoluteTime(iso) {
   const d = parseLocal(iso);
-  return d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` : "";
+  return d
+    ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    : "";
 }
 
 /** "just now" | "N min ago" | "N h ago" | "yesterday" | "YYYY-MM-DD"; "" when unparsable. */
@@ -423,10 +432,18 @@ export function summarizeAutomations(src) {
   const pairs = Array.isArray(src) ? src.map((e) => [e?.name, e]) : Object.entries(src && typeof src === "object" ? src : {});
   const items = pairs.map(([name, e]) => {
     const x = e && typeof e === "object" ? e : {};
-    return { name: String(name), state: automationState(e), status: typeof x.status === "string" ? x.status : "", at: x.at ?? null, exit: x.exit ?? null, error: x.error ? String(x.error) : "" };
+    return {
+      name: String(name),
+      state: automationState(e),
+      status: typeof x.status === "string" ? x.status : "",
+      at: x.at ?? null,
+      exit: x.exit ?? null,
+      error: x.error ? String(x.error) : "",
+    };
   });
   const time = (i) => +(parseLocal(i.at) ?? -Infinity);
-  const sortBy = (order) => [...items].sort((a, b) => order[a.state] - order[b.state] || time(b) - time(a) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const sortBy = (order) =>
+    [...items].sort((a, b) => order[a.state] - order[b.state] || time(b) - time(a) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const counts = { failed: 0, running: 0, skipped: 0, done: 0, unknown: 0 };
   for (const i of items) counts[i.state]++;
   const worstFirst = sortBy(WORST_ORDER);
@@ -474,7 +491,12 @@ export function dirtyTabs(f, loaded) {
   const a = formToPayload(f).config;
   const b = formToPayload(configToForm(loaded)).config;
   const autos = (c) => JSON.stringify([c.automations ?? [], Object.entries(c.boards).map(([n, x]) => [n, x.automations ?? []])]);
-  const strip = (c) => JSON.stringify({ ...c, automations: undefined, boards: Object.fromEntries(Object.entries(c.boards).map(([n, x]) => [n, { columns: x.columns }])) });
+  const strip = (c) =>
+    JSON.stringify({
+      ...c,
+      automations: undefined,
+      boards: Object.fromEntries(Object.entries(c.boards).map(([n, x]) => [n, { columns: x.columns }])),
+    });
   return { config: strip(a) !== strip(b), automations: autos(a) !== autos(b) };
 }
 

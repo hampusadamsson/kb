@@ -52,7 +52,12 @@ describe("cli automation e2e", () => {
   ])("skips with %s", (_n, _a, env) => {
     setup("echo x > out.txt");
     const id = idOf(kb(["add", "hello"]).out);
-    const args = _a.includes("--no-automation") && _a[0] === "mv" ? ["mv", id, "done", "--no-automation"] : _a[0] === "--no-automation" ? ["--no-automation", "mv", id, "done"] : ["mv", id, "done"];
+    const args =
+      _a.includes("--no-automation") && _a[0] === "mv"
+        ? ["mv", id, "done", "--no-automation"]
+        : _a[0] === "--no-automation"
+          ? ["--no-automation", "mv", id, "done"]
+          : ["mv", id, "done"];
     expect(kb(args, env).code).toBe(0);
     expect(fs.existsSync(path.join(dir, "out.txt"))).toBe(false);
     expect(fmOf(ticketFile()).automations).toBeUndefined();

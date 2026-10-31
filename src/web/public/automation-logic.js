@@ -23,8 +23,24 @@ export const VARIABLES = [
 
 /** Starter rules for the empty state. */
 export const STARTERS = [
-  { id: "moved", title: "Run a command when a ticket moves to a column", detail: "Appends the ticket id to a log file", event: "moved_to", pick: "last", name: "on-move", run: "echo {{ id }} moved to {{ to }} >> automation.log" },
-  { id: "created", title: "Run a command when a ticket is created in a column", detail: "Appends the new ticket's title to a log file", event: "created_in", pick: "first", name: "on-create", run: "echo created {{ id }} {{ name }} >> automation.log" },
+  {
+    id: "moved",
+    title: "Run a command when a ticket moves to a column",
+    detail: "Appends the ticket id to a log file",
+    event: "moved_to",
+    pick: "last",
+    name: "on-move",
+    run: "echo {{ id }} moved to {{ to }} >> automation.log",
+  },
+  {
+    id: "created",
+    title: "Run a command when a ticket is created in a column",
+    detail: "Appends the new ticket's title to a log file",
+    event: "created_in",
+    pick: "first",
+    name: "on-create",
+    run: "echo created {{ id }} {{ name }} >> automation.log",
+  },
 ];
 
 /** First free name `base`, `base-2`, … among `rules`. */
@@ -45,7 +61,13 @@ export function starterRule(s, cols, rules, newRule) {
 
 /** Copy of a rule with a unique "<name>-copy" name; new row (orig null). */
 export function duplicateRule(r, rules) {
-  return { ...r, orig: null, name: uniqueName(rules, `${r.name.trim() || "rule"}-copy`), labels: [...r.labels], props: r.props.map((p) => ({ ...p })) };
+  return {
+    ...r,
+    orig: null,
+    name: uniqueName(rules, `${r.name.trim() || "rule"}-copy`),
+    labels: [...r.labels],
+    props: r.props.map((p) => ({ ...p })),
+  };
 }
 
 /** Text with `snippet` inserted over [start, end); returns { value, start, end } (new selection; KEY placeholders stay selected). */
@@ -104,7 +126,9 @@ export const ruleTitle = (r) => r.name.trim() || "Untitled automation";
 
 /** Case-insensitive filter over name, script and column. */
 export function filterRules(rules, q) {
-  const s = String(q ?? "").trim().toLowerCase();
+  const s = String(q ?? "")
+    .trim()
+    .toLowerCase();
   if (!s) return rules;
   return rules.filter((r) => [r.name, r.run, r.column, ...r.labels].some((x) => String(x).toLowerCase().includes(s)));
 }
@@ -154,7 +178,18 @@ export function sampleFor(r, column = r.column, board = "") {
 
 /** The script with placeholders replaced by shell-quoted sample values (mirrors the server). "" if nothing to show. */
 export function previewScript(run, sample, event) {
-  const vars = { id: "000", name: "Sample ticket", body: "Sample body", board: sample.board || "", status: sample.to, from: event === "moved_to" ? "todo" : "", to: sample.to, path: "sample.md", labels: sample.labels.join(","), event };
+  const vars = {
+    id: "000",
+    name: "Sample ticket",
+    body: "Sample body",
+    board: sample.board || "",
+    status: sample.to,
+    from: event === "moved_to" ? "todo" : "",
+    to: sample.to,
+    path: "sample.md",
+    labels: sample.labels.join(","),
+    event,
+  };
   return run.replace(/\{\{\s*([^{}\s]+)\s*\}\}/g, (m, name) => {
     if (name.startsWith("props.")) return shellQuote(sample.props[name.slice(6)] ?? "");
     return Object.hasOwn(vars, name) ? shellQuote(vars[name]) : m;

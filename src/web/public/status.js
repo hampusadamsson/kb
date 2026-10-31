@@ -8,7 +8,7 @@ export function dot(state, label) {
 }
 
 /** Fill `wrap` (a <div> inside the <dl>) with the Automations dt/dd; empty when no entries. */
-export function fillAutomations(wrap, automations, now = new Date(), onReset = null) {
+export function fillAutomations(wrap, automations, now = new Date()) {
   clear(wrap);
   const sum = summarizeAutomations(automations);
   if (!sum.total) return;
@@ -26,12 +26,12 @@ export function fillAutomations(wrap, automations, now = new Date(), onReset = n
       i.error ? h("div", { class: "auto-error", text: i.error }) : null,
     );
   });
-  wrap.append(h("dt", { text: "Automations" }), h("dd", {}, h("ul", { class: "auto-rows", "aria-label": automationsText(sum) }, rows), onReset ? h("button", { type: "button", class: "btn small", text: "Reset automation history", onclick: onReset }) : null));
+  wrap.append(h("dt", { text: "Automations" }), h("dd", {}, h("ul", { class: "auto-rows", "aria-label": automationsText(sum) }, rows)));
 }
 
-export function automationsWrap(automations, onReset = null) {
+export function automationsWrap(automations) {
   const wrap = h("div", { class: "auto-wrap" });
-  fillAutomations(wrap, automations, new Date(), onReset);
+  fillAutomations(wrap, automations, new Date());
   return wrap;
 }
 

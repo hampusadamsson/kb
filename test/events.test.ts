@@ -77,7 +77,15 @@ describe("core events", () => {
     const k = mk();
     const { id } = k.add({ name: "A", labels: ["l"], properties: { p: "1" }, body: "same" });
     evs = [];
-    k.update(id, { name: "A", status: "todo", addLabels: ["l"], removeLabels: ["zzz"], setProps: { p: "1" }, unsetProps: ["q"], body: "same" });
+    k.update(id, {
+      name: "A",
+      status: "todo",
+      addLabels: ["l"],
+      removeLabels: ["zzz"],
+      setProps: { p: "1" },
+      unsetProps: ["q"],
+      body: "same",
+    });
     expect(evs).toEqual([]);
   });
 
@@ -121,7 +129,7 @@ describe("core events", () => {
     expect(d.automations.added).toEqual([{ board: "default", name: "r" }]);
   });
 
-  it("config.updated reports a default-board column rename keyed \"\" (as the web UI sends it)", () => {
+  it('config.updated reports a default-board column rename keyed "" (as the web UI sends it)', () => {
     const k = mk();
     k.add({ name: "A", status: "doing" });
     evs = [];

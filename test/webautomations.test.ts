@@ -8,7 +8,10 @@ import * as L from "../src/web/public/logic.js";
 
 const a = A as any;
 const l = L as any;
-const cols = [{ orig: "todo", value: "todo" }, { orig: "done", value: "done" }];
+const cols = [
+  { orig: "todo", value: "todo" },
+  { orig: "done", value: "done" },
+];
 const rule = (o: object = {}) => ({ ...l.newRule(cols), name: "r", run: "echo {{ id }}", ...o });
 
 describe("insertAtCursor", () => {
@@ -29,7 +32,15 @@ describe("insertAtCursor", () => {
 
 describe("summary", () => {
   it("describes event, conditions and script", () => {
-    const r = rule({ column: "review", labels: ["bug"], props: [{ key: "owner", value: "me" }, { key: "p", value: "!low" }, { key: " ", value: "x" }] });
+    const r = rule({
+      column: "review",
+      labels: ["bug"],
+      props: [
+        { key: "owner", value: "me" },
+        { key: "p", value: "!low" },
+        { key: " ", value: "x" },
+      ],
+    });
     expect(a.ruleSummary(r)).toBe("When a ticket moves to review · labels: bug · owner = me, p not low · runs echo {{ id }}");
     expect(a.ruleSummary(rule({ event: "created_in", column: "todo", run: " " }))).toBe("When a ticket is created in todo · no script yet");
   });
@@ -53,7 +64,11 @@ describe("names and templates", () => {
   it("starterRule picks first/last column", () => {
     const [moved, created] = a.STARTERS;
     expect(a.starterRule(moved, cols, [], l.newRule)).toMatchObject({ event: "moved_to", column: "done", name: "on-move" });
-    expect(a.starterRule(created, cols, [rule({ name: "on-create" })], l.newRule)).toMatchObject({ event: "created_in", column: "todo", name: "on-create-2" });
+    expect(a.starterRule(created, cols, [rule({ name: "on-create" })], l.newRule)).toMatchObject({
+      event: "created_in",
+      column: "todo",
+      name: "on-create-2",
+    });
   });
   it("starter scripts have no placeholder problems", () => {
     for (const s of a.STARTERS) expect(a.previewScript(s.run, { to: "x", labels: [], props: {}, board: "b" }, s.event)).not.toMatch(/\{\{/);
@@ -87,8 +102,18 @@ describe("last runs and status text", () => {
   const now = new Date("2026-01-01T12:10:00");
   it("picks the newest run per rule; running wins", () => {
     const m = a.lastRuns([
-      { autos: [{ name: "r", status: "done", at: "2026-01-01T12:00:00" }, { name: "q", status: "failed", at: "2026-01-01T12:00:00", exit: 1 }] },
-      { autos: [{ name: "r", status: "failed", at: "2026-01-01T12:05:00", exit: 2 }, { name: "q", status: "running", at: "2026-01-01T11:00:00" }] },
+      {
+        autos: [
+          { name: "r", status: "done", at: "2026-01-01T12:00:00" },
+          { name: "q", status: "failed", at: "2026-01-01T12:00:00", exit: 1 },
+        ],
+      },
+      {
+        autos: [
+          { name: "r", status: "failed", at: "2026-01-01T12:05:00", exit: 2 },
+          { name: "q", status: "running", at: "2026-01-01T11:00:00" },
+        ],
+      },
       { autos: [{ name: "r", status: "done", at: "2026-01-01T11:00:00" }] },
     ]);
     expect(m.get("r").state).toBe("failed");
@@ -101,8 +126,20 @@ describe("last runs and status text", () => {
 
 describe("preview", () => {
   it("renders shell-quoted sample values and props", () => {
-    const s = a.sampleFor(rule({ labels: ["bug"], props: [{ key: "o", value: "me" }, { key: "n", value: "!x" }] }), "done", "main");
-    expect(a.previewScript("echo {{ id }} {{ to }} {{ labels }} {{ props.o }} {{ props.n }} {{ nope }}", s, "moved_to")).toBe("echo '000' 'done' 'bug' 'me' '' {{ nope }}");
+    const s = a.sampleFor(
+      rule({
+        labels: ["bug"],
+        props: [
+          { key: "o", value: "me" },
+          { key: "n", value: "!x" },
+        ],
+      }),
+      "done",
+      "main",
+    );
+    expect(a.previewScript("echo {{ id }} {{ to }} {{ labels }} {{ props.o }} {{ props.n }} {{ nope }}", s, "moved_to")).toBe(
+      "echo '000' 'done' 'bug' 'me' '' {{ nope }}",
+    );
   });
   it("durationText", () => {
     expect(a.durationText(80)).toBe("80 ms");

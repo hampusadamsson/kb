@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import * as L from "../src/web/public/logs-logic.js";
 
-const ev = (id: string, type = "ticket.moved", data: any = {}) => ({ id, ts: "2026-01-01T10:00:00.000+00:00", type, source: "cli", summary: "s", data });
+const ev = (id: string, type = "ticket.moved", data: any = {}) => ({
+  id,
+  ts: "2026-01-01T10:00:00.000+00:00",
+  type,
+  source: "cli",
+  summary: "s",
+  data,
+});
 
 describe("logs-logic", () => {
   it("maps filters to type params", () => {

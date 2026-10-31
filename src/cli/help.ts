@@ -122,7 +122,10 @@ function mkFormat(style: () => Style) {
     }
 
     if (cmd.registeredArguments.length) {
-      section("ARGUMENTS", table(cmd.registeredArguments.map((a) => [a.required ? `<${a.name()}>` : `[${a.name()}]`, a.description] as [string, string])));
+      section(
+        "ARGUMENTS",
+        table(cmd.registeredArguments.map((a) => [a.required ? `<${a.name()}>` : `[${a.name()}]`, a.description] as [string, string])),
+      );
     }
 
     const opts = help.visibleOptions(cmd);
@@ -138,10 +141,17 @@ function mkFormat(style: () => Style) {
 
     sections.filter((s) => !s.intro).forEach(renderSection);
     const ex = (cmd as HelpCommand).examples;
-    if (ex?.length) section("EXAMPLES", ex.map((e) => `  $ ${e}`));
-    section("LEARN MORE", (cmd as HelpCommand).learnMore ?? [
-      cmd.parent ? "  Use 'kb help' to list all commands." : "  Use 'kb <command> --help' for more information about a command.",
-    ]);
+    if (ex?.length)
+      section(
+        "EXAMPLES",
+        ex.map((e) => `  $ ${e}`),
+      );
+    section(
+      "LEARN MORE",
+      (cmd as HelpCommand).learnMore ?? [
+        cmd.parent ? "  Use 'kb help' to list all commands." : "  Use 'kb <command> --help' for more information about a command.",
+      ],
+    );
     return blocks.map((b) => b.join("\n")).join("\n\n") + "\n";
   };
 }

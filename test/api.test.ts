@@ -52,7 +52,9 @@ describe("Kanban core API", () => {
     expect(l.warnings).toMatchObject([{ kind: "unsorted", path: "002-other.md" }]);
     expect(kb.boards()).toEqual(["default", "other"]);
 
-    expect(kb.update("1", { name: "Renamed", addLabels: ["ui"], removeLabels: ["bug"], setProps: { x: 1 }, unsetProps: ["priority"] }).id).toBe("001");
+    expect(
+      kb.update("1", { name: "Renamed", addLabels: ["ui"], removeLabels: ["bug"], setProps: { x: 1 }, unsetProps: ["priority"] }).id,
+    ).toBe("001");
     let t = kb.get("1");
     expect(t).toMatchObject({ name: "Renamed", labels: ["ui"], props: { x: 1 } });
     expect(t.body).toContain("details");
@@ -76,7 +78,7 @@ describe("Kanban core API", () => {
     expect(code(() => kb.add({ name: "B", properties: { id: 3 } }))).toBe("invalid");
     expect(code(() => kb.update("1", {}))).toBe("invalid");
     expect(code(() => kb.list({ board: "zzz" }))).toBe("not-found");
-    fs.writeFileSync(path.join(dir, "dup.md"), "---\ntype: ticket\nid: \"001\"\nname: D\nstatus: todo\n---\n");
+    fs.writeFileSync(path.join(dir, "dup.md"), '---\ntype: ticket\nid: "001"\nname: D\nstatus: todo\n---\n');
     expect(code(() => kb.get("001"))).toBe("ambiguous");
   });
 
@@ -85,7 +87,10 @@ describe("Kanban core API", () => {
     kb.add({ name: "Two", labels: ["ui"], properties: { priority: "low" } });
     kb.add({ name: "Three", board: "other", status: "active" });
     const names = (f: Parameters<Kanban["list"]>[0]) =>
-      kb.list(f).boards.flatMap((b) => [...b.columns.flatMap((c) => c.tickets), ...b.unsorted]).map((t) => t.name);
+      kb
+        .list(f)
+        .boards.flatMap((b) => [...b.columns.flatMap((c) => c.tickets), ...b.unsorted])
+        .map((t) => t.name);
     expect(names({ labels: ["bug"] })).toEqual(["One"]);
     expect(names({ labels: ["!bug"] })).toEqual(["Two", "Three"]);
     expect(names({ props: ["priority:high"] })).toEqual(["One"]);
@@ -105,7 +110,12 @@ describe("Kanban core API", () => {
       expect.arrayContaining(["missing id", 'status "nope" is not a column of board "default"']),
     );
     expect(v.errors.length).toBe(4);
-    expect(kb.load().warnings.map((w) => w.kind).sort()).toEqual(["duplicate-id", "missing-id", "unsorted"]);
+    expect(
+      kb
+        .load()
+        .warnings.map((w) => w.kind)
+        .sort(),
+    ).toEqual(["duplicate-id", "missing-id", "unsorted"]);
 
     const dry = kb.fix({ dryRun: true });
     expect(dry).toHaveLength(2);

@@ -123,7 +123,7 @@ describe("event log", () => {
     const log = createEventLog(dir);
     const a = ev();
     log.emit(a);
-    fs.appendFileSync(path.join(dir, ".kb", "events.log"), "{not json\n\n[1,2]\n{\"x\":1}\n");
+    fs.appendFileSync(path.join(dir, ".kb", "events.log"), '{not json\n\n[1,2]\n{"x":1}\n');
     const b = ev();
     log.emit(b);
     expect(log.query().events.map((e) => e.id)).toEqual([b.id, a.id]);

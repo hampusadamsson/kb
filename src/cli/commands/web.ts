@@ -21,9 +21,11 @@ export interface WebIO {
 export function defaultOpener(url: string): void {
   try {
     const [cmd, args]: [string, string[]] =
-      process.platform === "darwin" ? ["open", [url]]
-      : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
-      : ["xdg-open", [url]];
+      process.platform === "darwin"
+        ? ["open", [url]]
+        : process.platform === "win32"
+          ? ["cmd", ["/c", "start", "", url]]
+          : ["xdg-open", [url]];
     const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
     child.on("error", () => {});
     child.unref();
@@ -50,7 +52,11 @@ export function automationExposureWarning(host: string, automationsEnabled: bool
 
 export const SHUTDOWN_DEADLINE_MS = 5000;
 
-export async function runWeb(cwd: string, opts: WebOpts, io: WebIO): Promise<RunningServer & { shutdown(deadlineMs?: number): Promise<void> }> {
+export async function runWeb(
+  cwd: string,
+  opts: WebOpts,
+  io: WebIO,
+): Promise<RunningServer & { shutdown(deadlineMs?: number): Promise<void> }> {
   const host = opts.host ?? "127.0.0.1";
   const explicit = opts.port !== undefined;
   const port = explicit ? parsePort(opts.port as string | number) : 4747;

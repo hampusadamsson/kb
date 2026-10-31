@@ -23,7 +23,7 @@ describe("root help", () => {
     expect(g).toBeGreaterThan(0);
     expect(t).toBeGreaterThan(g);
     expect(m).toBeGreaterThan(t);
-    const steps = ["kb init", "kb add \"Fix login\" -l bug", "kb ls --format text", "kb mv 1 doing", "kb show 1", "kb web"];
+    const steps = ["kb init", 'kb add "Fix login" -l bug', "kb ls --format text", "kb mv 1 doing", "kb show 1", "kb web"];
     const pos = steps.map((s, i) => out.indexOf(`  ${i + 1}. ${s}`));
     expect(pos.every((p) => p > g && p < t)).toBe(true);
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
@@ -79,7 +79,7 @@ describe("help content", () => {
     for (const c of all) {
       const block = helpOf(c).split("\nEXAMPLES\n")[1]?.split("\n\n")[0] ?? "";
       for (const l of block.split("\n").filter(Boolean)) {
-        const m = l.match(/^ {2}\$ (?:\w+=(?:"[^"]*"|\S+) )?kb (\S+)/) ?? (/^ {2}\$ .*\| kb (\S+)/.exec(l));
+        const m = l.match(/^ {2}\$ (?:\w+=(?:"[^"]*"|\S+) )?kb (\S+)/) ?? /^ {2}\$ .*\| kb (\S+)/.exec(l);
         expect(m, l).toBeTruthy();
         expect(names.has(m![1]!), l).toBe(true);
       }

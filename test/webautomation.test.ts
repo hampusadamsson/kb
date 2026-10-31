@@ -77,7 +77,8 @@ describe("test-run concurrency", () => {
   it("rejects a 3rd concurrent test run with 429 busy", async () => {
     await start();
     const slow = () => call("POST", { run: "sleep 1" });
-    const a = slow(), b = slow();
+    const a = slow(),
+      b = slow();
     await new Promise((r) => setTimeout(r, 300));
     const c = await call("POST", { run: "echo hi" });
     expect(c.status).toBe(429);

@@ -6,6 +6,7 @@ import { createKanban } from "../core/index.js";
 import type { AutomationLog } from "../automationLog.js";
 import { createEventLog, type EventLog } from "../eventLog.js";
 import type { AutomationRunner } from "../core/automation.js";
+import { pidAlive } from "../killRun.js";
 import type { LiveRuns } from "../liveRuns.js";
 import { errorResponse, handleApi } from "./api.js";
 import { EventHub } from "./watch.js";
@@ -56,7 +57,11 @@ const CSP =
   "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 class HttpError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -190,7 +195,12 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     if (writes && (!sameOrigin(req) || !secFetchOk(req))) {
       return sendJson(res, 403, { error: "cross-origin request refused", code: "forbidden" });
     }
-    if (writes && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+    if (
+      writes &&
+      !String(req.headers["content-type"] ?? "")
+        .toLowerCase()
+        .startsWith("application/json")
+    ) {
       return sendJson(res, 415, { error: "content-type must be application/json", code: "unsupported" });
     }
     if (url.pathname === "/api/stream") {
@@ -204,9 +214,14 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       runner: opts.runner,
       events,
       source: "web",
+      isAlive: pidAlive,
       onAutomation: opts.log ? (rec) => opts.log!.append(rec) : undefined,
     }); // fresh view per request
-    const r = await handleApi(kb, { method, path: url.pathname, query: url.searchParams, body }, { runner: opts.runner, log: opts.log, events, live: opts.live });
+    const r = await handleApi(
+      kb,
+      { method, path: url.pathname, query: url.searchParams, body },
+      { runner: opts.runner, log: opts.log, events, live: opts.live, dir },
+    );
     if (opts.runner) {
       const p = kb.settled().catch(() => {});
       pending.add(p);
@@ -235,9 +250,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       const busy = (e as NodeJS.ErrnoException).code === "EADDRINUSE";
       if (!busy || opts.strictPort || wanted === 0 || i >= PORT_TRIES) {
         hub.close();
-        throw busy
-          ? new Error(`port ${port} is in use${opts.strictPort || wanted === 0 ? "" : ` (tried ${wanted}-${port})`}`)
-          : e;
+        throw busy ? new Error(`port ${port} is in use${opts.strictPort || wanted === 0 ? "" : ` (tried ${wanted}-${port})`}`) : e;
       }
       port++;
     }

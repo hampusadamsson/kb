@@ -5,12 +5,13 @@ import { automationsWrap, fillAutomations } from "./status.js";
 import {
   buildCreate,
   buildPatch,
+  commentEntries,
   display,
   hasPatch,
   rowsToProps,
   snapshot,
-  sortedComments,
   statusOptions,
+  summarizeAutomations,
 } from "./logic.js";
 
 const dlg = () => document.getElementById("ticket-dialog");
@@ -78,13 +79,23 @@ class Session {
     this.name = h("input", { type: "text", id: "t-name", required: true, disabled: ro });
     this.status = h("select", { id: "t-status", disabled: ro });
     this.board = h("input", { type: "text", id: "t-board", list: "t-boards", disabled: ro });
-    const boards = h("datalist", { id: "t-boards" }, this.ctx.boardNames.map((b) => h("option", { value: b })));
+    const boards = h(
+      "datalist",
+      { id: "t-boards" },
+      this.ctx.boardNames.map((b) => h("option", { value: b })),
+    );
     this.labels = chipInput({ label: "Add label", placeholder: "add label ⏎", readOnly: ro });
     this.propList = h("div", { class: "prop-rows" });
     this.body = h("textarea", { id: "t-body", rows: 8, disabled: ro });
     this.board.addEventListener("change", () => this.refreshStatusOptions(this.status.value));
 
-    const addProp = h("button", { type: "button", class: "btn small", text: "+ property", disabled: ro, onclick: () => this.addRow("", "", true) });
+    const addProp = h("button", {
+      type: "button",
+      class: "btn small",
+      text: "+ property",
+      disabled: ro,
+      onclick: () => this.addRow("", "", true),
+    });
 
     const field = (label, forId, el) => h("div", { class: "field" }, h("label", { for: forId, text: label }), el);
 
@@ -112,35 +123,49 @@ class Session {
           h("dd", { class: "mono", text: this.detail.hasId ? display(this.detail.id) : "(none)" }),
           h("dt", { text: "Type" }),
           h("dd", { class: "mono", text: display(this.detail.data?.type ?? "ticket") }),
-          (this.autoWrap = automationsWrap(this.detail.automations, ro ? null : () => this.resetAutomations())),
+          (this.autoWrap = automationsWrap(this.detail.automations)),
         );
 
-    this.commentList = h("ul", { class: "comments" });
-    this.commentInput = h("input", { type: "text", id: "t-comment", placeholder: create ? "optional initial comment" : "add a comment", disabled: ro });
+    this.commentList = h("ul", { class: "comments", "aria-label": "Comments", "aria-live": "polite" });
+    this.commentCount = h("span", { class: "muted" });
+    this.commentInput = h(create ? "input" : "textarea", {
+      type: create ? "text" : undefined,
+      id: "t-comment",
+      rows: create ? undefined : 2,
+      placeholder: create ? "optional initial comment" : "Add a comment…",
+      "aria-label": create ? "Comment" : "Add a comment",
+      disabled: ro,
+    });
+    this.commentBtn = create
+      ? null
+      : h("button", { type: "button", class: "btn primary", text: "Add comment", disabled: true, onclick: () => this.addComment() });
+    this.commentInput.addEventListener("input", () => this.commentDirty());
+    // Enter adds (Shift+Enter = newline); the create form is never submitted from here.
+    this.commentInput.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      if (create) return e.preventDefault();
+      if (e.shiftKey) return;
+      e.preventDefault();
+      this.addComment();
+    });
     const commentRow = create
       ? field("Comment", "t-comment", this.commentInput)
       : h(
           "div",
           { class: "field" },
-          h("label", { for: "t-comment", text: "Comments" }),
+          h("label", { for: "t-comment" }, "Comments", " ", this.commentCount),
           this.commentList,
-          ro
-            ? null
-            : h(
-                "div",
-                { class: "row" },
-                this.commentInput,
-                h("button", { type: "button", class: "btn", text: "Add comment", onclick: () => this.addComment() }),
-              ),
+          ro ? null : h("div", { class: "composer" }, this.commentInput, h("div", { class: "composer-side" }, this.commentBtn)),
         );
-    this.commentInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !create) {
-        e.preventDefault();
-        this.addComment();
-      } else if (e.key === "Enter") e.preventDefault();
-    });
 
     this.saveBtn = h("button", { type: "submit", class: "btn primary", text: create ? "Create" : "Save", hidden: ro });
+    this.resetBtn = h("button", {
+      type: "button",
+      class: "btn danger",
+      text: "Reset automation history",
+      hidden: true,
+      onclick: () => this.resetAutomations(),
+    });
     const form = h(
       "form",
       { method: "dialog", class: "ticket-form", onsubmit: (e) => (e.preventDefault(), this.save()) },
@@ -148,7 +173,14 @@ class Session {
         "div",
         { class: "dlg-head" },
         h("h2", { text: create ? "New ticket" : ro ? "Ticket (read-only)" : "Edit ticket" }),
-        h("button", { type: "button", class: "btn small only-narrow", "aria-label": "Close", title: "Close", text: "×", onclick: closeDialog }),
+        h("button", {
+          type: "button",
+          class: "btn small only-narrow",
+          "aria-label": "Close",
+          title: "Close",
+          text: "×",
+          onclick: closeDialog,
+        }),
       ),
       this.banner,
       head,
@@ -164,6 +196,8 @@ class Session {
       h(
         "div",
         { class: "actions" },
+        this.resetBtn,
+        h("span", { class: "spacer" }),
         h("button", { type: "button", class: "btn", text: ro ? "Close" : "Cancel", onclick: closeDialog }),
         this.saveBtn,
       ),
@@ -172,7 +206,7 @@ class Session {
   }
 
   focus() {
-    (this.mode === "create" ? this.name : this.readOnly ? this.root.querySelector(".actions button") : this.name).focus();
+    (this.mode === "create" ? this.name : this.readOnly ? this.root.querySelector(".actions button:not([hidden])") : this.name).focus();
   }
 
   dispose() {
@@ -230,16 +264,45 @@ class Session {
     this.rows = [];
     for (const [k, v] of Object.entries(s.props)) this.addRow(k, v);
     this.renderComments();
+    this.commentDirty();
+    this.syncReset();
+  }
+
+  /** Show "Reset automation history" only when the ticket has run history and can be written. */
+  syncReset() {
+    const total = summarizeAutomations(this.detail?.automations).total;
+    this.resetBtn.hidden = !(this.mode === "edit" && !this.readOnly && total > 0);
   }
 
   renderComments() {
     if (this.mode === "create") return;
     clear(this.commentList);
-    const entries = sortedComments(this.detail.comments);
-    if (!entries.length) this.commentList.append(h("li", { class: "muted", text: "No comments yet." }));
-    for (const [k, t] of entries) {
-      this.commentList.append(h("li", {}, h("span", { class: "ckey mono", text: k }), h("span", { class: "ctext", text: t })));
+    const entries = commentEntries(this.detail.comments);
+    this.commentCount.textContent = entries.length ? `(${entries.length})` : "";
+    if (!entries.length) {
+      this.commentList.append(h("li", { class: "comment empty", text: "No comments yet." }));
+      return;
     }
+    for (const c of entries) {
+      this.commentList.append(
+        h(
+          "li",
+          { class: "comment" },
+          h("div", { class: "cmeta" }, h("time", { datetime: c.key, title: c.abs, text: c.rel })),
+          h("div", { class: "ctext", text: c.text }),
+        ),
+      );
+    }
+    this.commentList.scrollTop = this.commentList.scrollHeight;
+  }
+
+  /** Enable the add button only with text; grow the textarea to fit. */
+  commentDirty() {
+    if (this.commentBtn) this.commentBtn.disabled = !this.commentInput.value.trim() || this.busy;
+    const el = this.commentInput;
+    if (el.tagName !== "TEXTAREA") return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }
 
   current() {
@@ -326,7 +389,8 @@ class Session {
       // runner status update: refresh just the section and the stored mtime, keep the form and any edits
       this.detail = { ...this.detail, mtime: d.mtime, automations: d.automations, data: d.data };
       this.mtime = d.mtime;
-      fillAutomations(this.autoWrap, d.automations, new Date(), this.readOnly ? null : () => this.resetAutomations());
+      fillAutomations(this.autoWrap, d.automations, new Date());
+      this.syncReset();
       return;
     }
     if (this.dirty()) return this.showBanner("This ticket changed on disk");
@@ -342,7 +406,7 @@ class Session {
     if (this.gone || !this.autoWrap) return false;
     const strip = (x) => JSON.stringify([snapshot(x), x.comments ?? {}, x.hasId, x.readOnly]);
     const rest = (x) => {
-      const { automations, ...r } = x.data ?? {};
+      const { automations: _automations, ...r } = x.data ?? {};
       return JSON.stringify(r);
     };
     return strip(d) === strip(this.detail) && rest(d) === rest(this.detail) && d.path === this.detail.path;
@@ -358,7 +422,8 @@ class Session {
       const d = await api.get(String(this.detail.id));
       this.detail = { ...this.detail, mtime: d.mtime, automations: d.automations, data: d.data };
       this.mtime = d.mtime;
-      fillAutomations(this.autoWrap, d.automations, new Date(), () => this.resetAutomations());
+      fillAutomations(this.autoWrap, d.automations, new Date());
+      this.syncReset();
       this.ctx.onSaved?.(true);
     } catch (e) {
       this.handleError(e);
@@ -372,17 +437,21 @@ class Session {
     if (!text || this.busy) return;
     this.showError("");
     this.busy = true;
+    this.commentDirty();
     try {
       const r = await api.comment(String(this.detail.id), text, this.mtime);
       this.commentInput.value = "";
+      this.commentDirty();
       this.mtime = r.mtime;
       this.detail = { ...this.detail, mtime: r.mtime, comments: { ...this.detail.comments, [r.key]: text } };
       this.renderComments();
+      this.commentInput.focus();
       this.ctx.onSaved?.(true);
     } catch (e) {
       this.handleError(e);
     } finally {
       this.busy = false;
+      this.commentDirty();
     }
   }
 

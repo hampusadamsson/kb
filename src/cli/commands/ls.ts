@@ -12,10 +12,7 @@ export interface Result {
 }
 
 function line(t: Ticket, s: Style): string {
-  const tags = [
-    ...t.labels.map((l) => `[${l}]`),
-    ...Object.entries(t.props).map(([k, v]) => `${k}:${fmtValue(v)}`),
-  ];
+  const tags = [...t.labels.map((l) => `[${l}]`), ...Object.entries(t.props).map(([k, v]) => `${k}:${fmtValue(v)}`)];
   const head = `  #${fmtId(t.id)} ${t.name}`;
   return tags.length ? `${head}   ${s.dim(tags.join(" "))}` : head;
 }

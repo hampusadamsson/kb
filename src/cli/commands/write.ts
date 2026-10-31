@@ -42,8 +42,7 @@ function props(list: string[] | undefined): Record<string, unknown> | undefined 
   return Object.fromEntries(list.map(parseProperty));
 }
 
-const body = (opt: string | undefined, io: Io): string | undefined =>
-  opt === "-" ? io.readStdin() : opt;
+const body = (opt: string | undefined, io: Io): string | undefined => (opt === "-" ? io.readStdin() : opt);
 
 const warnAll = (ws: Warning[], io: Io): void => ws.forEach((w) => io.warn(fmtWarning(w)));
 

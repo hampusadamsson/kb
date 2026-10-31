@@ -1,5 +1,5 @@
 // App: state, routing (URL hash), rendering, live updates.
-import { api, ApiError } from "./api.js";
+import { api } from "./api.js";
 import { renderBoards } from "./board.js";
 import { closeDialog, isOpen as ticketOpen, openCreate, openDetail, refreshOpen } from "./dialog.js";
 import { clear, debounce, h, toast } from "./dom.js";

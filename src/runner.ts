@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { KILLED_BY_USER, type AutomationRunner, type RunResult } from "./core/automation.js";
 import { isoWithOffset } from "./core/events.js";
 import type { LiveHandle, LiveRuns } from "./liveRuns.js";
+import { killTree } from "./procTree.js";
 
 const CAP = 64 * 1024;
 const MARKER = "\n[output truncated]";
@@ -34,10 +35,15 @@ class Capture {
 
 const GRACE_MS = 100;
 
+/**
+ * Kill a run and its whole tree. The group alone is not enough: a script that spawns an agent
+ * harness or daemon detached puts it in another group, where it outlives the shell and keeps going.
+ */
 function killGroup(child: ChildProcess): void {
-  try {
-    if (child.pid) process.kill(-child.pid, "SIGKILL");
-  } catch {
+  const pid = child.pid;
+  // Fire-and-forget: signals are sent synchronously by killTree before its first await.
+  void killTree(pid ? [pid] : [], { immediate: true, waitMs: 0 });
+  if (!pid) {
     try {
       child.kill("SIGKILL");
     } catch {
@@ -83,6 +89,7 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
             stdio: ["pipe", "pipe", "pipe"],
           });
           live.add(child);
+          if (child.pid) o.onSpawn?.({ pid: child.pid, pgid: child.pid });
           child.stdin.on("error", () => {}); // EPIPE if bash exits early
           child.stdin.end(command);
           child.stdout.on("data", (c: Buffer) => {
@@ -112,23 +119,7 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
               () => {
                 if (done || killedByUser) return !done;
                 killedByUser = true;
-                try {
-                  process.kill(-pid, "SIGTERM");
-                } catch {
-                  try {
-                    child.kill("SIGTERM");
-                  } catch {
-                    // already gone
-                  }
-                }
-                setTimeout(() => {
-                  try {
-                    process.kill(-pid, 0);
-                    process.kill(-pid, "SIGKILL");
-                  } catch {
-                    // group is gone
-                  }
-                }, TERM_GRACE_MS).unref();
+                void killTree([pid], { graceMs: TERM_GRACE_MS, waitMs: 0 });
                 return true;
               },
             );
@@ -166,21 +157,8 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
           });
           if (timeoutMs !== undefined) {
             timer = setTimeout(() => {
-              try {
-                if (child.pid) process.kill(-child.pid, "SIGTERM");
-              } catch {
-                // already gone
-              }
-              setTimeout(() => {
-                try {
-                  if (child.pid) {
-                    process.kill(-child.pid, 0);
-                    process.kill(-child.pid, "SIGKILL");
-                  }
-                } catch {
-                  // group is gone
-                }
-              }, TERM_GRACE_MS).unref();
+              // SIGTERM the tree, then SIGKILL whatever survives (killTree escalates on its own).
+              void killTree([child.pid ?? 0].filter(Boolean), { graceMs: TERM_GRACE_MS, waitMs: 0 });
               finish({ exitCode: null, error: `timed out after ${timeoutMs / 1000}s`, timedOut: true });
             }, timeoutMs);
           }

@@ -38,10 +38,30 @@ kb web                          # open the board in your browser
 ## Development
 
 ```sh
-npm run build && npm test
+npm install          # also installs the git hooks (husky)
+npm run dev          # tsc --watch
+npm run verify       # format:check + lint + typecheck + build + test
 ```
 
-`npm run build` runs `tsc` and copies `src/web/public` to `dist/web/public`. The e2e web tests need a built `dist`, so run the build before the tests.
+| Script               | What it does                                                        |
+| `npm run verify`     | Full gate. Run this before pushing; CI runs exactly the same steps |
+| `npm test`           | Vitest suite (builds `dist` once via global setup)                   |
+| `npm run test:watch` | Vitest in watch mode                                                |
+| `npm run coverage`   | Vitest with a v8 coverage summary                                   |
+| `npm run typecheck`  | `tsc --noEmit` over `src` **and** `test`                            |
+| `npm run lint`       | oxlint (`--fix` variant: `npm run lint:fix`)                        |
+| `npm run format`     | Prettier write (`format:check` to verify only)                      |
+
+`npm run build` runs `tsc` and copies `src/web/public` to `dist/web/public`. The e2e tests spawn the compiled CLI and the web server; a `vitest` global setup builds `dist` once before the suite, so `npm test` works on a clean checkout. Tests can be run in parallel.
+
+Git hooks (`.husky/`):
+
+- **pre-commit** — `lint-staged`: oxlint `--fix` + Prettier on staged files.
+- **pre-push** — `typecheck` plus the test files related to the pushed changes.
+
+CI (`.github/workflows/ci.yml`) runs the same `verify` steps on Node 22 for every push to `main` and every PR.
+
+Code style: Prettier (140 cols, double quotes, trailing commas) and `.editorconfig`. Lint rules live in `.oxlintrc.json`; correctness and suspicious categories are errors/warnings, so `npm run lint` must be clean.
 
 ## Everyday CLI usage
 

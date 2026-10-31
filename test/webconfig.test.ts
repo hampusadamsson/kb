@@ -6,8 +6,7 @@ import { startServer, type RunningServer } from "../src/web/server.js";
 
 let dir: string;
 let srv: RunningServer;
-const ticket = (id: string, status: string) =>
-  `---\ntype: ticket\nid: "${id}"\nname: T${id}\nstatus: ${status}\n---\nb\n`;
+const ticket = (id: string, status: string) => `---\ntype: ticket\nid: "${id}"\nname: T${id}\nstatus: ${status}\n---\nb\n`;
 const read = (f: string) => fs.readFileSync(path.join(dir, f), "utf8");
 
 beforeEach(async () => {
@@ -100,7 +99,11 @@ describe("web config api", () => {
 
   it("PUT is guarded like other writes (JSON content type, same origin)", async () => {
     const { config } = (await call("GET", "/api/config")).json;
-    const bad = await fetch(srv.url + "/api/config", { method: "PUT", headers: { "content-type": "text/plain" }, body: JSON.stringify({ config }) });
+    const bad = await fetch(srv.url + "/api/config", {
+      method: "PUT",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ config }),
+    });
     expect(bad.status).toBe(415);
     const evil = await fetch(srv.url + "/api/config", {
       method: "PUT",

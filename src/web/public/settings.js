@@ -140,7 +140,14 @@ function tabItems() {
   const bad = formError ? errorTab(formError) : "";
   const n = healthCount();
   return [
-    { id: "config", label: "Config", issues: n, level: issueSummary(validation, boardWarnings).level, dirty: d.config, error: bad === "config" },
+    {
+      id: "config",
+      label: "Config",
+      issues: n,
+      level: issueSummary(validation, boardWarnings).level,
+      dirty: d.config,
+      error: bad === "config",
+    },
     { id: "automations", label: "Automations", dirty: d.automations, error: bad === "automations" },
     { id: "live", label: liveLabel(live.count()), running: live.count() > 0 },
     { id: "logs", label: "Logs" },
@@ -247,8 +254,19 @@ function footer(kind) {
               onclick: showFix,
             })
           : null,
-        formTab ? h("button", { id: "config-revert", type: "button", class: "btn", text: "Revert", disabled: !dirty, onclick: reload }) : null,
-        formTab ? h("button", { id: "config-save", type: "button", class: "btn primary", text: "Save config", disabled: !dirty || busy, onclick: () => save(false) }) : null,
+        formTab
+          ? h("button", { id: "config-revert", type: "button", class: "btn", text: "Revert", disabled: !dirty, onclick: reload })
+          : null,
+        formTab
+          ? h("button", {
+              id: "config-save",
+              type: "button",
+              class: "btn primary",
+              text: "Save config",
+              disabled: !dirty || busy,
+              onclick: () => save(false),
+            })
+          : null,
         h("button", { id: "config-close", type: "button", class: "btn", text: "Close", onclick: requestClose }),
       ),
     ),
@@ -302,13 +320,28 @@ function updateHealth() {
 }
 
 function configPanel() {
-  const sec = h("section", { id: "config-section", class: "config" }, h("h3", { class: "section-title", text: "Board config (kanban.yaml)" }), bannerBox());
+  const sec = h(
+    "section",
+    { id: "config-section", class: "config" },
+    h("h3", { class: "section-title", text: "Board config (kanban.yaml)" }),
+    bannerBox(),
+  );
   sec.append(
     h(
       "div",
       { class: "row2" },
-      h("div", { class: "field" }, h("label", { text: "Default board name" }), input(form.name, (v) => ((form.name = v), onDirty()), "Default board name")),
-      h("div", { class: "field" }, h("label", { text: "Ticket files (glob)" }), input(form.glob, (v) => ((form.glob = v), onDirty()), "Glob")),
+      h(
+        "div",
+        { class: "field" },
+        h("label", { text: "Default board name" }),
+        input(form.name, (v) => ((form.name = v), onDirty()), "Default board name"),
+      ),
+      h(
+        "div",
+        { class: "field" },
+        h("label", { text: "Ticket files (glob)" }),
+        input(form.glob, (v) => ((form.glob = v), onDirty()), "Glob"),
+      ),
     ),
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Columns (in order)" }), columnList(form.columns, onDirty)),
     h("span", { class: "lbl", text: "Per-board column overrides (optional)" }),
@@ -354,8 +387,15 @@ function configPanel() {
 }
 
 function automationsPanel() {
-  const boards = [{ name: () => form.name.trim() || "(unnamed)", rules: form.automations, cols: form.columns, test: () => form.name.trim() }].concat(
-    form.boards.map((b) => ({ name: () => b.name.trim() || "(unnamed)", rules: b.automations, cols: b.columns, test: () => b.name.trim() })),
+  const boards = [
+    { name: () => form.name.trim() || "(unnamed)", rules: form.automations, cols: form.columns, test: () => form.name.trim() },
+  ].concat(
+    form.boards.map((b) => ({
+      name: () => b.name.trim() || "(unnamed)",
+      rules: b.automations,
+      cols: b.columns,
+      test: () => b.name.trim(),
+    })),
   );
   return h("section", { class: "config", id: "automations-section" }, bannerBox(), automationsTab({ boards, onChange: onDirty }));
 }
@@ -371,8 +411,22 @@ function columnList(rows, onChange) {
           "div",
           { class: "col-row" },
           input(r.value, (v) => ((r.value = v), onChange()), `Column ${i + 1}`),
-          h("button", { type: "button", class: "btn small", text: "↑", "aria-label": "Move up", disabled: i === 0, onclick: () => swap(i, -1) }),
-          h("button", { type: "button", class: "btn small", text: "↓", "aria-label": "Move down", disabled: i === rows.length - 1, onclick: () => swap(i, 1) }),
+          h("button", {
+            type: "button",
+            class: "btn small",
+            text: "↑",
+            "aria-label": "Move up",
+            disabled: i === 0,
+            onclick: () => swap(i, -1),
+          }),
+          h("button", {
+            type: "button",
+            class: "btn small",
+            text: "↓",
+            "aria-label": "Move down",
+            disabled: i === rows.length - 1,
+            onclick: () => swap(i, 1),
+          }),
           h("button", { type: "button", class: "btn small danger", text: "×", "aria-label": "Remove column", onclick: () => remove(i) }),
         ),
       );
@@ -406,9 +460,21 @@ function previewBox() {
   return h(
     "div",
     { class: "notice", role: "alertdialog", id: "save-confirm" },
-    scope.length ? h("ul", { class: "tr-scope" }, scope.map((s) => h("li", { text: s }))) : null,
+    scope.length
+      ? h(
+          "ul",
+          { class: "tr-scope" },
+          scope.map((s) => h("li", { text: s })),
+        )
+      : null,
     n ? h("strong", { text: `This will edit ${n} ticket file${n === 1 ? "" : "s"}:` }) : null,
-    n ? h("ul", { class: "mono" }, preview.changes.slice(0, 50).map((c) => h("li", { text: describeTicketChange(c) }))) : null,
+    n
+      ? h(
+          "ul",
+          { class: "mono" },
+          preview.changes.slice(0, 50).map((c) => h("li", { text: describeTicketChange(c) })),
+        )
+      : null,
     n > 50 ? h("p", { class: "muted", text: `… and ${n - 50} more` }) : null,
     h(
       "div",
@@ -470,7 +536,11 @@ async function save(overwrite, confirmed = false) {
 
 function healthSection() {
   const v = validation;
-  const sec = h("section", { id: "health-section", class: "health", tabIndex: -1, "aria-label": "Health" }, h("h3", { class: "section-title", text: "Health" }));
+  const sec = h(
+    "section",
+    { id: "health-section", class: "health", tabIndex: -1, "aria-label": "Health" },
+    h("h3", { class: "section-title", text: "Health" }),
+  );
   const none = !v.errors.length && !v.warnings.length && !boardWarnings.length;
   if (none) sec.append(h("p", { class: "muted", text: "No issues found." }));
   else sec.append(...[section("Errors", v.errors, "error"), section("Warnings", v.warnings, "warn"), boardSection()].filter(Boolean));
@@ -520,11 +590,15 @@ function boardSection() {
 function fixBox() {
   const box = h("div", { class: "fix-box" });
   if (!fixPlan) return box;
-  if (fixPlan.error) return box.append(h("p", { class: "form-error", role: "alert", text: fixPlan.error })), box;
-  if (!fixPlan.changes.length) return box.append(h("p", { class: "muted", text: "Nothing to fix." })), box;
+  if (fixPlan.error) return (box.append(h("p", { class: "form-error", role: "alert", text: fixPlan.error })), box);
+  if (!fixPlan.changes.length) return (box.append(h("p", { class: "muted", text: "Nothing to fix." })), box);
   box.append(
     h("p", { text: `${fixPlan.changes.length} change(s) planned:` }),
-    h("ul", { class: "mono" }, fixPlan.changes.map((c) => h("li", { text: describeChange(c) }))),
+    h(
+      "ul",
+      { class: "mono" },
+      fixPlan.changes.map((c) => h("li", { text: describeChange(c) })),
+    ),
     h(
       "div",
       { class: "actions" },

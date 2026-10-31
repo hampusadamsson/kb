@@ -15,7 +15,7 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-"));
   fs.writeFileSync(
     path.join(dir, "kanban.yaml"),
-    "columns: [todo, doing, done]\nglob: \"**/*.md\"\nboards:\n  other:\n    columns: [backlog, active]\n",
+    'columns: [todo, doing, done]\nglob: "**/*.md"\nboards:\n  other:\n    columns: [backlog, active]\n',
   );
   warns = [];
   stdin = "";
@@ -29,9 +29,7 @@ const fm = (f: string) => parse(splitFrontmatter(read(f)).yaml!) as Record<strin
 describe("add", () => {
   it("defaults", () => {
     expect(add(dir, "Fix login bug", {}, io)).toBe("#001 001-fix-login-bug.md");
-    expect(read("001-fix-login-bug.md")).toBe(
-      "---\ntype: ticket\nid: \"001\"\nname: Fix login bug\nstatus: todo\n---\n",
-    );
+    expect(read("001-fix-login-bug.md")).toBe('---\ntype: ticket\nid: "001"\nname: Fix login bug\nstatus: todo\n---\n');
     expect(add(dir, undefined, { name: "Two" }, io)).toBe("#002 002-two.md");
   });
   it("name errors", () => {
@@ -41,10 +39,21 @@ describe("add", () => {
   });
   it("all flags", () => {
     stdin = "from stdin";
-    add(dir, "Full", {
-      status: "doing", label: ["bug", "ui"], property: ["n:3", "ok:true", "t:hello"],
-      body: "-", comment: "first", file: "sub/dir/x.md", id: "ABC-1", board: "other",
-    }, io);
+    add(
+      dir,
+      "Full",
+      {
+        status: "doing",
+        label: ["bug", "ui"],
+        property: ["n:3", "ok:true", "t:hello"],
+        body: "-",
+        comment: "first",
+        file: "sub/dir/x.md",
+        id: "ABC-1",
+        board: "other",
+      },
+      io,
+    );
     const d = fm("sub/dir/x.md");
     expect(Object.keys(d)).toEqual(["type", "id", "name", "status", "board", "labels", "n", "ok", "t", "comments"]);
     expect(d).toMatchObject({ id: "ABC-1", board: "other", labels: ["bug", "ui"], n: 3, ok: true, t: "hello" });
@@ -74,11 +83,12 @@ describe("add", () => {
   it("long comment is not folded; CRLF preserved on mv", () => {
     const long = "word ".repeat(40).trim();
     add(dir, "A", { comment: long }, io);
-    expect(read("001-a.md").split("\n").some((l) => l.includes(long))).toBe(true);
-    fs.writeFileSync(
-      path.join(dir, "c.md"),
-      "---\r\ntype: ticket\r\nid: 9\r\nname: C\r\nstatus: todo\r\n---\r\nbody\r\nmore\r\n",
-    );
+    expect(
+      read("001-a.md")
+        .split("\n")
+        .some((l) => l.includes(long)),
+    ).toBe(true);
+    fs.writeFileSync(path.join(dir, "c.md"), "---\r\ntype: ticket\r\nid: 9\r\nname: C\r\nstatus: todo\r\n---\r\nbody\r\nmore\r\n");
     mv(dir, "9", "done", io);
     const t = read("c.md");
     const fmText = t.slice(0, t.indexOf("---\r\nbody") + 5);
@@ -172,7 +182,8 @@ describe("comment & edit", () => {
       expect(read("002-b.md")).toContain("edited");
     } finally {
       if (old.v !== undefined) process.env.VISUAL = old.v;
-      if (old.e !== undefined) process.env.EDITOR = old.e; else delete process.env.EDITOR;
+      if (old.e !== undefined) process.env.EDITOR = old.e;
+      else delete process.env.EDITOR;
     }
   });
 });

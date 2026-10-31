@@ -42,7 +42,13 @@ export function boundedLine(e: KbEvent): string {
   const s = JSON.stringify(e);
   if (s.length <= MAX_LINE_CHARS) return s;
   const clip = (v: string | undefined, n: number) => (v !== undefined && v.length > n ? v.slice(0, n) + "…" : v);
-  const small: KbEvent = { ...e, summary: clip(e.summary, 300) ?? "", ticketName: clip(e.ticketName, 200), path: clip(e.path, 300), data: { truncated: true } };
+  const small: KbEvent = {
+    ...e,
+    summary: clip(e.summary, 300) ?? "",
+    ticketName: clip(e.ticketName, 200),
+    path: clip(e.path, 300),
+    data: { truncated: true },
+  };
   return JSON.stringify(small);
 }
 

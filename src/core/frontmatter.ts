@@ -94,4 +94,3 @@ export function addComment(doc: Document, text: string, now = new Date()): strin
   map.add(doc.createPair(keyNode, new Scalar(text)));
   return key;
 }
-

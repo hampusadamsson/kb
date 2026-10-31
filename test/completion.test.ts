@@ -36,7 +36,9 @@ describe("generated scripts cover the program", () => {
 
 describe("__complete", () => {
   let dir: string;
-  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "kbc-")); });
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "kbc-"));
+  });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
   const tk = (f: string, fm: string) => fs.writeFileSync(path.join(dir, f), `---\ntype: ticket\n${fm}\n---\n`);
 

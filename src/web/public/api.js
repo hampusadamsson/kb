@@ -18,7 +18,7 @@ async function request(method, url, body) {
       body: method === "GET" ? undefined : JSON.stringify(body ?? {}),
       cache: "no-store",
     });
-  } catch (e) {
+  } catch {
     throw new ApiError(0, "network", "Cannot reach the server");
   }
   let data = null;

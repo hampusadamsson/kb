@@ -19,7 +19,7 @@ beforeAll(() => {
   w("plain.md", "no frontmatter\n");
   w("bad-note.md", "---\nfoo: [unclosed\nbar: : :\n---\n");
   w("bad-ticket.md", "---\ntype: ticket\nfoo: [unclosed\n---\n");
-  w("real.md", '---\ntype: ticket\nid: 1\nname: Real\nstatus: todo\n---\n');
+  w("real.md", "---\ntype: ticket\nid: 1\nname: Real\nstatus: todo\n---\n");
 });
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 

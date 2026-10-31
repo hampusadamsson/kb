@@ -48,8 +48,20 @@ const rule = (over: Partial<Automation> = {}): Automation => ({
 });
 const tk = (over: Partial<Ticket> = {}): Ticket =>
   ({
-    path: "1.md", id: "001", name: "T", status: "done", column: "done", board: "default",
-    labels: [], comments: {}, props: {}, body: "", raw: "", data: {}, mtime: 0, ...over,
+    path: "1.md",
+    id: "001",
+    name: "T",
+    status: "done",
+    column: "done",
+    board: "default",
+    labels: [],
+    comments: {},
+    props: {},
+    body: "",
+    raw: "",
+    data: {},
+    mtime: 0,
+    ...over,
   }) as Ticket;
 const mv: AutomationEvent = { type: "moved_to", to: "done", from: "todo" };
 
@@ -79,7 +91,11 @@ const fm = (rel: string) => readFile(path.join(dir, rel)).doc.toJS() as Record<s
 
 describe("config", () => {
   it("parses automations and per-board lists, not inherited", () => {
-    w("kanban.yaml", BASIC + "boards:\n  other:\n    columns: [a, b]\n  third:\n    columns: [a]\n    automations:\n      - { name: x, when: { created_in: a }, run: ls }\n");
+    w(
+      "kanban.yaml",
+      BASIC +
+        "boards:\n  other:\n    columns: [a, b]\n  third:\n    columns: [a]\n    automations:\n      - { name: x, when: { created_in: a }, run: ls }\n",
+    );
     const c = loadConfig(dir);
     expect(automationsFor(c, "default")).toHaveLength(2);
     expect(automationsFor(c, "other")).toEqual([]);
@@ -249,7 +265,8 @@ describe("dispatch", () => {
 
   it("rules are per board", async () => {
     const { kb, runner } = setup(
-      BASIC + "boards:\n  other:\n    columns: [todo, done]\n  third:\n    columns: [todo, done]\n    automations:\n      - { name: t, when: { created_in: todo }, run: 'echo {{ board }}' }\n",
+      BASIC +
+        "boards:\n  other:\n    columns: [todo, done]\n  third:\n    columns: [todo, done]\n    automations:\n      - { name: t, when: { created_in: todo }, run: 'echo {{ board }}' }\n",
     );
     kb.add({ name: "a", board: "other" });
     expect(runner.calls).toHaveLength(0);
@@ -283,7 +300,7 @@ describe("placeholder contexts", () => {
   it("allows bare and nested bare", () => {
     expect(ctx("echo {{ name }} && x {{id}}")).toEqual([]);
     expect(ctx("echo $(foo {{ name }})")).toEqual([]);
-    expect(ctx("echo $(foo (a) {{ name }}) \"x\" {{ id }}")).toEqual([]);
+    expect(ctx('echo $(foo (a) {{ name }}) "x" {{ id }}')).toEqual([]);
     expect(ctx("# c {{ id }}\necho {{ id }}")).toEqual([]);
     expect(ctx("echo \"x\" {{ id }} 'y' {{ name }}")).toEqual([]);
   });

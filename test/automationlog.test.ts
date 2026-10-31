@@ -10,9 +10,15 @@ beforeEach(() => void (dir = fs.mkdtempSync(path.join(os.tmpdir(), "kblog-"))));
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const rec = (n: number, out = ""): AutomationRecord => ({
-  board: "main", rule: `r${n}`, ticketId: n, path: "a.md",
-  event: { type: "moved_to", to: "done" }, command: "x",
-  startedAt: "s", finishedAt: "f", status: "done",
+  board: "main",
+  rule: `r${n}`,
+  ticketId: n,
+  path: "a.md",
+  event: { type: "moved_to", to: "done" },
+  command: "x",
+  startedAt: "s",
+  finishedAt: "f",
+  status: "done",
   result: { exitCode: 0, stdout: out, stderr: out },
 });
 const file = () => path.join(dir, ".kb", "automation.log");

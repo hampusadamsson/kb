@@ -1,0 +1,22 @@
+name: default
+columns: [todo, doing, review, done]
+glob: "*.md"
+automations:
+  - name: log-review
+    when:
+      moved_to: review
+    run: echo {{ id }} {{ body }} >> test.txt
+  - name: followup-on-done
+    when:
+      moved_to: done
+    run: echo "asdasd" && echo {{ to }} && sleep 33 && kb add "ABC"{{ id }} -s todo
+    enabled: false
+  - name: pi-AGENT
+    when:
+      moved_to: done
+      labels:
+        - ai
+    # {{ … }} values are shell-quoted for you, so write them bare (never inside "…").
+    # Quotes inside the -p prompt must be escaped as \" or bash splits the prompt into several args.
+    run: |
+      pi --role {{ props.role }} -p "Execute \"kb show "{{ id }}"\" and create a ticket in todo with a summary of this ticket's body from the web."

@@ -17,7 +17,8 @@ export interface AutomationLog {
   recent(n?: number): AutomationRecord[];
 }
 
-const clip = (s: string): string => (Buffer.byteLength(s) > OUT_CAP ? Buffer.from(s).subarray(0, OUT_CAP).toString("utf8") + "\n[truncated]" : s);
+const clip = (s: string): string =>
+  Buffer.byteLength(s) > OUT_CAP ? Buffer.from(s).subarray(0, OUT_CAP).toString("utf8") + "\n[truncated]" : s;
 
 export function createAutomationLog(dir: string): AutomationLog {
   const folder = path.join(dir, ".kb");
@@ -25,7 +26,11 @@ export function createAutomationLog(dir: string): AutomationLog {
   return {
     append(rec) {
       try {
-        const r = { ...rec, command: clip(rec.command), result: { ...rec.result, stdout: clip(rec.result.stdout), stderr: clip(rec.result.stderr) } };
+        const r = {
+          ...rec,
+          command: clip(rec.command),
+          result: { ...rec.result, stdout: clip(rec.result.stdout), stderr: clip(rec.result.stderr) },
+        };
         fs.mkdirSync(folder, { recursive: true });
         fs.appendFileSync(file, JSON.stringify(r) + "\n");
         if (fs.statSync(file).size > MAX_BYTES) {

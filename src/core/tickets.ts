@@ -1,16 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
-import {
-  columnsFor,
-  globMatches,
-  isPathExcluded,
-  isPathIncluded,
-  isTicketFile,
-  scanGlobs,
-  ticketRules,
-  type Config,
-} from "./config.js";
+import { columnsFor, globMatches, isPathExcluded, isPathIncluded, isTicketFile, scanGlobs, ticketRules, type Config } from "./config.js";
 import { KanbanError } from "./errors.js";
 import { splitFrontmatter, YAML_OPTS } from "./frontmatter.js";
 import { parsePropertyFilter, splitNegation } from "./parse.js";
@@ -54,11 +45,7 @@ export function scan(cwd: string, config: Config): ScanResult {
   const tickets: Ticket[] = [];
   const diagnostics: Diagnostic[] = [];
   const rules = ticketRules(config);
-  const files = [
-    ...new Set(
-      fs.globSync(scanGlobs(config), { cwd }).map((f) => f.split(path.sep).join("/")),
-    ),
-  ]
+  const files = [...new Set(fs.globSync(scanGlobs(config), { cwd }).map((f) => f.split(path.sep).join("/")))]
     .filter((f) => !isPathExcluded(rules, f))
     .sort();
 
@@ -97,18 +84,10 @@ export function matchesTicketGlob(config: Config, rel: string): boolean {
   return scanGlobs(config).some((g) => globMatches(rel, g));
 }
 
-function toTicket(
-  rel: string,
-  data: Record<string, unknown>,
-  body: string,
-  raw: string,
-  mtime: number,
-  config: Config,
-): Ticket {
+function toTicket(rel: string, data: Record<string, unknown>, body: string, raw: string, mtime: number, config: Config): Ticket {
   const board = data.board != null ? String(data.board) : config.name;
   const status = data.status != null ? String(data.status) : undefined;
-  const column =
-    status !== undefined && columnsFor(config, board).includes(status) ? status : UNSORTED;
+  const column = status !== undefined && columnsFor(config, board).includes(status) ? status : UNSORTED;
 
   const labels = Array.isArray(data.labels) ? data.labels.map(String) : [];
   const comments: Record<string, string> = {};
@@ -143,13 +122,19 @@ export function boardNames(tickets: Ticket[], config: Config): string[] {
   return [...names];
 }
 
-export function findById(tickets: Ticket[], arg: string): Ticket {
-  let found = tickets.filter((t) => hasId(t) && String(t.id) === arg);
+/** Find a ticket by id. `board` limits the search to one board; omit it to search every board. */
+export function findById(tickets: Ticket[], arg: string, board?: string): Ticket {
+  const pool = board === undefined ? tickets : tickets.filter((t) => t.board === board);
+  const where = board === undefined ? "" : ` on board "${board}"`;
+  let found = pool.filter((t) => hasId(t) && String(t.id) === arg);
   if (found.length === 0) {
     const n = numericId(arg);
-    if (n !== undefined) found = tickets.filter((t) => hasId(t) && numericId(t.id) === n);
+    if (n !== undefined) found = pool.filter((t) => hasId(t) && numericId(t.id) === n);
   }
-  if (found.length === 0) throw new KanbanError("not-found", `no ticket ${arg}`);
+  if (found.length === 0) {
+    const hint = board === undefined ? "" : "; --all searches every board";
+    throw new KanbanError("not-found", `no ticket ${arg}${where}${hint}`);
+  }
   if (found.length > 1) {
     throw new KanbanError("ambiguous", `duplicate id ${arg}:\n${found.map((t) => `  ${t.path}`).join("\n")}`);
   }
@@ -193,7 +178,12 @@ export const hasId = (t: { id: unknown }): boolean => t.id !== undefined && t.id
 
 /** Default board first, then the rest sorted. */
 export function orderedBoards(tickets: Ticket[], config: Config): string[] {
-  return [config.name, ...boardNames(tickets, config).filter((b) => b !== config.name).sort()];
+  return [
+    config.name,
+    ...boardNames(tickets, config)
+      .filter((b) => b !== config.name)
+      .sort(),
+  ];
 }
 
 export function sortTickets(tickets: Ticket[]): Ticket[] {
@@ -214,8 +204,7 @@ export interface Filters {
   props?: string[];
 }
 
-export const hasFilters = (f: Filters): boolean =>
-  !!f.text || !!f.labels?.length || !!f.props?.length;
+export const hasFilters = (f: Filters): boolean => !!f.text || !!f.labels?.length || !!f.props?.length;
 
 /** All filters AND together; a leading "!" negates a single filter. */
 export function matches(t: Ticket, f: Filters): boolean {

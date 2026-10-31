@@ -36,7 +36,9 @@ boards:
     columns: [a]
 `;
 let dir: string;
-beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-auto-")); });
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-auto-"));
+});
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 const tk = (file: string, fm: string) => fs.writeFileSync(path.join(dir, file), `---\ntype: ticket\n${fm}\n---\n`);
 const cfg = (c = CONFIG) => fs.writeFileSync(path.join(dir, "kanban.yaml"), c);
@@ -84,14 +86,21 @@ describe("automationOverview", () => {
 describe("kb automations (dist)", () => {
   const kb = (...a: string[]) => spawnSync("node", [CLI, ...a], { cwd: dir, encoding: "utf8" });
   const snap = (d = dir): string[] =>
-    fs.readdirSync(d, { withFileTypes: true }).flatMap((e) =>
-      e.isDirectory() ? snap(path.join(d, e.name)) : [`${path.join(d, e.name)}:${fs.statSync(path.join(d, e.name)).mtimeMs}:${fs.readFileSync(path.join(d, e.name), "utf8")}`]);
-  const nowIso = (minAgo: number) => iso(minAgo).replace(/.*/, () => {
-    const d = new Date(Date.now() - minAgo * 60_000);
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-  });
-  const real = (rule: string, status: string, min: number) => `automations:\n  ${rule}: { status: ${status}, at: "${nowIso(min)}", runs: 1 }`;
+    fs
+      .readdirSync(d, { withFileTypes: true })
+      .flatMap((e) =>
+        e.isDirectory()
+          ? snap(path.join(d, e.name))
+          : [`${path.join(d, e.name)}:${fs.statSync(path.join(d, e.name)).mtimeMs}:${fs.readFileSync(path.join(d, e.name), "utf8")}`],
+      );
+  const nowIso = (minAgo: number) =>
+    iso(minAgo).replace(/.*/, () => {
+      const d = new Date(Date.now() - minAgo * 60_000);
+      const p = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    });
+  const real = (rule: string, status: string, min: number) =>
+    `automations:\n  ${rule}: { status: ${status}, at: "${nowIso(min)}", runs: 1 }`;
 
   it("live empty, JSON and text", () => {
     cfg();
@@ -110,7 +119,7 @@ describe("kb automations (dist)", () => {
     const live = JSON.parse(kb("automations", "--live").stdout);
     expect(live.count).toBe(1);
     expect(live.live[0]).toMatchObject({ rule: "lint", board: "main", ticket: { id: 1, name: "A", path: "a.md" } });
-    expect(kb("automations", "--format", "text").stdout).toMatch(/^RULE +BOARD +TICKET +ELAPSED +STARTED\nlint +main +#1 A +1m /);
+    expect(kb("automations", "--format", "text").stdout).toMatch(/^RULE +BOARD +TICKET +ELAPSED +STARTED +PID\nlint +main +#1 A +1m /);
     const all = JSON.parse(kb("automations", "--all").stdout);
     expect(all.count).toBe(3);
     const lint = all.automations.find((a: any) => a.name === "lint");
@@ -141,5 +150,49 @@ describe("kb automations (dist)", () => {
     expect(kb("automations", "--all", "--format", "text").stdout).toBe("No automations configured.\nsee the README (Automations)\n");
     expect(JSON.parse(kb("automations", "--all").stdout)).toEqual({ automations: [], count: 0 });
     expect(fs.existsSync(path.join(dir, ".kb"))).toBe(false);
+  });
+
+  // `ls` is the same command, reachable with and without the verb; `kill` needs a selector.
+  it("ls verb behaves like the bare command", () => {
+    cfg();
+    tk("a.md", `id: 1\nname: A\nstatus: review\n${real("lint", "running", 1)}`);
+    const strip = (s: string): string => s.replace(/"elapsedMs": \d+/, '"elapsedMs": 0');
+    expect(strip(kb("automations", "ls").stdout)).toBe(strip(kb("automations").stdout));
+    expect(kb("automations", "ls", "--format", "text").stdout).toMatch(/^RULE +BOARD +TICKET +ELAPSED +STARTED +PID\n/);
+    expect(JSON.parse(kb("automations", "ls").stdout).count).toBe(1);
+    expect(strip(kb("automations", "ls", "--all").stdout)).toBe(strip(kb("automations", "--all").stdout));
+  });
+  it("kill requires a selector and reports an empty board", () => {
+    cfg();
+    const none = kb("automations", "kill");
+    expect(none.status).toBe(1);
+    expect(none.stderr).toMatch(/nothing selected: pass -t\/--ticket <id>, -r\/--rule <name>, or -a\/--all/);
+    const empty = kb("automations", "kill", "--all");
+    expect(empty.status).toBe(1);
+    expect(empty.stderr).toBe("error: no automations running\n");
+  });
+  it("kill --dry-run lists targets and signals nothing", () => {
+    cfg();
+    tk("a.md", `id: 1\nname: A\nstatus: review\n${real("lint", "running", 1)}`);
+    const before = snap();
+    const r = kb("automations", "kill", "--all", "--dry-run", "--format", "text");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("would kill 1 automation:\n  lint on #1 A (no pid)\n");
+    expect(JSON.parse(kb("automations", "kill", "-t", "1", "--dry-run").stdout)).toMatchObject({ dryRun: true, count: 1 });
+    expect(snap()).toEqual(before);
+  });
+  it("kill refuses an entry with no pid, exit 1", () => {
+    cfg();
+    tk("a.md", `id: 1\nname: A\nstatus: review\n${real("lint", "running", 1)}`);
+    const r = kb("automations", "kill", "-t", "1", "--format", "text");
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/^cannot kill lint on #1 A: no pid recorded/);
+  });
+  it("kill options need the kill action; unknown action is an error", () => {
+    cfg();
+    expect(kb("automations", "ls", "-t", "1").stderr).toMatch(/kill options .* need 'kb automations kill'/);
+    const bad = kb("automations", "frobnicate");
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toBe('error: unknown action "frobnicate" (expected ls or kill)\n');
   });
 });

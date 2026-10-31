@@ -1,11 +1,4 @@
-export type ErrorCode =
-  | "not-found"
-  | "ambiguous"
-  | "invalid"
-  | "exists"
-  | "config"
-  | "parse"
-  | "stale";
+export type ErrorCode = "not-found" | "ambiguous" | "invalid" | "exists" | "config" | "parse" | "stale";
 
 /** Error thrown by the core API; `code` lets a UI tell failure kinds apart. */
 export class KanbanError extends Error {

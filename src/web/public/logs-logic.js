@@ -87,7 +87,9 @@ export function relativeTime(iso, now = new Date()) {
 /** Local "YYYY-MM-DD HH:MM:SS" for tooltips. */
 export function absoluteTime(iso) {
   const d = parse(iso);
-  return d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` : "";
+  return d
+    ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    : "";
 }
 
 /** Entries of event.data for display: [{key, value, pre}] — scalars as text, objects/arrays as pretty JSON (pre: true). */

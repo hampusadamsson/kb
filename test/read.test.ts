@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +9,9 @@ import { boards } from "../src/cli/commands/boards.js";
 import { show } from "../src/cli/commands/show.js";
 
 let dir: string;
-beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-")); });
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-"));
+});
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const CONFIG = `columns: [todo, doing, done]
@@ -46,7 +48,7 @@ describe("ls", () => {
       [
         "== default ==",
         "todo (3)",
-        "  #1 Fix login   [bug] [ui] priority:high meta:{\"a\":1}",
+        '  #1 Fix login   [bug] [ui] priority:high meta:{"a":1}',
         "  #4 Write docs",
         "  #? No id",
         "doing (1)",
@@ -110,6 +112,30 @@ describe("show", () => {
     expect(() => show(dir, "99")).toThrow(/no ticket 99/);
     expect(() => show(dir, "1")).toThrow(/duplicate id 1/);
   });
+  it("board scoping: default, -b and all", () => {
+    setup();
+    // id 5 exists only on board "other"
+    expect(() => show(dir, "5")).toThrow(/no ticket 5 on board "default"/);
+    expect(show(dir, "5", { board: "other" })).toContain("#5 Other one");
+    expect(show(dir, "5", { all: true })).toContain("#5 Other one");
+    expect(show(dir, "5", { board: "all" })).toContain("#5 Other one");
+    // the same id on two boards only resolves inside a board
+    tk("p.md", "id: 1\nname: On other\nstatus: active\nboard: other");
+    expect(show(dir, "1")).toContain("#1 Fix login");
+    expect(show(dir, "1", { board: "other" })).toContain("#1 On other");
+    expect(() => show(dir, "1", { all: true })).toThrow(/duplicate id 1[\s\S]*b\.md[\s\S]*p\.md/);
+  });
+  it("unknown board is an error; not-found hints at --all", () => {
+    setup();
+    expect(() => show(dir, "1", { board: "zzz" })).toThrow(/unknown board "zzz" \(boards: default, other\)/);
+    expect(() => show(dir, "99")).toThrow(/--all searches every board/);
+    expect(() => show(dir, "99", { all: true })).toThrow(/^no ticket 99$/);
+  });
+  it("--all beats --board", () => {
+    setup();
+    tk("p.md", "id: 5\nname: Also 5\nstatus: todo");
+    expect(() => show(dir, "5", { board: "other", all: true })).toThrow(/duplicate id 5/);
+  });
 });
 
 describe("string ids", () => {
@@ -143,7 +169,6 @@ describe("string ids", () => {
 
 describe("cli e2e", () => {
   it("runs built cli", () => {
-    execFileSync("npx", ["tsc"], { cwd: process.cwd() });
     const cli = path.resolve("dist/cli/main.js");
     const run = (...a: string[]) => spawnSync("node", [cli, ...a], { cwd: dir, encoding: "utf8" });
     expect(run("ls").status).toBe(1);
@@ -160,11 +185,20 @@ describe("cli e2e", () => {
     expect(run("ls", "--limit", "-1").status).toBe(1);
     expect(run("ls", "--help").stdout).toContain("--board");
     expect(run("show", "1").stdout).toContain("#1 Hello");
+    expect(run("show", "1", "--board", "default").stdout).toContain("#1 Hello");
+    expect(run("show", "1", "--all").stdout).toContain("#1 Hello");
+    expect(run("show", "1", "-a").stdout).toContain("#1 Hello");
+    expect(run("show", "1", "--board", "nope").status).toBe(1);
+    expect(run("show", "1", "--help").stdout).toContain("--board");
   });
 });
 
 describe("ls filters", () => {
-  const tickets = (o: Parameters<typeof ls>[1]) => ls(dir, o).out.split("\n").filter((l) => l.startsWith("  #")).map((l) => l.trim().split(" ")[0]);
+  const tickets = (o: Parameters<typeof ls>[1]) =>
+    ls(dir, o)
+      .out.split("\n")
+      .filter((l) => l.startsWith("  #"))
+      .map((l) => l.trim().split(" ")[0]);
   beforeEach(() => {
     fs.writeFileSync(path.join(dir, "kanban.yaml"), CONFIG);
     tk("a.md", "id: 1\nname: Alpha\nstatus: todo\nlabels: [bug, ui]\npriority: high\nsize: 3\ntags: [x, y]", "Login broken");
@@ -222,7 +256,16 @@ describe("ls json", () => {
     const j = JSON.parse(r.out);
     expect(j).toMatchObject({ total: 3, shown: 3, limit: 50, truncated: false });
     expect(j.tickets.map((t: any) => t.id)).toEqual([1, 2, 3]);
-    expect(j.tickets[0]).toEqual({ id: 1, name: "T1", board: "default", status: "todo", column: "todo", labels: ["x"], props: { priority: "p1" }, path: "t1.md" });
+    expect(j.tickets[0]).toEqual({
+      id: 1,
+      name: "T1",
+      board: "default",
+      status: "todo",
+      column: "todo",
+      labels: ["x"],
+      props: { priority: "p1" },
+      path: "t1.md",
+    });
     expect(r.warnings).toEqual([]);
   });
 
