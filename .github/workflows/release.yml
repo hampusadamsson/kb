@@ -38,7 +38,7 @@ jobs:
             exit 1
           fi
 
-      - run: npm pack --pack-destination artifacts
+      - run: mkdir -p artifacts && npm pack --pack-destination artifacts
       - name: Write checksums
         working-directory: artifacts
         run: sha256sum kb-*.tgz > SHA256SUMS.txt
