@@ -96,6 +96,7 @@ Free-form markdown body.
 | `kb fix`                | Give tickets a missing or duplicate id (`--dry-run` to preview).  |
 | `kb boards`             | List the boards in use.                                           |
 | `kb web`                | Start the local web UI (`--host`, `--port`, `--no-open`).         |
+| `kb mcp`                | Run kb as an MCP server on stdio for an editor or agent.          |
 | `kb completion <shell>` | Print a completion script for bash or zsh.                        |
 
 Ids accept a number: `7` matches `"007"`. Use `kb <command> --help` for every flag.
@@ -146,6 +147,36 @@ Rules run in the background; at most 15 runs per ticket (loop guardrail, `guard:
 - **Activity log**: an audit table of what changed and which automations ran.
 - Live updates over SSE via a filesystem watcher — changes from the CLI show up immediately.
 - **No auth.** Anyone who can reach the port can read and edit tickets. It is loopback-only by default; only bind `--host` to a network you trust.
+
+## MCP
+
+`kb mcp` runs kb as an MCP server over stdio, so an editor or agent can read and change tickets. It wraps the same core as the CLI and the web UI — same board, same config, same tickets — with no new dependencies.
+
+```json
+{
+  "mcpServers": {
+    "kb": { "command": "kb", "args": ["mcp", "--dir", "/path/to/board"] }
+  }
+}
+```
+
+| Tool             | What it does                                                                        |
+| ---------------  | ----------------------------------------------------------------------------------- |
+| `kb_boards`      | List boards and their columns (no tickets).                                         |
+| `kb_search`      | Search tickets by text, board, label or property; summaries only, no bodies.        |
+| `kb_read`        | Read one ticket: frontmatter, body, comments and automation status.                 |
+| `kb_create`      | Create a ticket.                                                                    |
+| `kb_update`      | Change name, status, board, labels, properties or body, or append a comment.        |
+| `kb_move`        | Move a ticket to another column (sets status only).                                 |
+| `kb_comment`     | Append a comment to a ticket.                                                       |
+| `kb_validate`    | Check `kanban.yaml` and every ticket; reports errors and warnings.                  |
+| `kb_fix`         | Repair missing or duplicate ids; dry-run unless you ask it to write.                |
+| `kb_automations` | List automation runs currently in progress.                                         |
+
+- **Stdio only.** The client spawns the process; nothing listens on a port and stdout carries only JSON-RPC.
+- `--dir` picks the board directory (default: the current directory). A missing `kanban.yaml` fails at startup rather than on the first tool call.
+- Automations are fire-and-forget: a write returns before its rule finishes — check `kb_read` or `kb_automations` for the result.
+- `kb_fix` defaults to dry-run, so nothing is written until you pass `dryRun: false`.
 
 ## Development
 
