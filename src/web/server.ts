@@ -6,7 +6,7 @@ import { createEventLog, type EventLog } from "../eventLog.js";
 import type { AutomationRunner } from "../core/automation.js";
 import { pidAlive } from "../killRun.js";
 import type { LiveRuns } from "../liveRuns.js";
-import { errorResponse, handleApi } from "./api.js";
+import { errorResponse, handleApi } from "../api/api.js";
 import { isDir, PUBLIC_DIR, readPublic } from "./assets.js";
 import { EventHub } from "./watch.js";
 

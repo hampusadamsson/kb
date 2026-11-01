@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createKanban, isTicketFile, loadConfig, scan, scanGlobs, type KbEvent, type TicketRulesInput } from "../src/core/index.js";
-import { handleApi } from "../src/web/api.js";
+import { handleApi } from "../src/api/api.js";
 
 const T = { type: "ticket" };
 const is = (rules: TicketRulesInput, rel: string, data?: Record<string, unknown>, top?: string) => isTicketFile(rules, rel, data, top);
