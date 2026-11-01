@@ -1,22 +1,261 @@
+# =============================================================================
+# kanban.yaml — reference file: every config key the tool supports, with its
+# default, in the order of `configSchema` in src/core/config.ts.
+#
+# Top-level keys: name, columns, glob, tickets, automations, boards, web.
+#
+# Every ticket is a markdown file with YAML frontmatter; the column a ticket
+# appears in is its `status` property.
+#
+# This file itself is never a ticket: it is not matched by `glob` below.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# name — name of the DEFAULT board.
+# Default: "default".
+# Tickets without a `board:` frontmatter key belong to this board.
+# Renaming it here by hand does NOT migrate tickets: a ticket with a
+# `board: default` key would then point at an undeclared board (kb validate
+# warns). Rename it in Settings -> Config instead, which migrates them.
+# -----------------------------------------------------------------------------
 name: default
+
+
+# -----------------------------------------------------------------------------
+# columns — columns of the default board, in order.
+# Default: none — this key is REQUIRED (at least one column); `kb init` writes
+# [todo, doing, done]. A ticket whose `status` is not one of these is shown
+# under "unsorted" and `kb validate` reports it as an error.
+# -----------------------------------------------------------------------------
 columns: [todo, doing, review, done]
+
+
+# -----------------------------------------------------------------------------
+# glob — which files are scanned for tickets, relative to this directory.
+# Default: "*.md".
+# node glob syntax. Absolute paths, ".." segments and empty values are
+# rejected. Only matching files are read, so test.txt, kanban.yaml,
+# node_modules/** and .kb/** never even get parsed.
+# -----------------------------------------------------------------------------
 glob: "*.md"
+
+
+# -----------------------------------------------------------------------------
+# tickets — decides which scanned files count as tickets.
+# Defaults: baseline: true, include: [], exclude: []
+#
+# Decision order (isTicketFile in src/core/config.ts):
+#   1. hard-excluded paths (node_modules, .kb) are never tickets;
+#   2. a matching `exclude` rule always wins;
+#   3. otherwise the file is a ticket when
+#        (baseline && type == "ticket" && inside `glob`)  OR  any include matches.
+#      Include rules only ever consider *.md files.
+#
+# RULE SHAPE — every rule needs AT LEAST ONE condition (glob, prefix, props or
+# has); an empty rule is a config error. Conditions within one rule are ANDed,
+# rules within one list are ORed.
+#   name:   optional label, used in validate messages (duplicates are warned)
+#   glob:   node glob relative to this directory (no leading "/", no "..")
+#   prefix: base-name prefix (a file name prefix, so no slashes)
+#   props:  frontmatter property equals value; "!value" means "is NOT value"
+#   has:    frontmatter key must be present; "!key" means "must be absent"
+# Include rules also WIDEN the scan: their `glob` is added to the top-level
+# `glob`, so they can pull in files from subdirectories.
+#
+# Here baseline is OFF on purpose, to show the explicit-include form. The first
+# rule below is literally the baseline condition, so the union of the includes
+# picks the same set the baseline would; the others are narrower variants that
+# only demonstrate `prefix`, `!value` and `!key` without changing that set.
+tickets:
+  baseline: false
+
+  include:
+    # glob + props: the workhorse rule — any .md here that declares itself a
+    # ticket. Equivalent to `baseline: true`.
+    - name: markdown-tickets
+      glob: "*.md"
+      props:
+        type: ticket
+
+    # prefix + props: ticket ids are numeric file names, so prefix "0" matches
+    # "001-…". Prefix is compared against the base name only, never a path.
+    # (A subset of the rule above, so it adds no files.)
+    - name: zero-prefixed-tickets
+      prefix: "0"
+      props:
+        type: ticket
+
+    # props with `!value` negation: "is NOT this value" (an absent key counts as
+    # "not archived"). Still a subset of the baseline set.
+    - name: not-archived-tickets
+      glob: "*.md"
+      props:
+        type: ticket
+        archived: "!true"
+
+    # has with `!key` negation: `id` must be present, `archived` must be absent.
+    - name: identified-tickets
+      props:
+        type: ticket
+      has:
+        - id
+        - "!archived"
+
+  exclude:
+    # Exclude rules never add files to the scan, they only remove matches.
+    # Path-only excludes are applied before a file is even read.
+    - name: scratch-text-files
+      glob: "*.txt"
+
+    # prefix + props: ignore test-*.md scratch notes that never claim to be
+    # tickets (a real test-*.md ticket would still be kept).
+    - name: test-prefixed-non-tickets
+      prefix: test
+      props:
+        type: "!ticket"
+
+    # glob + has with `!key`: drop .md files with no `type` frontmatter at all.
+    - name: untyped-markdown
+      glob: "*.md"
+      has:
+        - "!type"
+
+
+# -----------------------------------------------------------------------------
+# automations — shell commands run on tickets of the DEFAULT board.
+# Default: none (empty list).
+#
+# Per-rule keys:
+#   name     (required) unique per board; also the key under which run history
+#            is recorded in the ticket's `automations:` frontmatter
+#   when     (required) exactly one of moved_to / created_in — both or neither
+#            is a config error — plus optional `labels` (all must be present)
+#            and `props` (frontmatter key: value; "!value" negates)
+#   run      (required) shell command — or a list of steps run in order (one
+#            shell call each). {{ … }} placeholders are shell-quoted
+#            automatically, so write them BARE — inside "…", '…' or backticks
+#            `kb validate` rejects them. (A placeholder followed by a literal
+#            quote, as in the pi-AGENT prompt below, is fine.)
+#   enabled  default true; false keeps the rule documented but never fires it
+#   continueOnError  default false — a failing step (non-zero exit, error or
+#            timeout) stops the sequence; true keeps running the later steps
+#   guard    default true; stops after a per-ticket run cap so loops cannot
+#            spin forever; false opts out (for rules that must always run)
+#   timeout  default none (0 = no timeout); whole seconds, max 86400
+#
+# Placeholders: id, name, body, board, status, from, to, path, labels, event,
+# and props.<key>. Automations are skipped while another automation runs
+# (KB_AUTOMATION), and `kb ... --no-automation` disables them.
+# -----------------------------------------------------------------------------
 automations:
+  # moved_to: fires when a ticket is moved INTO the given column.
+  # Only this rule writes test.txt, and the write is a cheap append.
   - name: log-review
     when:
       moved_to: review
     run: echo {{ id }} {{ body }} >> test.txt
+    timeout: 10
+
+  # A rule that creates another ticket, so it is loop-prone: shipped disabled.
+  # guard: false opts out of the per-ticket run cap for when it is enabled.
   - name: followup-on-done
     when:
       moved_to: done
-    run: echo "asdasd" && echo {{ to }} && sleep 33 && kb add "ABC"{{ id }} -s todo
+    run: echo followup for {{ id }} && sleep 1 && kb add "ABC"{{ id }} -s todo
     enabled: false
+    guard: false
+    timeout: 60
+
+  # moved_to + `labels` (all must match) + the multi-line `run: |` YAML form.
+  # {{ … }} values are shell-quoted for you, so write them bare (never inside "…").
+  # Quotes inside the -p prompt must be escaped as \" or bash splits the prompt into several args.
   - name: pi-AGENT
     when:
       moved_to: done
       labels:
         - ai
-    # {{ … }} values are shell-quoted for you, so write them bare (never inside "…").
-    # Quotes inside the -p prompt must be escaped as \" or bash splits the prompt into several args.
     run: |
-      pi --role {{ props.role }} -p "Execute \"kb show "{{ id }}"\" and create a ticket in todo with a summary of this ticket's body from the web."
+      pi --role {{ props.role }} -p "Execute \"kb show "{{ id }}\" and create a ticket in todo with a summary of this ticket's body from the web."
+
+  # created_in: fires when a ticket is CREATED in the given column.
+  # `props` in `when` filters on frontmatter; "!bot" = role is not "bot".
+  # Cheap and side-effect free: prints to /dev/null (no network, no files).
+  - name: announce-created
+    when:
+      created_in: todo
+      props:
+        role: "!bot"
+    run: echo new ticket {{ id }} on board {{ board }} > /dev/null
+    enabled: true
+    timeout: 5
+
+
+# -----------------------------------------------------------------------------
+  # Multi-step `run`: a list is executed in order, one shell call per step.
+  # Failure at step 1 (non-zero exit, error or timeout) skips step 2, unless
+  # `continueOnError: true`. Cheap and side-effect free: prints to /dev/null.
+  - name: two-step-review
+    when:
+      moved_to: review
+    run:
+      - echo {{ id }} first step > /dev/null
+      - echo {{ id }} second step > /dev/null
+    continueOnError: false # default shown explicitly: a failing step stops the rest
+    enabled: false
+
+  # A rule can call `kb` itself: `kb set` adds the "reviewed" label and
+  # `kb comment` appends a comment, all from one move into review. Disabled
+  # because it mutates tickets — while enabled, each move into review would
+  # label and comment the ticket again, up to the 15-run per-ticket guardrail.
+  # KB_AUTOMATION=1 is set for every step, so the nested `kb` calls do NOT
+  # re-trigger automations (no loop).
+  - name: mark-reviewed
+    when:
+      moved_to: review
+    run:
+      - echo reviewed {{ id }} {{ name }}
+      - kb set {{ id }} -l reviewed
+      - kb comment {{ id }} "I reviewed this ticket"
+    continueOnError: false # a failing step (e.g. the echo) stops the rest
+    enabled: false
+
+# boards — overrides for extra boards, keyed by board name.
+# Default: none. Each entry accepts exactly `columns` (required) and
+# `automations` (optional).
+# A ticket joins a board through its `board:` frontmatter property; a ticket on
+# an undeclared board still renders, but `kb validate` warns about it.
+#
+# IMPORTANT: a board's `automations` are NOT inherited from the default board.
+# The rules above belong to the default board only; another board gets its own
+# list, and omitting the key means "no automations at all" for that board.
+# Columns are likewise per board, never merged / inherited.
+# -----------------------------------------------------------------------------
+boards:
+  # Its own columns AND its own, independent automation list.
+  lab:
+    columns: [backlog, active, shipped]
+    automations:
+      - name: lab-created
+        when:
+          created_in: backlog
+        run: echo lab ticket {{ id }} > /dev/null
+        enabled: false
+
+  # Overrides only columns, so this board has NO automations — none of
+  # log-review / followup-on-done / pi-AGENT / announce-created apply here.
+  archive:
+    columns: [inbox, filed]
+
+
+# -----------------------------------------------------------------------------
+# web — defaults for the local web UI started by `kb web`.
+# Default: none, i.e. the built-in fallbacks host 127.0.0.1 and port 4747.
+#   host: interface to bind (non-loopback binds print a warning, since
+#         automations can run commands on this machine)
+#   port: 0-65535 (0 lets the OS pick a free port)
+# CLI FLAGS WIN over these values: `kb web --host … --port …` overrides the file.
+# -----------------------------------------------------------------------------
+web:
+  host: 127.0.0.1
+  port: 4747

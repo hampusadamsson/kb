@@ -58,9 +58,6 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: Combine checksums
-        working-directory: artifacts
-        run: cat SHA256SUMS-*.txt > SHA256SUMS.txt
 
       - name: Attach assets to the GitHub release
         env:
@@ -77,4 +74,4 @@ jobs:
             echo "::warning::NPM_TOKEN is not set; skipping npm publish"
             exit 0
           fi
-          npm publish artifacts/kb-*.tgz --provenance --access public
+          npm publish artifacts/kbkan-*.tgz --provenance --access public

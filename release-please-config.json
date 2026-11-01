@@ -55,7 +55,7 @@
   ],
   "packages": {
     ".": {
-      "package-name": "kb",
+      "package-name": "kbkan",
       "changelog-path": "CHANGELOG.md"
     }
   }

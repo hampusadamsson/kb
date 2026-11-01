@@ -58,6 +58,39 @@ describe("POST /api/automation/test", () => {
     expect((await call("POST", { run: "echo {{ nope }}" })).status).toBe(400);
     expect((await call("POST", { run: "  " })).status).toBe(400);
     expect((await call("POST", {})).status).toBe(400);
+    expect((await call("POST", { run: [] })).status).toBe(400);
+    expect((await call("POST", { run: ["echo a", " "] })).status).toBe(400);
+  });
+
+  it("names the failing step on a bad placeholder", async () => {
+    await start();
+    const r = await call("POST", { run: ["echo a", "echo {{ nope }}"] });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toContain("step 2");
+    expect(r.json.error).toContain("nope");
+  });
+
+  it("run list stops at the first failure", async () => {
+    await start();
+    const r = await call("POST", { run: ["echo a", "exit 1", "echo c"], continueOnError: false });
+    expect(r.status).toBe(200);
+    expect(r.json.command).toBe("echo a && exit 1 && echo c");
+    // the failing step ran (it is the one that failed); the step after it did not
+    expect(r.json.result.steps).toHaveLength(2);
+    expect(r.json.result.steps.map((s: any) => s.exitCode)).toEqual([0, 1]);
+    expect(r.json.result.steps[0].stdout.trim()).toBe("a");
+    expect(r.json.result.exitCode).toBe(1);
+  });
+
+  it("run list with continueOnError runs every step, reporting the first failure", async () => {
+    await start();
+    const r = await call("POST", { run: ["echo a", "exit 1", "echo c"], continueOnError: true });
+    expect(r.status).toBe(200);
+    expect(r.json.result.steps).toHaveLength(3);
+    expect(r.json.result.steps.map((s: any) => s.exitCode)).toEqual([0, 1, 0]);
+    // aggregate = the first failure, not the last (successful) step
+    expect(r.json.result.exitCode).toBe(1);
+    expect(r.json.result.steps[2].stdout.trim()).toBe("c");
   });
 
   it("503 disabled without a runner", async () => {

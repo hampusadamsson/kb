@@ -17,6 +17,7 @@ import {
 import { automationsFor, loadConfig, type Automation } from "../src/core/config.js";
 import { createKanban } from "../src/core/board.js";
 import { readFile } from "../src/core/frontmatter.js";
+import type { KbEvent } from "../src/core/events.js";
 import type { Ticket } from "../src/core/tickets.js";
 
 let dir: string;
@@ -65,18 +66,20 @@ const tk = (over: Partial<Ticket> = {}): Ticket =>
   }) as Ticket;
 const mv: AutomationEvent = { type: "moved_to", to: "done", from: "todo" };
 
-function setup(yaml: string, opts: { automations?: boolean; noRunner?: boolean } = {}) {
+function setup(yaml: string, opts: { automations?: boolean; noRunner?: boolean; events?: boolean } = {}) {
   w("kanban.yaml", yaml);
   const runner = new FakeRunner();
   const records: AutomationRecord[] = [];
+  const evs: KbEvent[] = [];
   const kb = createKanban({
     dir,
     now: () => NOW,
     runner: opts.noRunner ? undefined : runner,
     automations: opts.automations,
     onAutomation: (r) => records.push(r),
+    ...(opts.events ? { events: { emit: (e) => void evs.push(e) } } : {}),
   });
-  return { kb, runner, records };
+  return { kb, runner, records, evs };
 }
 const BASIC = `columns: [todo, done]
 automations:
@@ -87,7 +90,20 @@ automations:
     when: { created_in: todo }
     run: "echo created {{ id }}"
 `;
+const STEPS = `columns: [todo, done]
+automations:
+  - name: m
+    when: { created_in: todo }
+    run:
+      - "echo one"
+      - "echo two {{ id }}"
+      - "echo three"
+`;
+
 const fm = (rel: string) => readFile(path.join(dir, rel)).doc.toJS() as Record<string, any>;
+
+/** Let queued microtasks/next steps run without waiting for the whole rule. */
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("config", () => {
   it("parses automations and per-board lists, not inherited", () => {
@@ -209,6 +225,97 @@ describe("dispatch", () => {
     expect(fm(p).automations.n.status).toBe("failed");
     expect(fm(p).automations.n.error).toMatch(/nope/);
     expect(records.at(-1)!.status).toBe("failed");
+  });
+
+  it("list runs all steps in order", async () => {
+    const { kb, runner, records } = setup(STEPS);
+    const { path: p } = kb.add({ name: "a" });
+    expect(runner.calls.map((c) => c.command)).toEqual(["echo one"]);
+    runner.finish();
+    await tick();
+    expect(runner.calls.map((c) => c.command)).toEqual(["echo one", "echo two '001'"]);
+    runner.finish({}, 1);
+    await tick();
+    expect(runner.calls.map((c) => c.command)).toEqual(["echo one", "echo two '001'", "echo three"]);
+    runner.finish({}, 2);
+    await kb.settled();
+    expect(runner.calls.every((c) => c.env.KB_AUTOMATION === "1")).toBe(true);
+    expect(fm(p).automations.m).toEqual({ status: "done", at: AT, exit: 0, runs: 1 });
+    expect(records.at(-1)).toMatchObject({ status: "done", command: "echo one && echo two '001' && echo three" });
+    expect(records.at(-1)!.failedStep).toBeUndefined();
+  });
+
+  it("step 0 fails → later steps do not run", async () => {
+    const { kb, runner, records } = setup(STEPS);
+    const { path: p } = kb.add({ name: "a" });
+    expect(runner.calls.map((c) => c.command)).toEqual(["echo one"]);
+    runner.finish({ exitCode: 7 });
+    await tick();
+    expect(runner.calls).toHaveLength(1);
+    await kb.settled();
+    expect(fm(p).automations.m).toEqual({ status: "failed", at: AT, exit: 7, step: 1, runs: 1 });
+    expect(records.at(-1)).toMatchObject({ status: "failed", failedStep: 1, command: "echo one && echo two '001' && echo three" });
+  });
+
+  it("continueOnError: true keeps the first failure's result", async () => {
+    const { kb, runner, records, evs } = setup(STEPS.replace("    run:", "    continueOnError: true\n    run:"), { events: true });
+    const { path: p } = kb.add({ name: "a" });
+    runner.finish({ exitCode: 3, stdout: "one out\n", stderr: "one err\n", error: "step one broke" });
+    await tick();
+    expect(runner.calls.map((c) => c.command)).toEqual(["echo one", "echo two '001'"]);
+    runner.finish({}, 1);
+    await tick();
+    expect(runner.calls.map((c) => c.command)).toEqual(["echo one", "echo two '001'", "echo three"]);
+    runner.finish({}, 2);
+    await kb.settled();
+    // the first failure is what gets recorded, not the last (successful) step
+    expect(fm(p).automations.m).toEqual({ status: "failed", at: AT, exit: 3, error: "step one broke", step: 1, runs: 1 });
+    expect(records.at(-1)).toMatchObject({
+      status: "failed",
+      failedStep: 1,
+      result: { exitCode: 3, stdout: "one out\n", stderr: "one err\n", error: "step one broke" },
+    });
+    expect(evs.find((e) => e.type === "automation.finished")!.data).toMatchObject({
+      status: "failed",
+      exit: 3,
+      error: "step one broke",
+      step: 1,
+    });
+  });
+
+  it("all steps succeeding records the last result and no step", async () => {
+    const { kb, runner, evs } = setup(STEPS.replace("    run:", "    continueOnError: true\n    run:"), { events: true });
+    const { path: p } = kb.add({ name: "a" });
+    runner.finish({}, 0);
+    await tick();
+    runner.finish({}, 1);
+    await tick();
+    runner.finish({ stdout: "three out\n" }, 2);
+    await kb.settled();
+    expect(fm(p).automations.m).toEqual({ status: "done", at: AT, exit: 0, runs: 1 });
+    const data = evs.find((e) => e.type === "automation.finished")!.data;
+    expect(data).toMatchObject({ status: "done", exit: 0 });
+    expect(data.step).toBeUndefined();
+  });
+
+  it("a failing string run records no step", async () => {
+    const { kb, runner } = setup(BASIC);
+    const { path: p } = kb.add({ name: "a" });
+    runner.finish({ exitCode: 4, error: "boom" });
+    await kb.settled();
+    expect(fm(p).automations.c).toEqual({ status: "failed", at: AT, exit: 4, error: "boom", runs: 1 });
+    expect(fm(p).automations.c.step).toBeUndefined();
+  });
+
+  it("a string run is still a single step", async () => {
+    const { kb, runner, records } = setup(BASIC);
+    kb.add({ name: "a" });
+    expect(runner.calls.map((c) => c.command)).toEqual(["echo created '001'"]);
+    expect(records).toHaveLength(0);
+    runner.finish();
+    await kb.settled();
+    expect(records.at(-1)).toMatchObject({ status: "done", command: "echo created '001'" });
+    expect(records.at(-1)!.failedStep).toBeUndefined();
   });
 
   it("no trigger when status unchanged or non-status edits", () => {

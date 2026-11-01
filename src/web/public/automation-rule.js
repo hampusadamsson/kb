@@ -9,8 +9,10 @@ import {
   durationText,
   previewScript,
   ruleIssues,
+  ruleSteps,
   ruleSummary,
   ruleTitle,
+  runLabel,
   sampleFor,
   statusText,
 } from "./automation-logic.js";
@@ -161,6 +163,10 @@ export function ruleCard(r, ctx) {
   drawProps();
 
   // ---- 2 Run ----
+  // A rule whose `run` is a step list is shown read-only: the form edits a single script and lists
+  // live in kanban.yaml (joining them into one string would change what runs).
+  const multiStep = Array.isArray(r.run);
+  const emptyScript = () => ruleSteps(r.run).every((s) => !s.trim());
   const runErr = h("p", { class: "arule-err", id: `${uid}-run-err`, hidden: true });
   const varWarn = h("p", { class: "arule-err", id: `${uid}-run-warn`, hidden: true });
   const runTa = h("textarea", {
@@ -169,12 +175,13 @@ export function ruleCard(r, ctx) {
     rows: 3,
     spellcheck: false,
     placeholder: "echo {{ id }} >> done.txt",
-    value: r.run,
+    value: multiStep ? "" : r.run,
     "aria-describedby": `${uid}-run-err ${uid}-run-warn ${uid}-run-hint`,
     oninput: () => ((r.run = runTa.value), grow(), ctx.onChange(), validate(), updatePreview()),
     onblur: () => (touched.add("run"), validate()),
   });
   const grow = () => {
+    if (multiStep) return;
     runTa.style.height = "auto";
     runTa.style.height = `${Math.min(runTa.scrollHeight + 2, 320)}px`;
   };
@@ -207,6 +214,22 @@ export function ruleCard(r, ctx) {
     { class: "field", hidden: true },
     h("span", { class: "lbl", text: "Preview with a sample ticket (values are shell-quoted)" }),
     preview,
+  );
+  // A step list cannot be edited as one string without changing what runs: show it read-only.
+  const runEditor = h("div", { class: "field" }, h("label", { for: `${uid}-run`, text: "Shell script" }), runTa, runErr, varWarn);
+  const runList = h(
+    "div",
+    { class: "field" },
+    h("span", { class: "lbl", text: `Shell script (${runLabel(r.run)}, run in order)` }),
+    h(
+      "ol",
+      { class: "mono arule-steps" },
+      ruleSteps(r.run).map((s) => h("li", { text: s })),
+    ),
+    h("p", {
+      class: "muted hint",
+      text: "This rule has several steps. Edit them in kanban.yaml; the form only edits a single script.",
+    }),
   );
 
   // ---- 3 Options ----
@@ -269,7 +292,7 @@ export function ruleCard(r, ctx) {
     out.hidden = !body;
   }
   async function runTest() {
-    if (!r.run.trim()) return showRes("failed", "Script is empty. Enter a script first.", "");
+    if (emptyScript()) return showRes("failed", "Script is empty. Enter a script first.", "");
     if (!confirm(CONFIRM)) return;
     testBtn.disabled = true;
     showRes("running", "Running…", "");
@@ -318,7 +341,7 @@ export function ruleCard(r, ctx) {
     set(colErr, colSel, "column");
     set(runErr, runTa, "run");
     set(timeoutErr, timeoutIn, "timeout");
-    const bad = unknownVars(r.run);
+    const bad = typeof r.run === "string" ? unknownVars(r.run) : [];
     varWarn.textContent = bad.length
       ? `Unknown variable${bad.length > 1 ? "s" : ""}: ${bad.map((v) => `{{ ${v} }}`).join(", ")}. Saving works, but the script will fail to render.`
       : "";
@@ -326,7 +349,7 @@ export function ruleCard(r, ctx) {
     updateHead(iss);
   }
   function updatePreview() {
-    const run = r.run.trim();
+    const run = typeof r.run === "string" ? r.run.trim() : "";
     previewWrap.hidden = !run;
     if (run) preview.textContent = previewScript(r.run, sampleFor(r, effectiveColumn(ctx.cols, r.column), ctx.board()), r.event);
     preview.hidden = !run;
@@ -404,14 +427,18 @@ export function ruleCard(r, ctx) {
     section(
       2,
       "Run",
-      h("div", { class: "field" }, h("label", { for: `${uid}-run`, text: "Shell script" }), runTa, runErr, varWarn),
-      h("div", { class: "field" }, h("span", { class: "lbl", text: "Insert a variable at the cursor" }), varBar),
-      h("p", {
-        class: "muted hint",
-        id: `${uid}-run-hint`,
-        text: "Values are shell-quoted automatically: write placeholders bare (echo {{ name }}), not inside quotes.",
-      }),
-      previewWrap,
+      multiStep ? runList : runEditor,
+      ...(multiStep
+        ? []
+        : [
+            h("div", { class: "field" }, h("span", { class: "lbl", text: "Insert a variable at the cursor" }), varBar),
+            h("p", {
+              class: "muted hint",
+              id: `${uid}-run-hint`,
+              text: "Values are shell-quoted automatically: write placeholders bare (echo {{ name }}), not inside quotes.",
+            }),
+            previewWrap,
+          ]),
     ),
     section(
       3,

@@ -1,10 +1,10 @@
 import path from "node:path";
 import type { AutomationLog } from "../automationLog.js";
 import type { EventLog } from "../eventLog.js";
-import type { AutomationRunner } from "../core/automation.js";
+import type { AutomationRunner, RunResult } from "../core/automation.js";
 import { automationSchema } from "../core/config.js";
 import { renderCommand } from "../core/automation.js";
-import { KanbanError, type Kanban, type Patch } from "../core/index.js";
+import { KanbanError, type Kanban, type Patch, type Ticket } from "../core/index.js";
 import { killRun, pidAlive } from "../killRun.js";
 import type { LiveRuns } from "../liveRuns.js";
 import { duplicateKeys, toDetail, toView } from "./view.js";
@@ -81,11 +81,24 @@ const obj = (v: unknown, name: string): Record<string, unknown> | undefined => {
   return v as Record<string, unknown>;
 };
 
+/** Label option counts for the filter bar: union over all tickets of the selected board (ignoring text/label/property filters). */
+function labelCounts(tickets: Ticket[], board: string | undefined): { name: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const t of tickets) {
+    if (board !== undefined && t.board !== board) continue;
+    for (const l of t.labels) counts.set(l, (counts.get(l) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
 const board: Handler = (kb, req) => {
   const q = req.query;
   const { config, tickets } = kb.load();
+  const boardName = q.get("board") ?? undefined;
   const result = kb.list({
-    board: q.get("board") ?? undefined,
+    board: boardName,
     text: q.get("text") ?? undefined,
     labels: q.getAll("label"),
     props: q.getAll("property"),
@@ -104,6 +117,7 @@ const board: Handler = (kb, req) => {
     boardNames,
     columns,
     warnings: result.warnings,
+    labels: labelCounts(tickets, boardName),
   });
 };
 
@@ -299,9 +313,14 @@ let testRuns = 0;
 /** Renders `run` with a sample ticket and really executes it (not logged, no ticket touched). */
 const automationTest: Handler = async (kb, req, _p, ctx) => {
   const b = req.body;
-  const run = str(b.run, "run");
-  if (run === undefined || run.trim() === "") throw new KanbanError("invalid", "run must not be empty");
+  const run = b.run;
+  const steps = typeof run === "string" ? [run] : strArray(run, "run");
+  if (steps === undefined || steps.length === 0 || steps.some((s) => s.trim() === "")) {
+    throw new KanbanError("invalid", "run must not be empty");
+  }
   if (!ctx.runner) return fail(503, "disabled", "automations are disabled (kb web --no-automation)");
+  const multi = Array.isArray(run);
+  const continueOnError = b.continueOnError === true;
   const event = str(b.event, "event") ?? "moved_to";
   if (event !== "moved_to" && event !== "created_in") throw new KanbanError("invalid", "event must be moved_to or created_in");
   const s = obj(b.sample, "sample") ?? {};
@@ -321,16 +340,38 @@ const automationTest: Handler = async (kb, req, _p, ctx) => {
     props: obj(s.props, "sample.props") ?? {},
   };
   const timeout = b.timeout === undefined || b.timeout === null ? 0 : parseTimeout(b.timeout);
-  const command = renderCommand(run, vars); // throws invalid on unknown variable
+  // Render every step before running any (same as core): a bad placeholder fails the whole test up front.
+  const commands = steps.map((step, i) => {
+    try {
+      return renderCommand(step, vars);
+    } catch (e) {
+      const msg = (e as Error).message;
+      throw new KanbanError("invalid", multi ? `step ${String(i + 1)}: ${msg}` : msg);
+    }
+  });
+  const command = commands.join(" && ");
   if (testRuns >= MAX_TEST_RUNS) return fail(429, "busy", "too many test runs in progress; try again shortly");
   testRuns++;
   try {
-    const result = await ctx.runner.run(command, {
-      cwd: kb.dir,
-      env: { KB_AUTOMATION: "1" },
-      ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
-      meta: { test: true, board: vars.board },
-    });
+    const results: RunResult[] = [];
+    for (const step of commands) {
+      let r: RunResult;
+      try {
+        r = await ctx.runner.run(step, {
+          cwd: kb.dir,
+          env: { KB_AUTOMATION: "1" },
+          ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
+          meta: { test: true, board: vars.board },
+        });
+      } catch (e) {
+        r = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
+      }
+      results.push(r);
+      if ((r.exitCode !== 0 || r.error) && !continueOnError) break;
+    }
+    // Aggregate: the first failure if any, else the last step (same rule as core).
+    const firstFailure = results.find((r) => r.exitCode !== 0 || r.error);
+    const result: RunResult & { steps: RunResult[] } = { ...(firstFailure ?? results[results.length - 1]), steps: results };
     return ok({ command, result });
   } finally {
     testRuns--;

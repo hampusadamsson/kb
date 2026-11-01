@@ -77,6 +77,14 @@ describe("automationOverview", () => {
     expect(o.rules[2].run.length).toBe(201);
     expect(o.rules[0].lastRun).toBeNull();
   });
+  it("exposes a step list and continueOnError as configured", () => {
+    cfg(CONFIG.replace("    run: echo lint\n", "    continueOnError: true\n    run: [echo one, echo two]\n"));
+    const lint = ov("main").rules.find((r) => r.name === "lint")!;
+    expect(lint.run).toEqual(["echo one", "echo two"]);
+    expect(lint.continueOnError).toBe(true);
+    // a plain string run has no continueOnError key
+    expect(ov("main").rules.find((r) => r.name === "off")!.continueOnError).toBeUndefined();
+  });
   it("unknown board throws", () => {
     cfg();
     expect(() => ov("nope")).toThrow(/unknown board/);
@@ -126,9 +134,9 @@ describe("kb automations (dist)", () => {
     expect(lint).toMatchObject({ running: 1, counts: { running: 1, stale: 1 }, enabled: true, when: { moved_to: "review" } });
     expect(lint.lastRun.ticketId).toBe(1);
     const txt = kb("automations", "--all", "--format", "text").stdout;
-    expect(txt).toMatch(/^NAME +BOARD +ON +WHEN +TIMEOUT +RUNNING +LAST\n/);
-    expect(txt).toMatch(/lint +main +yes +moved_to review +- +1 +running 1m ago #1/);
-    expect(txt).toMatch(/off +main +no +created_in todo +5m /);
+    expect(txt).toMatch(/^NAME +BOARD +ON +WHEN +RUN +TIMEOUT +RUNNING +LAST\n/);
+    expect(txt).toMatch(/lint +main +yes +moved_to review +echo lint +- +1 +running 1m ago #1/);
+    expect(txt).toMatch(/off +main +no +created_in todo +echo off +5m /);
     expect(lint).toMatchObject({ timeout: 0 });
     expect(all.automations.find((a: any) => a.name === "off").timeout).toBe(300);
     expect(snap()).toEqual(before);

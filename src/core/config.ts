@@ -24,8 +24,11 @@ export const automationSchema = z.object({
     .refine((w) => (w.moved_to !== undefined) !== (w.created_in !== undefined), {
       message: "when needs exactly one of moved_to / created_in",
     }),
-  run: z.string(),
+  /** one shell command, or a list of steps run sequentially */
+  run: z.union([z.string(), z.array(z.string()).min(1)]),
   enabled: z.boolean().optional(),
+  /** keep going after a failing step (default false: stop and fail) */
+  continueOnError: z.boolean().optional(),
   /** loop guard (default true): stop after AUTOMATION_RUN_LIMIT runs per ticket; false opts out */
   guard: z.boolean().optional(),
   /** per-run timeout in whole seconds; 0 or absent = no timeout */
@@ -211,6 +214,12 @@ export function scanGlobs(config: { glob: string; tickets?: TicketRulesInput }):
   return globs;
 }
 
+/** Optional `web` block: defaults for the web UI host/port (CLI flags win). */
+export const webSchema = z.object({
+  host: z.string().min(1).optional(),
+  port: z.number().int().min(0).max(65535).optional(),
+});
+
 const configSchema = z.object({
   name: z.string().default("default"),
   columns: columnsSchema,
@@ -218,9 +227,11 @@ const configSchema = z.object({
   tickets: ticketRulesSchema.optional(),
   automations: automationsSchema,
   boards: z.record(z.string(), z.object({ columns: columnsSchema, automations: automationsSchema })).optional(),
+  web: webSchema.optional(),
 });
 
 export type Config = z.infer<typeof configSchema>;
+export type WebConfig = NonNullable<Config["web"]>;
 
 export const STARTER_CONFIG = `name: default
 columns: [todo, doing, done]

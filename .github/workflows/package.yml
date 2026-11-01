@@ -1,7 +1,7 @@
 name: Package
 
-# Reusable packaging: builds the npm tarball and the standalone binaries for every supported
-# platform. Called by build.yml (every push) and release.yml (tagged releases).
+# Reusable packaging: builds the npm tarball and its checksum. Called by build.yml (every push)
+# and release.yml (tagged releases). kb ships as an npm package only.
 on:
   workflow_call:
 
@@ -20,50 +20,12 @@ jobs:
         run: mkdir -p artifacts && npm pack --pack-destination artifacts
       - name: Verify it installs and runs
         run: node scripts/pack-smoke.mjs
+      - name: Write checksums
+        run: cd artifacts && shasum -a 256 kbkan-*.tgz > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: kb-npm-tarball
-          path: artifacts/kb-*.tgz
-          if-no-files-found: error
-
-  binary:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: linux-x64
-          - os: ubuntu-24.04-arm
-            name: linux-arm64
-          - os: macos-15-intel
-            name: darwin-x64
-          - os: macos-latest
-            name: darwin-arm64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Build single executable
-        run: npm run build:sea
-      - name: Smoke test it
-        run: npm run build:sea:smoke
-      - name: Name and checksum the artifact
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          mkdir -p artifacts
-          mv build/kb "artifacts/kb-${version}-${{ matrix.name }}"
-          cd artifacts
-          if command -v sha256sum >/dev/null; then
-            sha256sum kb-* > "SHA256SUMS-${{ matrix.name }}.txt"
-          else
-            shasum -a 256 kb-* > "SHA256SUMS-${{ matrix.name }}.txt"
-          fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kb-binary-${{ matrix.name }}
-          path: artifacts/*
+          path: |
+            artifacts/kbkan-*.tgz
+            artifacts/SHA256SUMS.txt
           if-no-files-found: error

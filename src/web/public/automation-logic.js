@@ -90,6 +90,12 @@ const oneLine = (s, n) => {
 /** "!x" → "not x" */
 const propText = (p) => (p.value.startsWith("!") ? `${p.key.trim()} not ${p.value.slice(1)}` : `${p.key.trim()} = ${p.value}`);
 
+/** Steps of a rule's script: a plain string `run` is a single step. */
+export const ruleSteps = (run) => (Array.isArray(run) ? run : [run]);
+
+/** Script as one short label: a step list becomes "3 steps". */
+export const runLabel = (run) => (Array.isArray(run) ? `${run.length} step${run.length === 1 ? "" : "s"}` : run);
+
 /** One-line human summary of a rule (column = effective column). */
 export function ruleSummary(r, column = r.column) {
   const ev = EVENT_OPTIONS.find((e) => e.value === r.event) ?? EVENT_OPTIONS[0];
@@ -98,7 +104,7 @@ export function ruleSummary(r, column = r.column) {
   if (labels.length) parts.push(`labels: ${labels.join(", ")}`);
   const props = r.props.filter((p) => p.key.trim());
   if (props.length) parts.push(props.map(propText).join(", "));
-  const run = oneLine(r.run, 60);
+  const run = oneLine(runLabel(r.run), 60);
   parts.push(run ? `runs ${run}` : "no script yet");
   const to = timeoutLabel(parseTimeout(r.timeout).seconds);
   if (to) parts.push(`timeout ${to}`);
@@ -111,7 +117,7 @@ export function ruleIssues(r, rules, cols) {
   const name = r.name.trim();
   if (!name) out.name = "Give the automation a name.";
   else if (rules.some((o) => o !== r && o.name.trim() === name)) out.name = `Another automation on this board is already called "${name}".`;
-  if (!r.run.trim()) out.run = "Enter the script to run.";
+  if (ruleSteps(r.run).every((s) => !s.trim())) out.run = "Enter the script to run.";
   const te = parseTimeout(r.timeout).error;
   if (te) out.timeout = te;
   const col = effectiveColumn(cols, r.column);
@@ -130,7 +136,7 @@ export function filterRules(rules, q) {
     .trim()
     .toLowerCase();
   if (!s) return rules;
-  return rules.filter((r) => [r.name, r.run, r.column, ...r.labels].some((x) => String(x).toLowerCase().includes(s)));
+  return rules.filter((r) => [r.name, ruleSteps(r.run).join(" "), r.column, ...r.labels].some((x) => String(x).toLowerCase().includes(s)));
 }
 
 /** Rules with problems. */

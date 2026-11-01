@@ -151,6 +151,12 @@ export async function killAutomations(cwd: string, o: KillOpts = {}): Promise<Ki
 
 const startedText = (l: AutomationLive): string => l.startedAt.replace("T", " ");
 
+const runText = (r: AutomationInfo): string => {
+  if (Array.isArray(r.run)) return `${r.run.length} step${r.run.length === 1 ? "" : "s"}`;
+  const one = r.run.replace(/\s+/g, " ").trim();
+  return one.length > 40 ? `${one.slice(0, 39)}…` : one;
+};
+
 /** Output of `kb automations`. Read-only; never runs or writes anything. */
 export function automations(cwd: string, o: AutomationsOpts = {}): string {
   const now = o.now ?? (() => new Date());
@@ -181,6 +187,7 @@ export function automations(cwd: string, o: AutomationsOpts = {}): string {
       timeout: r.timeout,
       when: r.when,
       run: r.run,
+      ...(r.continueOnError ? { continueOnError: r.continueOnError } : {}),
       running: r.running,
       lastRun: r.lastRun,
       counts: r.counts,
@@ -195,12 +202,13 @@ export function automations(cwd: string, o: AutomationsOpts = {}): string {
     return `${r.lastRun.status}${ago} #${String(r.lastRun.ticketId)}`;
   };
   return table(
-    ["NAME", "BOARD", "ON", "WHEN", "TIMEOUT", "RUNNING", "LAST"],
+    ["NAME", "BOARD", "ON", "WHEN", "RUN", "TIMEOUT", "RUNNING", "LAST"],
     ov.rules.map((r) => [
       r.name,
       r.board,
       r.enabled ? (r.guard ? "yes" : "yes (guard off)") : "no",
       whenText(r),
+      runText(r),
       fmtTimeout(r.timeout),
       String(r.running),
       last(r),

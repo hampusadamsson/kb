@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { VERSION } from "../src/version.js";
-import { isDir, isSea, PUBLIC_DIR, readPublic } from "../src/web/assets.js";
+import { isDir, PUBLIC_DIR, readPublic } from "../src/web/assets.js";
 
 describe("version", () => {
   it("matches package.json", () => {
@@ -12,9 +12,6 @@ describe("version", () => {
 });
 
 describe("web assets (filesystem mode)", () => {
-  it("is not a single executable outside the SEA build", () => {
-    expect(isSea()).toBe(false);
-  });
   it("reads a real asset", () => {
     const html = readPublic("index.html")?.toString("utf8") ?? "";
     expect(html).toContain("<title>kb</title>");

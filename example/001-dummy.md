@@ -3,19 +3,19 @@ type: ticket
 id: "001"
 name: boaty
 status: done
-role: ticketor
+role: local
 labels:
   - ai
 automations:
   log-review:
     status: done
-    at: "2026-10-30T23:36:50"
+    at: "2026-10-31T11:52:28"
     exit: 0
-    runs: 1
+    runs: 3
   pi-AGENT:
     status: done
-    at: "2026-10-30T23:39:59"
+    at: "2026-10-31T12:00:38"
     exit: 0
-    runs: 1
+    runs: 3
 ---
 boats

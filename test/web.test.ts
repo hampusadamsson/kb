@@ -56,8 +56,26 @@ describe("web api", () => {
 
     const f = await call("GET", "/api/board?label=bug&property=priority:high&board=default");
     expect(f.json.boards[0].columns[0].tickets.map((t: any) => t.id)).toEqual([1]);
+    expect(f.json.labels).toEqual([{ name: "bug", count: 1 }]);
+    // the option list ignores the filters and stays stable while filtering
+    expect(f.json.labels).toEqual((await call("GET", "/api/board")).json.labels);
     expect((await call("GET", "/api/board?text=beta")).json.boards[0].columns[0].tickets).toHaveLength(1);
     expect((await call("GET", "/api/board?board=nope")).status).toBe(404);
+  });
+
+  it("lists label options (count desc, then name asc) ignoring text/label filters", async () => {
+    fs.writeFileSync(path.join(dir, "2-b.md"), ticket("2", "Beta", "labels: [bug, urgent]\n"));
+    fs.writeFileSync(path.join(dir, "3-c.md"), ticket("3", "Gamma", "labels: [bug]\n"));
+    const all = await call("GET", "/api/board");
+    expect(all.json.labels).toEqual([
+      { name: "bug", count: 3 },
+      { name: "urgent", count: 1 },
+    ]);
+    // text/label filters narrow the tickets but not the option list
+    const filtered = await call("GET", "/api/board?text=Beta&label=urgent");
+    expect(filtered.json.labels).toEqual(all.json.labels);
+    // board selection is respected
+    expect((await call("GET", "/api/board?board=other")).json.labels).toEqual([]);
   });
 
   it("ticket detail and not-found", async () => {
@@ -196,7 +214,7 @@ describe("static files", () => {
     for (const p of ["/..%2f..%2fpackage.json", "/%2e%2e/%2e%2e/package.json", "/../../package.json", "/..%2f..%2f..%2fpackage.json"]) {
       const r = await fetch(srv.url + p);
       expect([400, 404]).toContain(r.status);
-      expect(await r.text()).not.toContain('"name": "kb"');
+      expect(await r.text()).not.toContain('"name": "kbkan"');
     }
     // raw (non-normalised) request path
     const status = await new Promise<number>((resolve, reject) => {
@@ -314,6 +332,7 @@ describe("web frontend assets", () => {
       "/dialog.js": "text/javascript",
       "/dom.js": "text/javascript",
       "/filters.js": "text/javascript",
+      "/filters-logic.js": "text/javascript",
       "/settings.js": "text/javascript",
       "/settings-tabs.js": "text/javascript",
       "/ticket-rules.js": "text/javascript",

@@ -85,6 +85,7 @@ async function load() {
   $("fatal").hidden = true;
   $("app").hidden = false;
   settings.setBoardWarnings(data.warnings);
+  filters.setLabels(data.labels);
   render();
 }
 

@@ -124,6 +124,47 @@ describe("last runs and status text", () => {
   });
 });
 
+describe("multi-step rules", () => {
+  it("ruleSteps / runLabel", () => {
+    expect(a.ruleSteps("echo a")).toEqual(["echo a"]);
+    expect(a.ruleSteps(["echo a", "echo b"])).toEqual(["echo a", "echo b"]);
+    expect(a.runLabel("echo a")).toBe("echo a");
+    expect(a.runLabel(["echo a", "echo b"])).toBe("2 steps");
+  });
+  it("summary and issues tolerate a step list", () => {
+    expect(a.ruleSummary(rule({ column: "todo", run: ["echo a", "echo b"] }))).toBe("When a ticket moves to todo · runs 2 steps");
+    const ok = rule({ run: ["echo a", "echo b"] });
+    expect(a.ruleIssues(ok, [], cols)).toEqual({});
+    expect(a.ruleIssues(rule({ run: [" ", " \t"] }), [], cols).run).toBe("Enter the script to run.");
+  });
+  it("test body forwards the step list and continueOnError", () => {
+    expect(l.testBody({ run: ["a", "b"], event: "moved_to", continueOnError: true }, "b")).toEqual({
+      run: ["a", "b"],
+      event: "moved_to",
+      continueOnError: true,
+      board: "b",
+    });
+    expect(l.testBody({ run: "x", event: "created_in" }, "")).toEqual({ run: "x", event: "created_in" });
+  });
+  it("describeTestRun lists per-step results", () => {
+    const r = {
+      command: "echo a && exit 1",
+      result: {
+        exitCode: 1,
+        stdout: "a\n",
+        stderr: "",
+        steps: [
+          { exitCode: 0, stdout: "a\n", stderr: "" },
+          { exitCode: 1, stdout: "", stderr: "" },
+        ],
+      },
+    };
+    const text = l.describeTestRun(r);
+    expect(text).toContain("--- steps ---");
+    expect(text).toContain("step 2: exit 1 (failed)");
+  });
+});
+
 describe("preview", () => {
   it("renders shell-quoted sample values and props", () => {
     const s = a.sampleFor(

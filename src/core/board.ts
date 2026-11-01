@@ -5,6 +5,8 @@ import { Document, isSeq, Scalar, YAMLMap } from "yaml";
 import {
   matchRule,
   renderCommand,
+  ruleCommand,
+  runSteps,
   ticketVars,
   automationProblems,
   buildAutomationOverview,
@@ -410,8 +412,11 @@ export class Kanban {
           result,
         });
         const finish = (r: AutomationRecord) => {
+          // A multi-step run records the first failing step's number (single `run` strings keep their shape).
+          const failedStep = Array.isArray(rule.run) ? r.failedStep : undefined;
           const entry: Record<string, unknown> = { status: r.status, at: r.finishedAt, exit: r.result.exitCode };
           if (r.result.error) entry.error = r.result.error;
+          if (failedStep !== undefined) entry.step = failedStep;
           this.writeAutomationStatus(rel, ticket.id, rule.name, entry);
           const data: Record<string, unknown> = {
             rule: rule.name,
@@ -421,6 +426,7 @@ export class Kanban {
             command: clipText(r.command),
           };
           if (r.result.error) data.error = r.result.error;
+          if (failedStep !== undefined) data.step = failedStep;
           if (r.result.error === KILLED_BY_USER) data.killed = true;
           if (r.result.timedOut) {
             data.timedOut = true;
@@ -433,42 +439,57 @@ export class Kanban {
             // ignore
           }
         };
-        let command: string;
+        let commands: string[];
         try {
-          command = renderCommand(rule.run, ticketVars(ticket, event));
+          // Render every step before running any, so a template error fails the whole run up front.
+          const vars = ticketVars(ticket, event);
+          commands = runSteps(rule).map((step) => renderCommand(step, vars));
         } catch (e) {
-          finish(rec(rule.run, { exitCode: null, stdout: "", stderr: "", error: (e as Error).message }));
+          finish(rec(ruleCommand(rule), { exitCode: null, stdout: "", stderr: "", error: (e as Error).message }));
           continue;
         }
         let pid: number | undefined;
         const p: Promise<void> = (async () => {
-          let result: RunResult;
-          try {
-            result = await runner!.run(command, {
-              cwd: this.dir,
-              env: { KB_AUTOMATION: "1" },
-              ...(rule.timeout ? { timeoutMs: rule.timeout * 1000 } : {}),
-              meta: { board: ticket.board, rule: rule.name, ticketId: String(ticket.id), ticketName: ticket.name, path: rel },
-              // Record the pid so `kb automations kill` can reach this run from another process.
-              onSpawn: (s) => {
-                pid = s.pid;
-                this.writeAutomationStatus(rel, ticket.id, rule.name, {
-                  status: "running",
-                  at: startedAt,
-                  pid: s.pid,
-                  pgid: s.pgid,
-                  host: os.hostname(),
-                });
-              },
-            });
-          } catch (e) {
-            result = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
+          let result: RunResult = { exitCode: 0, stdout: "", stderr: "" };
+          let failedStep: number | undefined;
+          let firstFailure: RunResult | undefined;
+          for (const [i, command] of commands.entries()) {
+            try {
+              result = await runner!.run(command, {
+                cwd: this.dir,
+                env: { KB_AUTOMATION: "1" },
+                ...(rule.timeout ? { timeoutMs: rule.timeout * 1000 } : {}),
+                meta: { board: ticket.board, rule: rule.name, ticketId: String(ticket.id), ticketName: ticket.name, path: rel },
+                // Record the pid so `kb automations kill` can reach this run from another process.
+                onSpawn: (s) => {
+                  pid = s.pid;
+                  this.writeAutomationStatus(rel, ticket.id, rule.name, {
+                    status: "running",
+                    at: startedAt,
+                    pid: s.pid,
+                    pgid: s.pgid,
+                    host: os.hostname(),
+                  });
+                },
+              });
+            } catch (e) {
+              result = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
+            }
+            // Killed from another process (kb automations kill): record it like the web Kill button.
+            if (result.exitCode === null && result.error && result.error !== KILLED_BY_USER && pid && consumeKilled(this.dir, pid)) {
+              result = { ...result, error: KILLED_BY_USER };
+            }
+            if (result.exitCode !== 0 || result.error) {
+              if (failedStep === undefined) {
+                failedStep = i + 1;
+                firstFailure = result;
+              }
+              if (rule.continueOnError !== true) break;
+            }
           }
-          // Killed from another process (kb automations kill): record it like the web Kill button.
-          if (result.exitCode === null && result.error && result.error !== KILLED_BY_USER && pid && consumeKilled(this.dir, pid)) {
-            result = { ...result, error: KILLED_BY_USER };
-          }
-          finish(rec(command, result));
+          // A failed multi-step run reports the first failure, not the last step's result.
+          const r = rec(commands.join(" && "), firstFailure ?? result);
+          finish(failedStep === undefined ? r : { ...r, status: "failed", failedStep });
         })()
           .catch(() => {})
           .finally(() => this.inflight.delete(p));

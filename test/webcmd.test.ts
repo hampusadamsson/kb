@@ -28,6 +28,16 @@ async function start(dir: string, o: Parameters<typeof runWeb>[1], i: WebIO): Pr
   servers.push(s);
   return s;
 }
+/** Port that was free a moment ago (for fixed-port tests). */
+async function freePort(): Promise<number> {
+  const s = net.createServer();
+  await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+  const p = (s.address() as net.AddressInfo).port;
+  await new Promise<void>((r) => s.close(() => r()));
+  return p;
+}
+/** Replace kanban.yaml (keeping the starter columns) with an extra top-level block. */
+const webCfg = (dir: string, yaml: string) => fs.writeFileSync(path.join(dir, "kanban.yaml"), `columns: [todo, doing, done]\n${yaml}`);
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.close()));
   for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
@@ -79,6 +89,38 @@ describe("runWeb", () => {
   it("errors on invalid port", async () => {
     for (const p of ["abc", "-1", "70000", "1.5", ""]) {
       await expect(runWeb(tmp(), { port: p, open: false }, io().i)).rejects.toThrow(/invalid port/);
+    }
+  });
+  it("uses web.host/web.port from config when no flags are given", async () => {
+    const dir = tmp();
+    const p = await freePort();
+    webCfg(dir, `web:\n  host: 127.0.0.1\n  port: ${p}\n`);
+    const t = io();
+    const s = await start(dir, { open: false }, t.i);
+    expect(s.port).toBe(p);
+    expect(t.out).toEqual([`kb web running at http://127.0.0.1:${p}`]);
+    expect(t.err).toEqual([]);
+  });
+  it("web.port: 0 means OS-assigned", async () => {
+    const dir = tmp();
+    webCfg(dir, "web:\n  port: 0\n");
+    const s = await start(dir, { open: false }, io().i);
+    expect(s.port).toBeGreaterThan(0);
+  });
+  it("--host/--port flags win over config", async () => {
+    const dir = tmp();
+    webCfg(dir, "web:\n  host: 0.0.0.0\n  port: 4747\n");
+    const t = io();
+    const s = await start(dir, { host: "127.0.0.1", port: 0, open: false }, t.i);
+    expect(s.host).toBe("127.0.0.1");
+    expect(t.out).toEqual([`kb web running at http://127.0.0.1:${s.port}`]);
+    expect(t.err).toEqual([]);
+  });
+  it("invalid web.port is a config error", async () => {
+    for (const bad of ["70000", "4747x", "-1", "1.5"]) {
+      const dir = tmp();
+      webCfg(dir, `web:\n  port: ${bad}\n`);
+      await expect(runWeb(dir, { open: false }, io().i)).rejects.toThrow(/invalid config.*web\.port/);
     }
   });
   it("busy port: explicit errors, default auto-increments", async () => {

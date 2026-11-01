@@ -152,6 +152,8 @@ const ruleRow = (a) => ({
   labels: [...(a.when.labels ?? [])],
   props: Object.entries(a.when.props ?? {}).map(([key, raw]) => ({ key, value: String(raw), raw })),
   run: a.run,
+  // a step list keeps its steps as-is; the form only edits a single script
+  continueOnError: a.continueOnError === true,
   enabled: a.enabled !== false,
   guard: a.guard !== false,
   timeout: a.timeout === undefined ? "" : String(a.timeout), // field text; "" = none
@@ -166,6 +168,7 @@ export const newRule = (cols) => ({
   labels: [],
   props: [],
   run: "",
+  continueOnError: false,
   enabled: true,
   guard: true,
   timeout: "",
@@ -176,6 +179,8 @@ export function configToForm(c) {
   return {
     name: c.name,
     glob: c.glob,
+    // not editable in the form: carried through so saving never drops the user's web: block
+    web: c.web,
     columns: colRows(c.columns),
     tickets: ticketsToForm(c.tickets),
     automations: (c.automations ?? []).map(ruleRow),
@@ -226,6 +231,7 @@ function ruleToConfig(r, cols) {
   }
   if (Object.keys(props).length) when.props = props;
   const out = { name: r.name.trim(), when, run: r.run };
+  if (r.continueOnError) out.continueOnError = true;
   if (!r.enabled) out.enabled = false;
   if (r.guard === false) out.guard = false; // default on: omitted from YAML
   const t = parseTimeout(r.timeout).seconds;
@@ -248,6 +254,7 @@ function renamedColumns(rows) {
 /** Form state → PUT /api/config payload parts: { config, renames }. */
 export function formToPayload(f) {
   const config = { name: f.name.trim(), glob: f.glob.trim(), columns: colValues(f.columns), boards: {} };
+  if (f.web) config.web = { ...f.web }; // untouched: the form does not edit it
   // always sent: the server keeps the current rules when the key is omitted (default object resets them)
   config.tickets = ticketsToConfig(f.tickets ?? ticketsToForm(undefined));
   if (f.automations?.length) config.automations = rulesToConfig(f.automations, f.columns);
@@ -318,13 +325,14 @@ export function checkRules(board, rules, cols) {
   const have = colValues(cols);
   const seen = new Set();
   for (const r of rules) {
+    const steps = Array.isArray(r.run) ? r.run : [r.run];
     const name = r.name.trim();
     const who = name ? `Automation "${name}"` : "An automation";
     const where = ` on board "${board}"`;
     if (!name) return `An automation${where} has no name.`;
     if (seen.has(name)) return `Duplicate automation name "${name}"${where}.`;
     seen.add(name);
-    if (!r.run.trim()) return `${who}${where} has an empty script.`;
+    if (!steps.some((s) => s.trim())) return `${who}${where} has an empty script.`;
     const te = parseTimeout(r.timeout).error;
     if (te) return `${who}${where}: ${te}`;
     const col = effectiveColumn(cols, r.column);
@@ -343,6 +351,7 @@ export const logTitle = (r) => `${r.board}/${r.rule}`;
 /** Test-run request body from a form rule. */
 export function testBody(rule, board) {
   const b = { run: rule.run, event: rule.event };
+  if (rule.continueOnError) b.continueOnError = true;
   const t = parseTimeout(rule.timeout).seconds;
   if (t > 0) b.timeout = t;
   if (board) b.board = board;
@@ -356,6 +365,14 @@ export function describeTestRun(r) {
   if (res.error) lines.push(`error: ${res.error}`);
   if (res.stdout) lines.push("--- stdout ---", res.stdout.replace(/\n$/, ""));
   if (res.stderr) lines.push("--- stderr ---", res.stderr.replace(/\n$/, ""));
+  // Multi-step runs report each step; mark the failures so a continued run is readable.
+  if (res.steps?.length > 1) {
+    lines.push("--- steps ---");
+    res.steps.forEach((s, i) => {
+      const bad = s.exitCode !== 0 || s.error;
+      lines.push(`step ${i + 1}: exit ${s.exitCode ?? "(none)"}${s.error ? `, ${s.error}` : ""}${bad ? " (failed)" : ""}`);
+    });
+  }
   return lines.join("\n");
 }
 

@@ -65,6 +65,8 @@ export interface AutomationRecord {
   finishedAt: string;
   status: "done" | "failed";
   result: RunResult;
+  /** 1-based index of the first failing step, when the rule has several steps */
+  failedStep?: number;
 }
 
 /** Loop guardrail: a ticket with this many recorded automation runs gets no more (unless the rule has guard: false). */
@@ -211,6 +213,16 @@ function contextMessage(p: PlaceholderProblem): string {
   return `{{ ${p.variable} }} must not be inside "…"/'…'/backticks/heredoc (${p.context}) — values are shell-quoted automatically, write it bare, e.g. echo {{ name }}`;
 }
 
+/** The rule's commands, in order (a plain string `run` is a single step). */
+export function runSteps(rule: Pick<Automation, "run">): string[] {
+  return Array.isArray(rule.run) ? rule.run : [rule.run];
+}
+
+/** All steps joined for logs/records (`&&` reads like the sequence). */
+export function ruleCommand(rule: Pick<Automation, "run">): string {
+  return Array.isArray(rule.run) ? rule.run.join(" && ") : rule.run;
+}
+
 /** All problems of the automations in a config (shared by validate and settings). */
 export function automationProblems(config: {
   name: string;
@@ -229,9 +241,13 @@ export function automationProblems(config: {
       if (!rule.name.trim()) out.push(`board "${board}": automation has an empty name`);
       else if (seen.has(rule.name)) out.push(`${where}: duplicate name`);
       seen.add(rule.name);
-      if (!rule.run.trim()) out.push(`${where}: empty run command`);
-      for (const v of unknownVars(rule.run)) out.push(`${where}: unknown template variable "${v}"`);
-      for (const p of placeholderContextProblems(rule.run)) out.push(`${where}: ${contextMessage(p)}`);
+      const steps = runSteps(rule);
+      for (const [i, cmd] of steps.entries()) {
+        const step = Array.isArray(rule.run) ? ` in step ${String(i + 1)}` : "";
+        if (!cmd.trim()) out.push(`${where}: empty run command${step}`);
+        for (const v of unknownVars(cmd)) out.push(`${where}: unknown template variable "${v}"${step}`);
+        for (const p of placeholderContextProblems(cmd)) out.push(`${where}: ${contextMessage(p)}${step}`);
+      }
       const col = rule.when.moved_to ?? rule.when.created_in;
       if (col !== undefined && !cols.includes(col)) {
         out.push(`${where}: column "${col}" is not a column of board "${board}"`);
@@ -335,7 +351,10 @@ export interface AutomationInfo {
   /** seconds; 0 = no timeout */
   timeout: number;
   when: Automation["when"];
-  run: string;
+  /** the script as configured: one command, or the list of steps */
+  run: string | string[];
+  /** steps keep running after a failure (only when the rule sets it) */
+  continueOnError?: boolean;
   /** non-stale running entries */
   running: number;
   lastRun: AutomationLastRun | null;
@@ -401,7 +420,8 @@ export function buildAutomationOverview(
         guard: r.guard !== false,
         timeout: r.timeout ?? 0,
         when: r.when,
-        run: clipText(r.run),
+        run: typeof r.run === "string" ? clipText(r.run) : r.run.map((s) => clipText(s)),
+        ...(r.continueOnError === true ? { continueOnError: true } : {}),
         running: 0,
         lastRun: null,
         counts: { done: 0, failed: 0, skipped: 0, running: 0, stale: 0 },
@@ -432,7 +452,7 @@ export function buildAutomationOverview(
               ticket: { id: t.id, name: t.name, path: t.path },
               startedAt: at,
               elapsedMs: Math.max(0, nowMs - ms),
-              command: info?.run ?? "",
+              command: info ? ruleCommand(info) : "",
               timeoutSeconds: info?.timeout ?? 0,
               ...(pid ? { pid, pgid } : {}),
               ...(host ? { host } : {}),

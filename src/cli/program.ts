@@ -228,11 +228,11 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
   program
     .command("web")
     .description("Start the local web UI")
-    .option("--host <addr>", "address to bind", "127.0.0.1")
-    .option("--port <n>", "port (default 4747, auto-increments if busy)")
+    .option("--host <addr>", "address to bind (default 127.0.0.1, or web.host in kanban.yaml)")
+    .option("--port <n>", "port (default 4747 or web.port; auto-increments if busy)")
     .option("--no-open", "do not open the browser")
     .option("--no-automation", "do not run board automations")
-    .action(async (o: { host: string; port?: string; open: boolean; automation?: boolean }) => {
+    .action(async (o: { host?: string; port?: string; open: boolean; automation?: boolean }) => {
       try {
         const server = await runWeb(
           cwd(),

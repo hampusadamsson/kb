@@ -97,6 +97,117 @@ body {
 .f input[type="text"] {
   min-width: 140px;
 }
+/* label filter: top-N checkboxes + searchable dropdown */
+.lf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.lf-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+}
+.lf-empty,
+.lf-none {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.lf-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  max-width: 100%;
+}
+.lf-opt input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+  flex: none;
+}
+.lf-opt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+.lf-opt-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.lf-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lf-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lf-trigger .badge-count {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.lf-neg {
+  display: contents;
+}
+.lf-negchip {
+  font-size: 11px;
+  padding: 1px 5px;
+}
+.lf-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.lf-panel[hidden] {
+  display: none;
+}
+.lf-panel input.lf-search {
+  width: 100%;
+  min-width: 0;
+}
+.lf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.lf-list .lf-opt {
+  padding: 2px 4px;
+  border-radius: 5px;
+}
+.lf-list .lf-opt:hover {
+  background: var(--card);
+}
+.lf-list .lf-opt-name {
+  flex: 1;
+  max-width: none;
+}
+
 .live {
   display: inline-flex;
   align-items: center;
@@ -243,7 +354,7 @@ main {
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   overflow-y: auto;
   min-height: 20px;
 }
@@ -255,8 +366,8 @@ main {
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px;
+  border-radius: 5px;
+  padding: 5px 7px;
   cursor: pointer;
 }
 .card[draggable="true"] {
@@ -273,9 +384,10 @@ main {
 }
 .card-top {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
   flex-wrap: wrap;
+  line-height: 1.2;
 }
 .id {
   color: var(--muted);
@@ -285,6 +397,8 @@ main {
 .name {
   font-weight: 600;
   overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.25;
 }
 .badge {
   font-size: 11px;
@@ -298,15 +412,15 @@ main {
 .meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
+  gap: 3px;
+  margin-top: 3px;
 }
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 11px;
-  padding: 1px 6px;
+  font-size: 10px;
+  padding: 0 5px;
   border-radius: 10px;
   overflow-wrap: anywhere;
 }
@@ -696,7 +810,7 @@ dialog::backdrop {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 3px;
   min-height: 10px;
 }
 .card-autos .dots {
@@ -1186,6 +1300,7 @@ main {
   min-width: 0;
 }
 .chip,
+.lf-negchip,
 .name,
 .ctext,
 .auto-error,
@@ -1287,13 +1402,17 @@ main {
   .arule-switch {
     min-height: 44px;
   }
-  .card-move {
-    position: static;
-    width: 100%;
-    height: auto;
-    opacity: 1;
-    pointer-events: auto;
-    margin-top: 8px;
+  .lf-list .lf-opt {
+    min-height: 44px;
+  }
+  /* no fast-move dropdown on touch: cards are moved via the ticket dialog or drag */
+  /* keep roomier card padding on touch targets */
+  .card {
+    padding: 8px;
+  }
+  .chip {
+    font-size: 11px;
+    padding: 1px 6px;
   }
   .live-row .link-btn,
   .logs-ticket .link-btn {
@@ -1347,6 +1466,19 @@ main {
   }
   .chip-input input {
     min-width: 0;
+  }
+  /* dropdown renders in flow so it cannot overflow a narrow screen */
+  .lf-panel {
+    position: static;
+    width: 100%;
+    max-width: none;
+    margin-top: 4px;
+  }
+  .lf-list {
+    max-height: 45dvh;
+  }
+  .lf-opt-name {
+    max-width: none;
   }
   .columns {
     scroll-snap-type: x mandatory;
@@ -1872,6 +2004,14 @@ main {
   width: 100%;
   resize: vertical;
   min-height: 64px;
+}
+.arule-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
 }
 .arule-vars {
   display: flex;

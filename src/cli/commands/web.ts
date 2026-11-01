@@ -57,10 +57,13 @@ export async function runWeb(
   opts: WebOpts,
   io: WebIO,
 ): Promise<RunningServer & { shutdown(deadlineMs?: number): Promise<void> }> {
-  const host = opts.host ?? "127.0.0.1";
-  const explicit = opts.port !== undefined;
-  const port = explicit ? parsePort(opts.port as string | number) : 4747;
-  createKanban({ dir: cwd }).load(); // throws if config missing/invalid
+  const { config } = createKanban({ dir: cwd }).load(); // throws if config missing/invalid
+  const host = opts.host ?? config.web?.host ?? "127.0.0.1";
+  // explicit --port wins over web.port, which wins over the built-in default
+  const wanted = opts.port !== undefined ? parsePort(opts.port as string | number) : config.web?.port;
+  const port = wanted ?? 4747;
+  // a deliberate port (flag or config) must not silently auto-increment; 0 always means OS-assigned
+  const strictPort = wanted !== undefined && wanted !== 0;
 
   const live = new LiveRuns();
   const runner = opts.automation === false ? undefined : createShellRunner({ registry: live });
@@ -68,7 +71,7 @@ export async function runWeb(
     dir: cwd,
     host,
     port,
-    strictPort: explicit,
+    strictPort,
     runner,
     live,
     log: createAutomationLog(cwd),

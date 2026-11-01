@@ -13,9 +13,11 @@ import {
   loadConfig,
   parseTicketRules,
   ticketRules,
+  webSchema,
   type Automation,
   type Config,
   type TicketRules,
+  type WebConfig,
 } from "./config.js";
 import { KanbanError } from "./errors.js";
 import { updateFile, YAML_OPTS } from "./frontmatter.js";
@@ -30,6 +32,8 @@ export interface ConfigInput {
   tickets?: TicketRules;
   automations?: Automation[];
   boards: Record<string, { columns: string[]; automations?: Automation[] }>;
+  /** web UI host/port defaults; round-tripped untouched by the settings form */
+  web?: WebConfig;
 }
 
 export interface TicketPreview {
@@ -101,6 +105,7 @@ const inputSchema = z.object({
   columns: columnsSchema,
   automations: z.array(automationSchema).optional(),
   tickets: z.unknown().optional(),
+  web: webSchema.optional(),
   boards: z
     .record(nonEmpty("board name"), z.object({ columns: columnsSchema, automations: z.array(automationSchema).optional() }))
     .default({}),
@@ -276,6 +281,11 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
     doc.set("glob", next.glob);
     changed = true;
   }
+  if (JSON.stringify(next.web ?? {}) !== JSON.stringify(old.web ?? {})) {
+    if (next.web && Object.keys(next.web).length > 0) doc.set("web", doc.createNode(next.web));
+    else doc.delete("web");
+    changed = true;
+  }
   const oldT = ticketRules(old);
   const newT = next.tickets ?? oldT;
   if (JSON.stringify(oldT) !== JSON.stringify(newT)) {
@@ -386,6 +396,7 @@ export function getConfigSnapshot(dir: string): ConfigSnapshot {
     if (v.automations?.length) boards[k].automations = structuredClone(v.automations);
   }
   const config: ConfigInput = { name: c.name, columns: [...c.columns], glob: c.glob, boards };
+  if (c.web) config.web = { ...c.web };
   if (c.automations?.length) config.automations = structuredClone(c.automations);
   if (!isDefaultTicketRules(c.tickets)) config.tickets = structuredClone(ticketRules(c));
   return {

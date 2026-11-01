@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { buildProgram } from "./program.js";
 
-// No top-level await: the single-executable bundle is CJS, where TLA is unsupported.
+// No top-level await: keep the entry point loadable by older CJS interop tooling.
 buildProgram()
   .parseAsync()
   .catch((e: unknown) => {

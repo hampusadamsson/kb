@@ -1,5 +1,5 @@
 {
-  "name": "kb",
+  "name": "kbkan",
   "version": "0.1.0",
   "description": "Local markdown kanban CLI and web UI: tickets are plain .md files, the board is kanban.yaml.",
   "type": "module",
@@ -42,8 +42,6 @@
   },
   "scripts": {
     "build": "tsc && node -e \"fs.cpSync('src/web/public','dist/web/public',{recursive:true})\"",
-    "build:sea": "node scripts/build-sea.mjs",
-    "build:sea:smoke": "node scripts/sea-smoke.mjs",
     "install:local": "npm run build && npm link",
     "dev": "tsc --watch",
     "test": "vitest run",
@@ -78,11 +76,9 @@
     "@commitlint/config-conventional": "^21.2.4",
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^5.0.5",
-    "esbuild": "^0.28.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "oxlint": "^1.90.0",
-    "postject": "^1.0.0-alpha.6",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"

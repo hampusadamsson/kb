@@ -58,6 +58,19 @@ describe("validate automations", () => {
     expect(m).toHaveLength(1);
     expect(m[0]).toContain("bogus");
   });
+  it("rejects an empty step and names its index", () => {
+    const m = msgs(check(rules(`{ name: a, when: { moved_to: done }, run: ["echo hi", "  "] }`)));
+    expect(m).toHaveLength(1);
+    expect(m[0]).toContain('automation "a"');
+    expect(m[0]).toMatch(/empty run command in step 2/);
+  });
+  it("accepts a step list and reports bad steps by index", () => {
+    expect(check(rules(`{ name: a, when: { moved_to: done }, run: ["echo {{ id }}", "echo hi"] }`)).errors).toEqual([]);
+    const m = msgs(check(rules(`{ name: a, when: { moved_to: done }, run: ["echo hi", "echo {{ bogus }}"] }`)));
+    expect(m).toHaveLength(1);
+    expect(m[0]).toContain("bogus");
+    expect(m[0]).toContain("step 2");
+  });
 });
 
 describe("validate placeholder context", () => {
