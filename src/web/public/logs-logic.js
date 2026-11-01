@@ -13,7 +13,7 @@ export const TYPE_FILTERS = [
   { value: "ids", label: "Fix ids", type: "ids.fixed" },
 ];
 
-export const SOURCE_FILTERS = ["cli", "web", "automation"];
+export const SOURCE_FILTERS = ["cli", "web", "mcp", "automation"];
 
 export const PAGE_SIZE = 50;
 

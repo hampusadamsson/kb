@@ -17,7 +17,7 @@ export type KbEventType =
   | "automation.finished"
   | "automation.skipped";
 
-export type KbEventSource = "cli" | "web" | "automation" | "api" | "unknown";
+export type KbEventSource = "cli" | "web" | "mcp" | "automation" | "api" | "unknown";
 
 export interface KbEvent {
   /** unique and sortable (time, then per-process counter) */

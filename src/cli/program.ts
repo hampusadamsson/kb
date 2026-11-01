@@ -10,6 +10,7 @@ import { applyHelpContent } from "./help-content.js";
 import { fix } from "./commands/fix.js";
 import { init } from "./commands/init.js";
 import { ls, lsJson, parseLimit } from "./commands/ls.js";
+import { mcp } from "./commands/mcp.js";
 import { show } from "./commands/show.js";
 import { defaultOpener, runWeb } from "./commands/web.js";
 import { validate } from "./commands/validate.js";
@@ -32,6 +33,7 @@ export const commandNames = [
   "validate",
   "automations",
   "web",
+  "mcp",
   "completion",
 ] as const;
 /** Central error handler: message to stderr, exit code 1. */
@@ -251,6 +253,19 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
         };
         process.once("SIGINT", stop);
         process.once("SIGTERM", stop);
+      } catch (e) {
+        console.error(`error: ${(e as Error).message}`);
+        process.exitCode = 1;
+      }
+    });
+
+  program
+    .command("mcp")
+    .description("Run kb as an MCP server on stdio")
+    .option("--dir <path>", "board directory (default: current directory)", ".")
+    .action(async (o: { dir: string; automation?: boolean }) => {
+      try {
+        await mcp(cwd(), { dir: o.dir, automation: automationEnabled(off(o)) });
       } catch (e) {
         console.error(`error: ${(e as Error).message}`);
         process.exitCode = 1;

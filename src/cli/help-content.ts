@@ -201,6 +201,23 @@ const COMMANDS: Record<string, Content> = {
     ],
     examples: ["kb web", "kb web --port 8080 --no-open", "kb web --no-automation"],
   },
+  mcp: {
+    sections: [
+      [
+        "Notes",
+        [
+          "- Stdio only: no port is opened and nothing listens on the network.",
+          "- An MCP client (editor, agent) spawns 'kb mcp' itself; you do not run it by hand.",
+          "- stdout is the protocol channel: stdout carries JSON-RPC, everything else goes to stderr.",
+          "- No auth or loopback concerns: access is whatever the spawning client already has.",
+          "- Automations are fire-and-forget: a write tool returns before its automation finishes.",
+          "- --dir picks the board directory (default: current directory).",
+          AUTO,
+        ],
+      ],
+    ],
+    examples: ["kb mcp", "kb mcp --dir ../other-board", "kb mcp --no-automation"],
+  },
   completion: {
     sections: [
       [
