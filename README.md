@@ -1,7 +1,7 @@
 # kb
 
 <p align="center">
-  <img src="kb_image.png" alt="kb screenshot" width="560">
+  <img src="kb_image.png" alt="kb screenshot" width="773">
 </p>
 
 A small, local, single-user kanban CLI: tickets are markdown files with YAML frontmatter, the board is `kanban.yaml`.

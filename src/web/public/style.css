@@ -64,6 +64,27 @@ body {
 .spacer {
   flex: 1;
 }
+.menu {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.menu .btn[aria-current="page"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.top.in-view .filters,
+.top.in-view #filters-toggle {
+  display: none !important;
+}
+.view .set-panel {
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+}
+.view .form-footer {
+  padding-bottom: 8px;
+}
 .tabs {
   display: flex;
   gap: 4px;
@@ -240,6 +261,9 @@ input:disabled,
 select:disabled,
 textarea:disabled {
   opacity: 0.7;
+}
+.composer textarea {
+  min-height: 4.5em;
 }
 textarea {
   width: 100%;
@@ -484,6 +508,19 @@ dialog::backdrop {
 }
 .row2 .field {
   flex: 1;
+}
+.row3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.row3 .field {
+  flex: 1 1 110px;
+  min-width: 110px;
+}
+.row3 .field.grow {
+  flex: 2 1 160px;
+  min-width: 160px;
 }
 .field input[type="text"],
 .field select {
@@ -1529,6 +1566,16 @@ main {
     align-items: stretch;
   }
   .top.filters-open .filters {
+    display: flex;
+  }
+  .menu {
+    display: none;
+    order: 6;
+    flex: 1 0 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .top.menu-open .menu {
     display: flex;
   }
   .top {

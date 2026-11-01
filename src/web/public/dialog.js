@@ -131,14 +131,12 @@ class Session {
     this.commentInput = h(create ? "input" : "textarea", {
       type: create ? "text" : undefined,
       id: "t-comment",
-      rows: create ? undefined : 2,
-      placeholder: create ? "optional initial comment" : "Add a comment…",
+      rows: create ? undefined : 3,
+      placeholder: create ? "optional initial comment" : "Add a comment… (Enter to send, Shift+Enter for newline)",
       "aria-label": create ? "Comment" : "Add a comment",
       disabled: ro,
     });
-    this.commentBtn = create
-      ? null
-      : h("button", { type: "button", class: "btn primary", text: "Add comment", disabled: true, onclick: () => this.addComment() });
+    this.commentBtn = null;
     this.commentInput.addEventListener("input", () => this.commentDirty());
     // Enter adds (Shift+Enter = newline); the create form is never submitted from here.
     this.commentInput.addEventListener("keydown", (e) => {
@@ -155,7 +153,7 @@ class Session {
           { class: "field" },
           h("label", { for: "t-comment" }, "Comments", " ", this.commentCount),
           this.commentList,
-          ro ? null : h("div", { class: "composer" }, this.commentInput, h("div", { class: "composer-side" }, this.commentBtn)),
+          ro ? null : h("div", { class: "composer" }, this.commentInput),
         );
 
     this.saveBtn = h("button", { type: "submit", class: "btn primary", text: create ? "Create" : "Save", hidden: ro });
@@ -186,9 +184,14 @@ class Session {
       head,
       meta,
       field("Name", "t-name", this.name),
-      h("div", { class: "row2" }, field("Status", "t-status", this.status), field("Board", "t-board", this.board)),
+      h(
+        "div",
+        { class: "row3" },
+        field("Status", "t-status", this.status),
+        field("Board", "t-board", this.board),
+        h("div", { class: "field grow" }, h("span", { class: "lbl", text: "Labels" }), this.labels.el),
+      ),
       boards,
-      h("div", { class: "field" }, h("span", { class: "lbl", text: "Labels" }), this.labels.el),
       h("div", { class: "field" }, h("span", { class: "lbl", text: "Properties" }), this.propList, addProp),
       field("Body", "t-body", this.body),
       commentRow,
@@ -302,7 +305,7 @@ class Session {
     const el = this.commentInput;
     if (el.tagName !== "TEXTAREA") return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 72), 140)}px`;
   }
 
   current() {

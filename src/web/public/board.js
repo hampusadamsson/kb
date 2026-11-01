@@ -103,8 +103,8 @@ function renderCard(t, handlers, targets) {
       h("span", { class: "id", text: idText }),
       t.duplicate ? h("span", { class: "badge warn", text: "⚠ duplicate id" }) : null,
       !t.hasId ? h("span", { class: "badge warn", text: "⚠ no id" }) : null,
+      h("span", { class: "name", text: t.name }),
     ),
-    h("div", { class: "name", text: t.name }),
     t.labels.length || Object.keys(t.props).length
       ? h(
           "div",

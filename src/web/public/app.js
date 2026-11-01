@@ -15,6 +15,7 @@ const state = {
   dragging: false,
   pending: false, // a refresh was requested while dragging
   loadSeq: 0,
+  view: "board", // board | automations | live | logs
 };
 
 const filters = createFilters($("filters"), (f) => {
@@ -83,7 +84,7 @@ async function load() {
   state.data = data;
   state.validation = validation;
   $("fatal").hidden = true;
-  $("app").hidden = false;
+  $("app").hidden = state.view !== "board";
   settings.setBoardWarnings(data.warnings);
   filters.setLabels(data.labels);
   render();
@@ -132,9 +133,10 @@ function renderTabs() {
       type: "button",
       role: "tab",
       class: "tab",
-      "aria-selected": String(sel === name),
+      "aria-selected": String(state.view === "board" && sel === name),
       text: label,
       onclick: () => {
+        if (!setView("board")) return;
         state.filters = { ...state.filters, board: name };
         writeHash();
       },
@@ -183,7 +185,38 @@ const handlers = {
   },
 };
 
-$("settings-btn").addEventListener("click", () => settings.open());
+// ---- main views (automations / live / logs) + hamburger menu ----
+
+const setMenuOpen = (on) => {
+  document.querySelector(".top").classList.toggle("menu-open", on);
+  $("menu-toggle").setAttribute("aria-expanded", String(on));
+};
+$("menu-toggle").addEventListener("click", () => setMenuOpen($("menu-toggle").getAttribute("aria-expanded") !== "true"));
+
+/** Switch the main area. Returns false when the user cancelled leaving unsaved edits. */
+function setView(v) {
+  setMenuOpen(false);
+  if (v === state.view) return true;
+  if (!settings.closeView()) return false;
+  state.view = v;
+  $("app").hidden = v !== "board" || !state.data;
+  $("view").hidden = v === "board";
+  document.querySelector(".top").classList.toggle("in-view", v !== "board");
+  for (const b of document.querySelectorAll("#menu [data-view]")) {
+    if (b.dataset.view === v) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  }
+  if (v !== "board") settings.openView(v);
+  if (state.data) renderTabs();
+  return true;
+}
+for (const b of document.querySelectorAll("#menu [data-view]")) {
+  b.addEventListener("click", () => setView(b.dataset.view === state.view ? "board" : b.dataset.view));
+}
+
+$("settings-btn").addEventListener("click", () => {
+  if (setView("board")) settings.open();
+});
 $("settings-close").addEventListener("click", () => settings.requestClose());
 settings.init(() => load(), {
   boardNames: () => state.data?.boardNames ?? [],
@@ -241,8 +274,8 @@ function connect() {
 // Header dot while automations run
 settings.onLiveChange(() => {
   const n = settings.liveCount();
-  $("settings-run").hidden = n === 0;
-  $("settings-btn").title = n ? `${n} automation${n === 1 ? "" : "s"} running` : "";
+  $("live-run").hidden = n === 0;
+  $("nav-live").title = n ? `${n} automation${n === 1 ? "" : "s"} running` : "";
 });
 
 // ---- boot ----

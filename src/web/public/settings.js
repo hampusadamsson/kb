@@ -4,8 +4,6 @@ import { h, clear, toast } from "./dom.js";
 import { automationsTab } from "./automations.js";
 import * as logs from "./logs.js";
 import * as live from "./live.js";
-import { liveLabel } from "./live-logic.js";
-import { tabList, tabPanel } from "./settings-tabs.js";
 import { ticketRulesSection } from "./ticket-rules.js";
 import { scopeLines } from "./ticket-rules-logic.js";
 import {
@@ -13,8 +11,6 @@ import {
   configToForm,
   describeChange,
   describeTicketChange,
-  dirtyTabs,
-  errorTab,
   formDirty,
   formToPayload,
   hasFixableIdIssues,
@@ -35,7 +31,9 @@ let formError = "";
 let busy = false;
 let fixPlan = null; // dry-run `fix` preview: {changes} | {changes: []} | {error}
 
-export const isOpen = () => dlg().open;
+// Where the form/panels render: the Settings dialog (config only) or the main page view (automations/live/logs).
+let host = "dialog";
+export const isOpen = () => dlg().open || host === "page";
 
 let liveChanged = () => {};
 /** Called by app.js with a callback for when the number of running automations changes. */
@@ -49,9 +47,12 @@ export function init(applied, logsCtx) {
   onApplied = applied;
   if (logsCtx) {
     logs.configure(logsCtx);
-    live.configure({ openTicket: logsCtx.openTicket, onChange: () => (refreshTabs(), liveChanged()) });
+    live.configure({ openTicket: logsCtx.openTicket, onChange: () => liveChanged() });
   }
-  dlg().addEventListener("close", () => live.unmount());
+  dlg().addEventListener("close", () => {
+    live.unmount();
+    clear(document.getElementById("settings-body"));
+  });
   dlg().addEventListener("mousedown", (e) => {
     dlg().dataset.bd = e.target === dlg() ? "1" : "";
   });
@@ -74,7 +75,33 @@ export function setBoardWarnings(w) {
   boardWarnings = w ?? [];
 }
 
+/** Show automations/live/logs in the main page view. */
+export async function openView(id) {
+  host = "page";
+  banner = "";
+  preview = null;
+  fixPlan = null;
+  formError = "";
+  activeTab = id;
+  await loadConfig();
+  await renderAll();
+}
+
+/** Leave the page view (confirms unsaved automation edits). Returns false when cancelled. */
+export function closeView() {
+  if (host !== "page") return true;
+  if (form && loaded && formDirty(form, loaded.config)) {
+    if (!confirm("Discard unsaved changes?")) return false;
+    form = configToForm(loaded.config);
+  }
+  live.unmount();
+  clear(document.getElementById("view-body"));
+  host = "dialog";
+  return true;
+}
+
 export async function open() {
+  host = "dialog";
   if (!dlg().open) dlg().showModal();
   banner = "";
   preview = null;
@@ -87,7 +114,7 @@ export async function open() {
 
 /** Called on live updates while open: refresh health; handle config changes on disk. */
 export async function refresh() {
-  if (!dlg().open || busy) return;
+  if (!isOpen() || busy) return;
   if (activeTab === "logs") logs.live();
   let changed = false;
   try {
@@ -110,7 +137,6 @@ export async function refresh() {
   } catch {
     return;
   }
-  refreshTabs();
   updateHealth(); // Health section + footer summary only: form and scroll stay untouched
 }
 
@@ -131,40 +157,11 @@ async function loadConfig() {
 
 let activeTab = "config";
 let validation = null; // last GET /api/validate
-let tabs = null; // tab strip controller
 
-const healthCount = () => (validation ? validation.errors.length + validation.warnings.length + boardWarnings.length : 0);
-
-function tabItems() {
-  const d = form && loaded ? dirtyTabs(form, loaded.config) : { config: false, automations: false };
-  const bad = formError ? errorTab(formError) : "";
-  const n = healthCount();
-  return [
-    {
-      id: "config",
-      label: "Config",
-      issues: n,
-      level: issueSummary(validation, boardWarnings).level,
-      dirty: d.config,
-      error: bad === "config",
-    },
-    { id: "automations", label: "Automations", dirty: d.automations, error: bad === "automations" },
-    { id: "live", label: liveLabel(live.count()), running: live.count() > 0 },
-    { id: "logs", label: "Logs" },
-  ];
-}
-
-const refreshTabs = () => tabs?.update(tabItems());
-
-function selectTab(id) {
-  if (id === activeTab) return;
-  activeTab = id;
-  refreshTabs();
-  renderPanel();
-}
+const tabPanel = (id) => h("div", { class: "set-panel", role: "region", "aria-label": id, tabIndex: 0 });
 
 async function renderAll() {
-  const body = document.getElementById("settings-body");
+  const body = document.getElementById(host === "page" ? "view-body" : "settings-body");
   try {
     validation = await api.validate();
   } catch (e) {
@@ -173,8 +170,7 @@ async function renderAll() {
     return;
   }
   clear(body);
-  tabs = tabList(tabItems(), () => activeTab, selectTab);
-  body.append(tabs.el, h("div", { id: "settings-panel-slot" }));
+  body.append(h("div", { id: "settings-panel-slot" }));
   await renderPanel();
 }
 
@@ -184,7 +180,8 @@ async function renderPanel() {
   if (!slot) return;
   const panel = tabPanel(activeTab);
   const formTab = activeTab === "config" || activeTab === "automations";
-  slot.replaceChildren(panel, footer(formTab && form ? activeTab : "other"));
+  const kind = formTab && form ? activeTab : "other";
+  slot.replaceChildren(panel, ...(host === "page" && kind === "other" ? [] : [footer(kind)]));
   if (activeTab === "logs") return void logs.mount(panel);
   if (activeTab === "live") return void live.mount(panel);
   if (!form) return void panel.append(h("p", { class: "form-error", text: formError || "Cannot load the config." }));
@@ -193,7 +190,6 @@ async function renderPanel() {
 }
 
 const rerenderConfig = () => {
-  refreshTabs();
   const panel = document.querySelector(".set-panel");
   if (!panel || activeTab === "logs" || activeTab === "live") return;
   const keep = panel.scrollTop;
@@ -211,7 +207,6 @@ const onDirty = () => {
   if (btn) btn.disabled = !formDirty(form, loaded.config) || busy;
   const rv = document.getElementById("config-revert");
   if (rv) rv.disabled = !formDirty(form, loaded.config);
-  refreshTabs();
 };
 
 function bannerBox() {
@@ -239,7 +234,7 @@ function footer(kind) {
     h(
       "div",
       { class: "footer-bar" },
-      formTab ? summaryButton(sum) : h("span"),
+      formTab && host === "dialog" ? summaryButton(sum) : h("span"),
       h(
         "div",
         { class: "actions" },
@@ -267,7 +262,7 @@ function footer(kind) {
               onclick: () => save(false),
             })
           : null,
-        h("button", { id: "config-close", type: "button", class: "btn", text: "Close", onclick: requestClose }),
+        host === "dialog" ? h("button", { id: "config-close", type: "button", class: "btn", text: "Close", onclick: requestClose }) : null,
       ),
     ),
   );
@@ -288,7 +283,6 @@ function summaryButton(sum) {
 async function gotoHealth() {
   if (activeTab !== "config") {
     activeTab = "config";
-    refreshTabs();
     await renderPanel();
   }
   document.getElementById("health-section")?.scrollIntoView({ block: "nearest" });
@@ -615,7 +609,6 @@ function fixBox() {
             toast(`Fixed ${a.changes.length} file(s)`, "ok");
             onApplied();
             validation = await api.validate();
-            refreshTabs();
             updateHealth();
           } catch (err) {
             toast(err.message, "error");
