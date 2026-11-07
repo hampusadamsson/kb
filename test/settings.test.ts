@@ -161,6 +161,17 @@ describe("getConfig / updateConfig", () => {
     expect(read("kanban.yaml")).toBe(YAML);
   });
 
+  it("rejects an invalid glob on save, so the loader can always read it back", () => {
+    // the save path must enforce the same rule as loadConfig: a bad glob here would brick the board
+    expect(code(() => kb.updateConfig({ ...cfg(), glob: "a[" }))).toBe("invalid");
+    expect(msg(() => kb.updateConfig({ ...cfg(), glob: "a[" }))).toMatch(/glob must be a valid glob pattern/);
+    expect(code(() => kb.updateConfig({ ...cfg(), glob: "a]" }))).toBe("invalid");
+    expect(read("kanban.yaml")).toBe(YAML);
+    // a valid glob still saves and loads back
+    kb.updateConfig({ ...cfg(), glob: "**/*.md" });
+    expect(cfg().glob).toBe("**/*.md");
+  });
+
   it("detects a stale mtime", () => {
     const { mtime } = kb.getConfig();
     const t = new Date(Date.now() + 5000);

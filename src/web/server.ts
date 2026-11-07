@@ -1,6 +1,6 @@
 import http from "node:http";
 import path from "node:path";
-import { createKanban } from "../core/index.js";
+import { createKanban, KanbanError } from "../core/index.js";
 import type { AutomationLog } from "../automationLog.js";
 import { createEventLog, type EventLog } from "../eventLog.js";
 import type { AutomationRunner } from "../core/automation.js";
@@ -261,7 +261,16 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     const r = await handleApi(
       kb,
       { method, path: url.pathname, query: url.searchParams, body },
-      { runner: opts.runner, log: opts.log, events, live: opts.live, dir },
+      {
+        runner: opts.runner,
+        log: opts.log,
+        events,
+        live: opts.live,
+        dir,
+        // Redacted 500s lose all diagnostics: keep the original server-side. Expected failures
+        // (HttpError/KanbanError) never reach this, so 404/409/415 stay quiet.
+        onInternalError: (e) => console.error("kb web:", e),
+      },
     );
     if (opts.runner) {
       const p = kb.settled().catch(() => {});
@@ -278,6 +287,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       if (e instanceof HttpError) sendJson(res, e.status, { error: e.message, code: e.code });
       else {
         const r = errorResponse(e);
+        if (!(e instanceof KanbanError)) console.error("kb web:", e);
         sendJson(res, r.status, r.body);
       }
     });

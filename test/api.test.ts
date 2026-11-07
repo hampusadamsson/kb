@@ -93,16 +93,35 @@ describe("Kanban core API", () => {
     expect(kb.add({ name: "O", board: "other", status: "backlog" }).id).toBe("002");
   });
 
-  it("update rejects a label that is both added and removed", () => {
+  it("add accepts a board that exists only on a ticket, and still rejects a truly unknown board", () => {
+    // the read paths derive board names from tickets; add() must agree with them
+    fs.writeFileSync(path.join(dir, "legacy.md"), '---\ntype: ticket\nid: "100"\nname: L\nstatus: todo\nboard: sprint\n---\n');
+    expect(kb.boards()).toContain("sprint");
+    const r = kb.add({ name: "Sprint work", board: "sprint" });
+    expect(kb.get(r.id, { board: "sprint" }).board).toBe("sprint");
+    expect(fs.readFileSync(path.join(dir, r.path), "utf8")).toContain("board: sprint");
+
+    // genuinely unknown boards are still rejected, with the same names the reads accept
+    expect(code(() => kb.add({ name: "X", board: "nope" }))).toBe("invalid");
+    expect(() => kb.add({ name: "X", board: "nope" })).toThrow(/unknown board "nope" \(known: default, other, sprint\)/);
+  });
+
+  it("update reconciles a label that is both added and removed (the add wins)", () => {
     kb.add({ name: "A", labels: ["bug"] });
     const file = path.join(dir, "001-a.md");
+    // a label in both lists is kept: the add wins over the remove
+    expect(kb.update("1", { addLabels: ["ui", "new"], removeLabels: ["new", "bug"] }).id).toBe("001");
+    expect(kb.get("1").labels).toEqual(["ui", "new"]);
+
+    // full-replace call: the current set in removeLabels, the desired set in addLabels
     const before = fs.readFileSync(file, "utf8");
-    const mtime = fs.statSync(file).mtimeMs;
-    expect(code(() => kb.update("1", { addLabels: ["ui", "new"], removeLabels: ["new", "bug"] }))).toBe("invalid");
-    expect(() => kb.update("1", { addLabels: ["ui", "new"], removeLabels: ["new"] })).toThrow(/labels both added and removed: new/);
+    expect(kb.update("1", { addLabels: ["ui", "new"], removeLabels: ["ui", "new"] }).id).toBe("001");
     expect(fs.readFileSync(file, "utf8")).toBe(before);
-    expect(fs.statSync(file).mtimeMs).toBe(mtime);
-    expect(kb.get("1").labels).toEqual(["bug"]);
+    expect(kb.get("1").labels).toEqual(["ui", "new"]);
+
+    // overlap on a label that is not on the ticket still adds it
+    kb.update("1", { addLabels: ["api"], removeLabels: ["api", "ui"] });
+    expect(kb.get("1").labels).toEqual(["new", "api"]);
   });
 
   it("fix API requires an explicit boolean and reports dry-run vs applied", async () => {

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseDocument } from "yaml";
 import { beforeEach, describe, expect, it } from "vitest";
-import { columnsFor, loadConfig, type Config } from "../src/core/config.js";
+import { columnsFor, isValidGlob, loadConfig, type Config } from "../src/core/config.js";
 import { addComment, createFile, readFile, splitFrontmatter, updateFile } from "../src/core/frontmatter.js";
 import { matchesTicketGlob, boardNames, duplicates, findById, nextId, numericId, scan, sortTickets } from "../src/core/tickets.js";
 import { filenameFor, padId, slugify } from "../src/core/util.js";
@@ -74,6 +74,14 @@ describe("scan", () => {
     const r = scan(dir, cfg());
     expect(r.tickets.map((t) => t.path)).toEqual(["1.md"]);
     expect(r.diagnostics.map((d) => d.path)).toEqual(["bad.md"]);
+  });
+  it("rejects an unmatched closing bracket in the top-level glob", () => {
+    w("kanban.yaml", 'columns: [a]\nglob: "a]"\n');
+    expect(() => loadConfig(dir)).toThrow(/glob must be a valid glob pattern/);
+    expect(isValidGlob("a]")).toBe(false);
+    expect(isValidGlob("a[")).toBe(false);
+    expect(isValidGlob("[ab].md")).toBe(true);
+    expect(isValidGlob("{a,b}/*.md")).toBe(true);
   });
   it("glob override and node_modules ignored", () => {
     w("sub/2.md", tk(2));
