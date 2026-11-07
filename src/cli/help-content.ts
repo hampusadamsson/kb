@@ -67,7 +67,8 @@ const COMMANDS: Record<string, Content> = {
         "Output",
         [
           "JSON by default (for scripts); --format text shows the board for humans.",
-          "At most 50 tickets are listed; --limit 0 lists all. -b picks one board.",
+          "--limit/--full are JSON-only: at most 50 tickets unless you pass --limit (0 = all).",
+          "Do not combine --limit/--full with --format text. -b picks one board.",
         ],
       ],
     ],

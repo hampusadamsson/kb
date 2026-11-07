@@ -89,11 +89,10 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
       ) =>
         run(() => {
           if (o.format !== "json" && o.format !== "text") throw new Error(`--format must be json or text, got "${o.format}"`);
+          const limit = parseLimit(o.limit);
+          if (o.format === "text" && (o.full || o.limit !== undefined)) throw new Error("--full and --limit only apply to --format json");
           const f = { board: o.board, text, labels: o.label, props: o.property };
-          const r =
-            o.format === "text"
-              ? ls(cwd(), { ...f, color: useColor() })
-              : lsJson(cwd(), { ...f, full: o.full, limit: parseLimit(o.limit) });
+          const r = o.format === "text" ? ls(cwd(), { ...f, color: useColor() }) : lsJson(cwd(), { ...f, full: o.full, limit });
           for (const w of r.warnings) console.error(w);
           if (r.out) console.log(r.out);
         }),
@@ -263,6 +262,7 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
     .command("mcp")
     .description("Run kb as an MCP server on stdio")
     .option("--dir <path>", "board directory (default: current directory)", ".")
+    .option("--no-automation", "do not run board automations")
     .action(async (o: { dir: string; automation?: boolean }) => {
       try {
         await mcp(cwd(), { dir: o.dir, automation: automationEnabled(off(o)) });
@@ -284,8 +284,13 @@ export function buildProgram(cwd: () => string = () => process.cwd()): Command {
     .argument("[arg]")
     .allowUnknownOption()
     .action((kind: string, arg: string | undefined) => {
-      const out = complete(cwd(), kind, arg);
-      if (out.length) process.stdout.write(out.join("\n") + "\n");
+      // A completion must never dump a stack trace into the user's shell.
+      try {
+        const out = complete(cwd(), kind, arg);
+        if (out.length) process.stdout.write(out.join("\n") + "\n");
+      } catch {
+        process.exitCode = 0;
+      }
     });
   applyHelpContent(program);
   configureHelp(program);

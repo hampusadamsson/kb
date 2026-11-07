@@ -1,5 +1,5 @@
 export function useColor(): boolean {
-  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+  return Boolean(process.stdout.isTTY) && !("NO_COLOR" in process.env);
 }
 
 export interface Style {
