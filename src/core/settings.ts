@@ -8,6 +8,7 @@ import {
   automationSchema,
   columnsFor,
   CONFIG_FILE,
+  globSchema,
   isDefaultTicketRules,
   isValidGlob,
   loadConfig,
@@ -101,7 +102,7 @@ const columnsSchema = z
 
 const inputSchema = z.object({
   name: nonEmpty("name"),
-  glob: nonEmpty("glob"),
+  glob: globSchema,
   columns: columnsSchema,
   automations: z.array(automationSchema).optional(),
   tickets: z.unknown().optional(),

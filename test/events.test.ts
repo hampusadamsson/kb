@@ -209,6 +209,52 @@ describe("automation events", () => {
     expect(warn[0].summary).toMatch(/state not saved/);
   });
 
+  it("with guard: false a failed status write is reported but does not cancel the run", async () => {
+    fs.writeFileSync(
+      path.join(dir, "kanban.yaml"),
+      `columns: [todo, done]\nautomations:\n  - name: r\n    when: { moved_to: done }\n    run: "true"\n    guard: false\n`,
+    );
+    const runs: string[] = [];
+    const k = mk({ runner: { run: async (c: string) => (runs.push(c), { exitCode: 0, stdout: "", stderr: "" }) } });
+    const { id } = k.add({ name: "A" });
+    evs = [];
+    const logged: string[] = [];
+    const errSpy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logged.push(a.join(" ")));
+    const restore = failStatusWrites();
+    try {
+      k.move(id, "done");
+      await k.settled();
+    } finally {
+      restore();
+      errSpy.mockRestore();
+    }
+    // The runs counter is not used by the guard, so a failed write must not drop the run.
+    expect(runs).toEqual(["true"]);
+    expect(types()).toContain("automation.started");
+    const warn = evs.filter((e) => e.type === "automation.skipped" && e.data.reason === "state-write-failed");
+    expect(warn).toHaveLength(1);
+    expect(logged.some((l) => /^kb: could not persist automation state for #001: .*EACCES/.test(l))).toBe(true);
+  });
+
+  it("a failed status write is logged even without an event sink", async () => {
+    fs.writeFileSync(path.join(dir, "kanban.yaml"), cfg);
+    const runs: string[] = [];
+    const k = createKanban({ dir, runner: { run: async (c: string) => (runs.push(c), { exitCode: 0, stdout: "", stderr: "" }) } });
+    const { id } = k.add({ name: "A" });
+    const logged: string[] = [];
+    const errSpy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logged.push(a.join(" ")));
+    const restore = failStatusWrites();
+    try {
+      k.move(id, "done");
+      await k.settled();
+    } finally {
+      restore();
+      errSpy.mockRestore();
+    }
+    expect(runs).toEqual([]);
+    expect(logged).toContainEqual(expect.stringMatching(/^kb: could not persist automation state for #001: /));
+  });
+
   it("a non-counter status write still fails loudly but keeps its call site's behaviour", async () => {
     // Guardrail path: the ticket is already over the limit, so the skipped status write failing must not
     // swallow the guardrail skip event itself.

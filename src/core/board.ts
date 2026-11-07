@@ -46,6 +46,7 @@ import {
 import { addComment, commentKey, idScalar, keyOf, readFile, render, updateFile } from "./frontmatter.js";
 import { consumeKilled } from "../killMarker.js";
 import {
+  boardNames,
   duplicates,
   findById,
   hasFilters,
@@ -333,6 +334,8 @@ export class Kanban {
       { rule, reason, error: message, bumped: bump },
       { ticketId: String(id), path: rel },
     );
+    // No sink means emit() is a no-op: keep the failure visible on stderr as well, one line and no stack.
+    console.error(`kb: could not persist automation state for #${String(id)}: ${message}`);
   }
 
   /**
@@ -414,9 +417,10 @@ export class Kanban {
         const startMs = this.now().getTime();
         const startedAt = commentKey(this.now(), true);
         // The `runs` counter backs the loop guard: if it cannot be persisted, stop rather than dispatch
-        // blind (a self-retriggering rule would never reach the limit, and the failure would be invisible).
+        // blind (a self-retriggering rule would never reach the limit). With `guard: false` the counter is
+        // not needed for safety, so a failed write is only reported and the run still happens.
         if (!this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "running", at: startedAt }, true)) {
-          continue;
+          if (rule.guard !== false) continue;
         }
         started++;
         this.emit("automation.started", `automation "${rule.name}" started on #${String(ticket.id)}`, { rule: rule.name, event }, ref);
@@ -659,7 +663,11 @@ export class Kanban {
 
     const warnings: Warning[] = [];
     if (input.board !== undefined) {
-      const known = [config.name, ...Object.keys(config.boards ?? {})];
+      // Use the same board set every read path uses: the default board, configured boards and
+      // boards that exist only because tickets reference them. A ticket-derived board is a real
+      // board (it shows up in list/boards), so adding to it must be allowed; only a board no read
+      // path would show is rejected.
+      const known = boardNames(tickets, config);
       if (!known.includes(input.board)) {
         throw new KanbanError("invalid", `unknown board "${input.board}" (known: ${known.join(", ")})`);
       }
@@ -732,11 +740,10 @@ export class Kanban {
     }
     const extra = checkProps(patch.setProps);
     if (!hasChanges(patch)) throw new KanbanError("invalid", "no changes requested");
-    const removed = new Set(patch.removeLabels ?? []);
-    const both = [...new Set(patch.addLabels ?? [])].filter((l) => removed.has(l));
-    if (both.length) {
-      throw new KanbanError("invalid", `labels both added and removed: ${both.join(", ")}`);
-    }
+    // A label in both lists is reconciled (the add wins) instead of rejected: the natural "replace the
+    // whole set" call sends the current set in removeLabels and the desired set in addLabels.
+    const addLabels = [...new Set(patch.addLabels ?? [])];
+    const removeLabels = [...new Set(patch.removeLabels ?? [])].filter((l) => !addLabels.includes(l));
 
     const warnings: Warning[] = [];
     const { doc, body: oldBody, crlf } = readFile(abs);
@@ -754,7 +761,7 @@ export class Kanban {
       }
       if (patch.status !== undefined) doc.set("status", patch.status);
     }
-    applyLabels(doc, patch.addLabels ?? [], patch.removeLabels ?? []);
+    applyLabels(doc, addLabels, removeLabels);
     for (const [k, v] of extra) doc.set(k, v);
     for (const k of unset) doc.delete(k);
     const hadAutos = doc.has("automations");

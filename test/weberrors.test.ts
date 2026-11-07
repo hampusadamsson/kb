@@ -268,6 +268,44 @@ describe("port-bind failure", () => {
 });
 
 describe("500 responses over HTTP", () => {
+  it("logs the original error to stderr for unexpected throws, keeping the body redacted", async () => {
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logged.push(a.join(" ")));
+    const events = {
+      emit: () => {},
+      query: () => {
+        throw new Error("ENOENT: no such file or directory, open '/srv/secret/.kb/events.log'");
+      },
+    };
+    const srv = await startServer({ dir, port: 0, events: events as any });
+    try {
+      const r = await fetch(`${srv.url}/api/events`);
+      expect(r.status).toBe(500);
+      const text = await r.text();
+      expect(text).not.toContain("ENOENT");
+      expect(text).not.toContain("/srv/secret");
+      expect(JSON.parse(text)).toEqual({ error: "internal error", code: "internal" });
+      // diagnostics stay server-side: the original error is logged
+      expect(logged.join("\n")).toContain("kb web:");
+      expect(logged.join("\n")).toContain("ENOENT");
+      expect(logged.join("\n")).toContain("/srv/secret/.kb/events.log");
+
+      // expected failures (404/409/415) stay quiet
+      logged.length = 0;
+      const nf = await fetch(`${srv.url}/api/tickets/999`);
+      expect(nf.status).toBe(404);
+      await nf.text();
+      expect(logged).toEqual([]);
+      const bad = await fetch(`${srv.url}/api/tickets`, { method: "POST", body: "x" });
+      expect(bad.status).toBe(415);
+      await bad.text();
+      expect(logged).toEqual([]);
+    } finally {
+      await srv.close();
+      spy.mockRestore();
+    }
+  });
+
   it("does not leak internal error text but keeps KanbanError messages", async () => {
     const events = {
       emit: () => {},

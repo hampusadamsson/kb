@@ -138,8 +138,11 @@ export function isValidGlob(glob: string): boolean {
     const c = glob[i];
     if (c === "\\") i++;
     else if (c === "[") br++;
-    else if (c === "]" && br > 0) br--;
-    else if (c === "{" && br === 0) cb++;
+    else if (c === "]") {
+      // an unmatched closing bracket is as invalid as an unclosed opening one
+      if (br === 0) return false;
+      br--;
+    } else if (c === "{" && br === 0) cb++;
     else if (c === "}" && br === 0) cb--;
     if (cb < 0) return false;
   }
@@ -224,10 +227,18 @@ export const webSchema = z.object({
   port: z.number().int().min(0).max(65535).optional(),
 });
 
+/** Top-level `glob` schema: shared by load and save so a saved glob is always loadable. */
+export const GLOB_MESSAGE = "glob must be a valid glob pattern (balanced [] and {})";
+export const globSchema = z
+  .string()
+  .default("*.md")
+  .refine((g) => g.trim() !== "", "glob must not be empty")
+  .refine(isValidGlob, GLOB_MESSAGE);
+
 const configSchema = z.object({
   name: z.string().default("default"),
   columns: columnsSchema,
-  glob: z.string().default("*.md").refine(isValidGlob, "glob must be a valid glob pattern (balanced [] and {})"),
+  glob: globSchema,
   tickets: ticketRulesSchema.optional(),
   automations: automationsSchema,
   boards: z.record(z.string(), z.object({ columns: columnsSchema, automations: automationsSchema })).optional(),

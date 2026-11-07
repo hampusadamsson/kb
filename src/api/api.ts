@@ -49,6 +49,11 @@ export interface ApiContext {
   live?: LiveRuns;
   /** config dir, for cross-process kill markers */
   dir?: string;
+  /**
+   * Called with unexpected (non-KanbanError) throws from a handler, right before the redacted
+   * response is produced. The UI decides where diagnostics go; the client body stays generic.
+   */
+  onInternalError?: (e: unknown) => void;
 }
 
 type Handler = (kb: Kanban, req: ApiRequest, params: string[], ctx: ApiContext) => ApiResponse | Promise<ApiResponse>;
@@ -431,6 +436,8 @@ export async function handleApi(kb: Kanban, req: ApiRequest, ctx: ApiContext = {
     }
     return await r.handler(kb, req, params, ctx);
   } catch (e) {
+    // Expected failures (KanbanError) are user-facing; anything else is redacted, so report it out.
+    if (!(e instanceof KanbanError)) ctx.onInternalError?.(e);
     return errorResponse(e);
   }
 }
