@@ -15,12 +15,16 @@ export function isDir(p: string): boolean {
 }
 
 /**
- * Reads a file below the public dir. `rel` must already be normalized and free of `..`
- * (the HTTP handler validates this). Returns undefined when the asset does not exist.
+ * Reads a file below the public dir. Returns undefined when the asset does not exist or when it
+ * resolves (via symlinks) outside the public dir: a lexical check is not enough, since a symlink
+ * inside the public dir can point anywhere on disk.
  */
 export function readPublic(rel: string): Buffer | undefined {
   try {
-    return fs.readFileSync(path.resolve(PUBLIC_DIR, rel));
+    const root = fs.realpathSync(PUBLIC_DIR);
+    const target = fs.realpathSync(path.resolve(PUBLIC_DIR, rel));
+    if (target !== root && !target.startsWith(root + path.sep)) return undefined;
+    return fs.readFileSync(target);
   } catch {
     return undefined;
   }
