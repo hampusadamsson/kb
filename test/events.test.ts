@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -57,7 +57,7 @@ describe("core events", () => {
       name: "B",
       board: "other",
       status: "a",
-      addLabels: ["new", "old"],
+      addLabels: ["new"],
       removeLabels: ["old", "nope"],
       setProps: { keep: "2", fresh: 5 },
       unsetProps: ["gone", "absent"],
@@ -168,5 +168,107 @@ describe("automation events", () => {
     evs = [];
     k.move(id, "done");
     expect(evs.filter((e) => e.type === "automation.skipped")).toHaveLength(2);
+  });
+
+  // A failed automation-state write used to be swallowed (`catch { return false; }`, return value ignored).
+  // That hid the one failure mode the loop guard depends on: if the `runs` counter cannot be persisted, a
+  // self-retriggering rule never reaches the limit. It must now surface as a diagnostic and not dispatch.
+  const failStatusWrites = (): (() => void) => {
+    const real = fs.writeFileSync.bind(fs) as typeof fs.writeFileSync;
+    const spy = vi.spyOn(fs, "writeFileSync").mockImplementation(((file: any, data: any, opts: any) => {
+      // Only automation-state writes fail: the ticket move itself must still land, so the rule still matches.
+      if (/status: (running|skipped)/.test(String(data))) {
+        throw Object.assign(new Error(`EACCES: permission denied, open '${String(file)}'`), { code: "EACCES" });
+      }
+      return real(file, data, opts);
+    }) as typeof fs.writeFileSync);
+    return () => spy.mockRestore();
+  };
+
+  it("a failed runs-counter write is reported and stops the dispatch (no silent loop)", async () => {
+    fs.writeFileSync(path.join(dir, "kanban.yaml"), cfg);
+    const runs: string[] = [];
+    const k = mk({ runner: { run: async (c: string) => (runs.push(c), { exitCode: 0, stdout: "", stderr: "" }) } });
+    const { id } = k.add({ name: "A" });
+    evs = [];
+    const restore = failStatusWrites();
+    try {
+      k.move(id, "done");
+      await k.settled();
+    } finally {
+      restore();
+    }
+    // The rule matched, but its run must not start: without a persisted counter the guard cannot bound it.
+    expect(runs).toEqual([]);
+    expect(types()).not.toContain("automation.started");
+    const warn = evs.filter((e) => e.type === "automation.skipped" && e.data.reason === "state-write-failed");
+    expect(warn).toHaveLength(1);
+    expect(warn[0]).toMatchObject({ ticketId: id, path: expect.any(String) });
+    expect(warn[0].data).toMatchObject({ rule: "r", bumped: true });
+    expect(String(warn[0].data.error)).toMatch(/EACCES/);
+    expect(warn[0].summary).toMatch(/state not saved/);
+  });
+
+  it("a non-counter status write still fails loudly but keeps its call site's behaviour", async () => {
+    // Guardrail path: the ticket is already over the limit, so the skipped status write failing must not
+    // swallow the guardrail skip event itself.
+    fs.writeFileSync(
+      path.join(dir, "kanban.yaml"),
+      `columns: [todo, done]\nautomations:\n  - name: r\n    when: { moved_to: done }\n    run: "true"\n`,
+    );
+    const k = mk({ runner: { run: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } });
+    const { id } = k.add({ name: "A" });
+    const file = path.join(
+      dir,
+      fs.readdirSync(dir).find((f) => f.endsWith(".md"))!,
+    );
+    const many = Array.from({ length: 15 }, (_, i) => `  old${i}: { status: done, at: "2026-01-01T00:00:00" }\n`).join("");
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("---\n", `---\nautomations:\n${many}`));
+    evs = [];
+    const restore = failStatusWrites();
+    try {
+      k.move(id, "done");
+      await k.settled();
+    } finally {
+      restore();
+    }
+    const reasons = evs.filter((e) => e.type === "automation.skipped").map((e) => e.data.reason);
+    expect(reasons).toContain("state-write-failed");
+    expect(reasons).toContain("guardrail");
+    expect(types()).not.toContain("automation.started");
+  });
+
+  it("a read-only ticket file surfaces the state-write failure (real fs)", async () => {
+    // Real-fs counterpart to the stubbed test: on macOS an owned file with mode 0o444 still rejects writes.
+    // The mode is applied from inside the runner, i.e. after the ticket move but before the pid status write.
+    if (process.getuid?.() === 0) return; // root ignores file modes
+    fs.writeFileSync(path.join(dir, "kanban.yaml"), cfg);
+    const { id } = mk().add({ name: "A" });
+    const file = path.join(
+      dir,
+      fs.readdirSync(dir).find((f) => f.endsWith(".md"))!,
+    );
+    const ran: string[] = [];
+    const ro = mk({
+      runner: {
+        run: async (c: string, opts: any) => {
+          ran.push(c);
+          fs.chmodSync(file, 0o444);
+          opts.onSpawn({ pid: 1234, pgid: 1234 });
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+      },
+    });
+    evs = [];
+    try {
+      ro.move(id, "done");
+      await ro.settled();
+    } finally {
+      fs.chmodSync(file, 0o644);
+    }
+    expect(ran).toHaveLength(1);
+    const warn = evs.filter((e) => e.type === "automation.skipped" && e.data.reason === "state-write-failed");
+    expect(warn.length).toBeGreaterThan(0);
+    expect(String(warn[0].data.error)).toMatch(/EACCES|EPERM|permission/i);
   });
 });

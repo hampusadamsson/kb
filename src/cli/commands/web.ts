@@ -36,13 +36,19 @@ export function defaultOpener(url: string): void {
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 
-function parsePort(v: string | number): number {
+export function parsePort(v: string | number): number {
   const s = String(v).trim();
   const n = Number(s);
   if (!/^\d+$/.test(s) || !Number.isInteger(n) || n < 0 || n > 65535) {
     throw new Error(`invalid port "${s}" (expected an integer 0-65535)`);
   }
   return n;
+}
+
+/** The port to bind: the --port flag wins over web.port; both go through parsePort. */
+export function resolvePort(flag: string | number | undefined, config: number | undefined): number | undefined {
+  if (flag !== undefined) return parsePort(flag);
+  return config !== undefined ? parsePort(config) : undefined;
 }
 
 export function automationExposureWarning(host: string, automationsEnabled: boolean): string | undefined {
@@ -60,7 +66,7 @@ export async function runWeb(
   const { config } = createKanban({ dir: cwd }).load(); // throws if config missing/invalid
   const host = opts.host ?? config.web?.host ?? "127.0.0.1";
   // explicit --port wins over web.port, which wins over the built-in default
-  const wanted = opts.port !== undefined ? parsePort(opts.port as string | number) : config.web?.port;
+  const wanted = resolvePort(opts.port, config.web?.port);
   const port = wanted ?? 4747;
   // a deliberate port (flag or config) must not silently auto-increment; 0 always means OS-assigned
   const strictPort = wanted !== undefined && wanted !== 0;
@@ -94,9 +100,14 @@ export async function runWeb(
       } finally {
         let t: NodeJS.Timeout | undefined;
         const deadline = new Promise<void>((r) => (t = setTimeout(r, deadlineMs)));
-        await Promise.race([server.settled(), deadline]);
-        clearTimeout(t);
-        runner?.killAll();
+        try {
+          await Promise.race([server.settled(), deadline]);
+        } finally {
+          // runs even when settled() rejects or the deadline wins: never leave the timer
+          // pending or automation children alive.
+          clearTimeout(t);
+          runner?.killAll();
+        }
       }
     },
   };

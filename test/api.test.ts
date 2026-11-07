@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createKanban, KanbanError, type Kanban } from "../src/index.js";
+import { handleApi } from "../src/api/api.js";
 
 let dir: string;
 let kb: Kanban;
@@ -80,6 +81,53 @@ describe("Kanban core API", () => {
     expect(code(() => kb.list({ board: "zzz" }))).toBe("not-found");
     fs.writeFileSync(path.join(dir, "dup.md"), '---\ntype: ticket\nid: "001"\nname: D\nstatus: todo\n---\n');
     expect(code(() => kb.get("001"))).toBe("ambiguous");
+  });
+
+  it("add rejects an unknown board", () => {
+    expect(code(() => kb.add({ name: "X", board: "todo/typo" }))).toBe("invalid");
+    expect(() => kb.add({ name: "X", board: "todo/typo" })).toThrow(/unknown board "todo\/typo" \(known: default, other\)/);
+    // nothing was written
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith(".md"))).toEqual([]);
+    // known boards (default and configured) still work
+    expect(kb.add({ name: "D", board: "default" }).id).toBe("001");
+    expect(kb.add({ name: "O", board: "other", status: "backlog" }).id).toBe("002");
+  });
+
+  it("update rejects a label that is both added and removed", () => {
+    kb.add({ name: "A", labels: ["bug"] });
+    const file = path.join(dir, "001-a.md");
+    const before = fs.readFileSync(file, "utf8");
+    const mtime = fs.statSync(file).mtimeMs;
+    expect(code(() => kb.update("1", { addLabels: ["ui", "new"], removeLabels: ["new", "bug"] }))).toBe("invalid");
+    expect(() => kb.update("1", { addLabels: ["ui", "new"], removeLabels: ["new"] })).toThrow(/labels both added and removed: new/);
+    expect(fs.readFileSync(file, "utf8")).toBe(before);
+    expect(fs.statSync(file).mtimeMs).toBe(mtime);
+    expect(kb.get("1").labels).toEqual(["bug"]);
+  });
+
+  it("fix API requires an explicit boolean and reports dry-run vs applied", async () => {
+    fs.writeFileSync(path.join(dir, "noid.md"), "---\ntype: ticket\nname: N\nstatus: todo\n---\n");
+    const call = (body: Record<string, unknown>) => handleApi(kb, { method: "POST", path: "/api/fix", query: new URLSearchParams(), body });
+
+    const empty = await call({});
+    expect(empty.status).toBe(200);
+    expect(empty.body).toMatchObject({ dryRun: true, applied: false, hint: "pass dryRun:false to apply" });
+    expect((empty.body as { changes: unknown[] }).changes).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, "noid.md"), "utf8")).not.toContain("id:");
+
+    const typo = await call({ dryrun: true });
+    expect(typo.status).toBe(200);
+    expect(typo.body).toMatchObject({ dryRun: true, applied: false });
+
+    const bad = await call({ dryRun: "yes" });
+    expect(bad.status).toBe(400);
+    expect(bad.body).toMatchObject({ code: "invalid" });
+
+    const applied = await call({ dryRun: false });
+    expect(applied.status).toBe(200);
+    expect(applied.body).toMatchObject({ dryRun: false, applied: true });
+    expect((applied.body as { changes: unknown[] }).changes).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, "noid.md"), "utf8")).toContain("id:");
   });
 
   it("filters", () => {

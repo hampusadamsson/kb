@@ -78,8 +78,18 @@ describe("collectTree (pure)", () => {
     expect(new Set(t.pgids)).toEqual(new Set([10, 12]));
   });
 
-  it("ignores missing roots", () => {
-    expect(collectTree([999], procs)).toEqual({ pids: [], all: [], pgids: [] });
+  it("keeps a root missing from the snapshot so it can still be signalled", () => {
+    // `ps` may be unavailable (empty snapshot) or the root may be younger than the snapshot.
+    // Dropping it left killTree with nothing to signal, so the run outlived its own kill.
+    expect(collectTree([999], procs)).toEqual({ pids: [999], all: [999], pgids: [] });
+    expect(collectTree([999], [])).toEqual({ pids: [999], all: [999], pgids: [] });
+  });
+
+  it("still walks known roots out of a partial snapshot", () => {
+    const t = collectTree([999, 10], procs);
+    expect(new Set(t.all)).toEqual(new Set([999, 10, 11, 12, 13]));
+    // the unknown root has no group in the snapshot; the known groups are still collected
+    expect(new Set(t.pgids)).toEqual(new Set([10, 12]));
   });
 
   it("protects a reserved pid and its ancestors", () => {
@@ -97,6 +107,39 @@ describe("collectTree (pure)", () => {
 
   it("does not treat the reserved pid itself as a root", () => {
     expect(collectTree([20], procs, [20]).all).toEqual([]);
+  });
+
+  it("never signals the caller's own process group", () => {
+    const group: Proc[] = [
+      { pid: 30, ppid: 1, pgid: 30 }, // the caller (reserved)
+      { pid: 31, ppid: 30, pgid: 30 }, // a run that never got a group of its own
+      { pid: 40, ppid: 30, pgid: 40 }, // a detached run with its own group
+      { pid: 41, ppid: 40, pgid: 40 },
+    ];
+    // kill(-30) would SIGKILL the caller and its shell, so the caller's group must be dropped.
+    expect(collectTree([31], group, [30])).toEqual({ pids: [31], all: [31], pgids: [] });
+    // Groups that do not contain a reserved pid are still signalled.
+    expect(new Set(collectTree([40], group, [30]).pgids)).toEqual(new Set([40]));
+  });
+
+  it("drops a group that a missing reserved pid leads", () => {
+    // The reserved pid is not in the snapshot; its group id is still its own pid, so kill(-30) would
+    // reach it. Only the pid is signalled then, not the group.
+    const procs: Proc[] = [{ pid: 31, ppid: 30, pgid: 30 }];
+    expect(collectTree([31], procs, [30])).toEqual({ pids: [31], all: [31], pgids: [] });
+  });
+
+  it("excludes the live caller's group from a real snapshot", async () => {
+    const child = spawn("bash", ["-c", "while true; do sleep 1; done"], { stdio: "ignore" }); // same group as us
+    await until(() => alive(child.pid!));
+    const procs = listProcs();
+    const ownGroup = procs.find((p) => p.pid === process.pid)?.pgid;
+    expect(ownGroup).toBeDefined();
+    const t = collectTree([child.pid!], procs, [process.pid]);
+    expect(t.all).toContain(child.pid!);
+    expect(t.pgids).not.toContain(ownGroup);
+    child.kill("SIGKILL");
+    await until(() => !alive(child.pid!));
   });
 });
 
@@ -135,6 +178,18 @@ describe("killTree", () => {
     track(root.pid);
     await until(() => readPid(pidFile) !== undefined);
     const r = await killTree([root.pid!], { graceMs: 150, waitMs: 3000 });
+    expect(r.survivors).toEqual([]);
+    await until(() => !alive(root.pid!));
+  });
+
+  it("kills the root when the ps snapshot is empty", async () => {
+    // `procs: []` is what listProcs() returns when ps is unavailable. Only the root's own pid is
+    // known then, and it must still be signalled.
+    const root = spawn("bash", ["-c", "trap '' TERM; while true; do sleep 1; done"], { detached: true, stdio: "ignore" });
+    track(root.pid);
+    await until(() => alive(root.pid!));
+    const r = await killTree([root.pid!], { graceMs: 100, waitMs: 2000, procs: [] });
+    expect(r.all).toEqual([root.pid!]);
     expect(r.survivors).toEqual([]);
     await until(() => !alive(root.pid!));
   });

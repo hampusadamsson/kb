@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
 import { ls } from "../src/cli/commands/ls.js";
-import { add, comment, edit, mv, set, type Io } from "../src/cli/commands/write.js";
+import { add, comment, edit, editorArgv, mv, openEditor, set, type Io } from "../src/cli/commands/write.js";
 import { splitFrontmatter } from "../src/core/frontmatter.js";
 
 let dir: string;
@@ -167,6 +167,48 @@ describe("comment & edit", () => {
     expect(comment(dir, "1", "one", now)).toBe("2024-01-02T03:04");
     expect(comment(dir, "1", "two", now)).toBe("2024-01-02T03:04:05");
     expect(Object.values(fm("001-a.md").comments as object)).toEqual(["one", "two"]);
+  });
+  it("editorArgv passes the file as one argv element (no shell)", () => {
+    expect(editorArgv("vi", "/tmp/a b.md")).toEqual({ command: "vi", args: ["/tmp/a b.md"] });
+    expect(editorArgv("code -w", "/tmp/a b.md")).toEqual({ command: "code", args: ["-w", "/tmp/a b.md"] });
+    expect(editorArgv("  nano  -R ", "f.md")).toEqual({ command: "nano", args: ["-R", "f.md"] });
+    const hostile = '/tmp/we$HOME/`id`/"quoted"/it\'s.md';
+    expect(editorArgv("vi", hostile)).toEqual({ command: "vi", args: [hostile] });
+    expect(editorArgv("", "f.md")).toEqual({ command: "vi", args: ["f.md"] });
+  });
+  it("openEditor spawns editor + argv verbatim (spaces, $ and quotes in the path)", () => {
+    const sub = path.join(dir, "we ird$dir `echo pwned`");
+    fs.mkdirSync(sub);
+    const file = path.join(sub, 't"q.md');
+    const script = path.join(dir, "argv.sh");
+    const log = path.join(dir, "argv.log");
+    fs.writeFileSync(script, `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(log)}\n`, { mode: 0o755 });
+    const old = process.env.EDITOR;
+    process.env.EDITOR = `${script} -w`;
+    try {
+      openEditor(file);
+    } finally {
+      if (old !== undefined) process.env.EDITOR = old;
+      else delete process.env.EDITOR;
+    }
+    expect(fs.readFileSync(log, "utf8")).toBe(`-w\n${file}\n`);
+  });
+  it("openEditor keeps the error handling", () => {
+    const old = process.env.EDITOR;
+    process.env.EDITOR = "/nonexistent/editor-xyz";
+    try {
+      expect(() => openEditor("f.md")).toThrow();
+    } finally {
+      if (old !== undefined) process.env.EDITOR = old;
+      else delete process.env.EDITOR;
+    }
+    process.env.EDITOR = "false";
+    try {
+      expect(() => openEditor("f.md")).toThrow(/editor exited with status/);
+    } finally {
+      if (old !== undefined) process.env.EDITOR = old;
+      else delete process.env.EDITOR;
+    }
   });
   it("edit uses EDITOR", () => {
     add(dir, "A", {}, io);

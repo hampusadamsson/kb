@@ -35,7 +35,8 @@ const STATUS: Record<string, number> = {
 
 export function errorResponse(e: unknown): ApiResponse {
   if (e instanceof KanbanError) return { status: STATUS[e.code] ?? 500, body: { error: e.message, code: e.code } };
-  return { status: 500, body: { error: (e as Error).message ?? String(e), code: "internal" } };
+  // Unexpected throws (fs errors, paths, ENOENT text) stay server-side; clients get a generic message.
+  return { status: 500, body: { error: "internal error", code: "internal" } };
 }
 
 const fail = (status: number, code: string, error: string): ApiResponse => ({ status, body: { error, code } });
@@ -178,8 +179,14 @@ const comment: Handler = (kb, req, [id]) => {
 const validate: Handler = (kb) => ok(kb.validate());
 
 const fix: Handler = (kb, req) => {
-  const dryRun = req.body.dryRun !== false;
-  return ok({ dryRun, changes: kb.fix({ dryRun }) });
+  const raw = req.body.dryRun;
+  if (raw !== undefined && typeof raw !== "boolean") throw new KanbanError("invalid", "dryRun must be a boolean");
+  // dry-run stays the default for an absent flag, but say so explicitly instead of reporting plain success.
+  const dryRun = raw === undefined ? true : raw;
+  const changes = kb.fix({ dryRun });
+  return ok(
+    dryRun ? { dryRun: true, applied: false, hint: "pass dryRun:false to apply", changes } : { dryRun: false, applied: true, changes },
+  );
 };
 
 const getConfig: Handler = (kb) => ok(kb.getConfig());

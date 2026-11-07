@@ -16,16 +16,51 @@ export class EventHub {
   private keepAlive: NodeJS.Timeout;
   private config: Config | undefined;
   private firstPending = 0;
+  /** a dead watcher is re-armed once; a second failure is only logged (no loop) */
+  private rearmed = false;
+  private closed = false;
 
   constructor(private readonly dir: string) {
     try {
-      this.watcher = fs.watch(dir, { recursive: true }, (_ev, filename) => this.onFile(filename));
-      this.watcher.on("error", () => {});
+      this.watcher = this.createWatcher();
     } catch {
       this.watcher = undefined; // no live updates, API still works
     }
     this.keepAlive = setInterval(() => this.broadcast(": keep-alive\n\n"), KEEPALIVE_MS);
     this.keepAlive.unref();
+  }
+
+  /** Create the watcher and route its errors to `onWatcherError`. */
+  private createWatcher(): fs.FSWatcher {
+    const watcher = fs.watch(this.dir, { recursive: true }, (_ev, filename) => this.onFile(filename));
+    watcher.on("error", (e: unknown) => this.onWatcherError(e));
+    return watcher;
+  }
+
+  private onWatcherError(err: unknown): void {
+    console.error("kb web: watcher error:", err);
+    if (this.closed) return;
+    if (this.rearmed) {
+      // re-arm at most once: no infinite retry loop, but do not leak the dead handle
+      try {
+        this.watcher?.close();
+      } catch {
+        // already dead
+      }
+      return;
+    }
+    this.rearmed = true;
+    try {
+      this.watcher?.close();
+    } catch {
+      // already dead
+    }
+    this.watcher = undefined;
+    try {
+      this.watcher = this.createWatcher();
+    } catch {
+      // re-arm failed: live updates stay off, API still works
+    }
   }
 
   private relevant(filename: string | Buffer | null): boolean {
@@ -49,6 +84,7 @@ export class EventHub {
   }
 
   private onFile(filename: string | Buffer | null): void {
+    if (this.closed) return; // a queued fs callback may fire after close()
     if (!this.relevant(filename)) return;
     const now = Date.now();
     if (!this.timer) this.firstPending = now;
@@ -62,11 +98,18 @@ export class EventHub {
 
   /** Tell clients the set of running automations changed. */
   notifyRuns(): void {
+    if (this.closed) return;
     this.broadcast("event: runs\ndata: {}\n\n");
   }
 
   private broadcast(msg: string): void {
-    for (const res of this.clients) res.write(msg);
+    for (const res of this.clients) {
+      if (res.writableEnded || res.destroyed) {
+        this.clients.delete(res);
+        continue;
+      }
+      res.write(msg);
+    }
   }
 
   /** Take over a response as an SSE stream. */
@@ -83,9 +126,11 @@ export class EventHub {
   }
 
   close(): void {
+    this.closed = true;
     clearTimeout(this.timer);
     clearInterval(this.keepAlive);
     this.watcher?.close();
+    this.watcher = undefined;
     for (const res of this.clients) res.end();
     this.clients.clear();
   }

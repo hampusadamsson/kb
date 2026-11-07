@@ -102,6 +102,36 @@ describe("killRun", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/pid reused|now in group|not a shell/);
   });
+  it("does not mark a kill that failed", async () => {
+    // The pid is alive but reserved, so nothing may be signalled: the kill fails and the marker must be
+    // rolled back, or the owner would later record an unrelated death as "killed by user".
+    const child = spawnShell();
+    const pid = child.pid!;
+    await until(() => alive(pid));
+    const r = await killRun({ pid, pgid: pid }, { root: dir, waitMs: 0, reserved: [pid] });
+    expect(r.ok).toBe(false);
+    expect(consumeKilled(dir, pid)).toBe(false);
+    expect(alive(pid)).toBe(true);
+    child.kill("SIGKILL");
+    await until(() => !alive(pid));
+  });
+  it("marks the kill as soon as it signals, and consumes it once", async () => {
+    // The marker has to be there while the tree is still dying: the owner consumes it when the child
+    // exits, which happens during killTree's SIGTERM grace, not after killTree resolves.
+    const child = spawnShell();
+    const pid = child.pid!;
+    await until(() => alive(pid));
+    let markedDuringGrace = false;
+    const probe = setInterval(() => {
+      if (alive(pid) && fs.existsSync(path.join(dir, ".kb", "killed", String(pid)))) markedDuringGrace = true;
+    }, 10);
+    const r = await killRun({ pid, pgid: pid }, { root: dir, graceMs: 300, waitMs: 3000 });
+    clearInterval(probe);
+    expect(r.ok).toBe(true);
+    expect(markedDuringGrace).toBe(true);
+    await until(() => !alive(pid));
+    expect(consumeKilled(dir, pid)).toBe(true);
+  });
 });
 
 describe("pid recorded by the owner", () => {

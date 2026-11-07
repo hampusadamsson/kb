@@ -197,8 +197,15 @@ export function createDispatcher(handlers: DispatcherHandlers = {}): Dispatcher 
       }
       if (!isRecord(message)) return fail(null, ErrorCode.invalidRequest, "invalid request: expected a JSON object");
 
-      const id = "id" in message ? toId(message.id) : null;
-      const isNotification = !("id" in message);
+      const hasId = "id" in message;
+      // A malformed id (boolean, object, array, ...) cannot be echoed back: answering with an id the
+      // client never sent makes the reply impossible to correlate, so this is a hard invalid request
+      // (`id: null`, the only id we can honestly put on the wire) instead of a silent coercion.
+      if (hasId && message.id !== null && typeof message.id !== "string" && typeof message.id !== "number") {
+        return fail(null, ErrorCode.invalidRequest, "invalid request: id must be a string, number or null");
+      }
+      const id = hasId ? toId(message.id) : null;
+      const isNotification = !hasId;
       if (message.jsonrpc !== "2.0") return fail(id, ErrorCode.invalidRequest, 'invalid request: jsonrpc must be "2.0"');
       const method = message.method;
       if (typeof method !== "string") return fail(id, ErrorCode.invalidRequest, "invalid request: method must be a string");
@@ -208,7 +215,11 @@ export function createDispatcher(handlers: DispatcherHandlers = {}): Dispatcher 
       const params = isRecord(message.params) ? message.params : undefined;
       try {
         const result = await dispatch(method, params);
-        return result === undefined ? undefined : ok(id, result);
+        // A request must always be answered. A handler that resolves to undefined (instead of
+        // returning a result or throwing) would leave the client waiting forever, so report it as an
+        // internal fault. Notifications were already dropped above and stay silent either way.
+        if (result === undefined) return fail(id, ErrorCode.internalError, "internal error: handler produced no result");
+        return ok(id, result);
       } catch (e) {
         if (e instanceof RpcError) return fail(id, e.code, e.message);
         return fail(id, ErrorCode.internalError, `internal error: ${(e as Error)?.message ?? String(e)}`);
@@ -221,8 +232,14 @@ export function createDispatcher(handlers: DispatcherHandlers = {}): Dispatcher 
  * Keeps stdout clean: MCP framing is the only thing allowed on it, so anything a stray
  * `console.log`/`process.stdout.write` would print goes to stderr instead. Called from
  * `runServer()` (not at import time, so importing this module in tests is side-effect free).
+ *
+ * Returns the undo function: these are process-wide globals, so whoever redirects has to put them
+ * back, or every later `console.log` in the same process (a test runner, say) silently vanishes.
  */
-export function redirectStdoutToStderr(): void {
+export function redirectStdoutToStderr(): () => void {
+  const originalWrite = process.stdout.write;
+  const originalLog = console.log;
+  const originalInfo = console.info;
   const toStderr = (chunk: unknown, encoding?: unknown, cb?: unknown): boolean =>
     (process.stderr.write as (...a: unknown[]) => boolean)(chunk, encoding, cb);
   process.stdout.write = toStderr as unknown as typeof process.stdout.write;
@@ -232,7 +249,22 @@ export function redirectStdoutToStderr(): void {
   console.info = (...args: unknown[]): void => {
     (console.error as (...a: unknown[]) => void)(...args);
   };
+  return () => {
+    process.stdout.write = originalWrite;
+    console.log = originalLog;
+    console.info = originalInfo;
+  };
 }
+
+/**
+ * Hard cap on one line that has not been terminated yet. A client streaming megabytes without a
+ * newline would otherwise grow `buffer` until the process dies, so past this size the line is
+ * discarded (through its newline) and reported as a parse error.
+ */
+const MAX_LINE_LENGTH = 8 * 1024 * 1024;
+
+/** The answer to a line we refuse to buffer (or refused to parse) because it is too long. */
+const tooLong = (): JsonRpcFailure => fail(null, ErrorCode.parseError, "parse error: line too long");
 
 /**
  * stdio transport: read newline-delimited JSON-RPC from `stdin`, write one compact JSON line per
@@ -246,28 +278,90 @@ export async function runServer(opts: RunServerOptions = {}): Promise<void> {
   const writeRaw = out.write.bind(out);
   const dispatcher = createDispatcher(opts);
 
-  redirectStdoutToStderr();
+  // Only own the real stdout. An injected `stdout` (tests, embedding) belongs to the caller, and
+  // rewriting the process's stdout on its behalf would leak out of this call and never be undone.
+  const restoreStdout = opts.stdout === undefined ? redirectStdoutToStderr() : undefined;
 
-  const write = (msg: unknown): void => {
-    writeRaw(JSON.stringify(msg) + "\n");
+  // Handlers run concurrently (a slow tool must not stall reading the next line), so the frames they
+  // produce are serialised through this promise chain: two concurrent replies can never interleave.
+  let writeChain: Promise<void> = Promise.resolve();
+  const writeNow = (msg: unknown): void => {
+    try {
+      writeRaw(JSON.stringify(msg) + "\n");
+    } catch (e) {
+      // A response we cannot serialise (circular structuredContent, a BigInt) or a stdout that has
+      // gone away (EPIPE once the client exited) must not surface as an unhandled rejection.
+      try {
+        (process.stderr.write as (...a: unknown[]) => boolean)(`kb mcp: failed to write response: ${(e as Error)?.message ?? String(e)}\n`);
+      } catch {
+        // stderr is gone too; nowhere left to report to.
+      }
+    }
   };
-  const handleLine = async (line: string): Promise<void> => {
-    const response = await dispatcher.handleMessage(line);
-    if (response !== undefined) write(response);
+  const write = (msg: unknown): Promise<void> => {
+    // writeNow never throws, so the chain can never wedge on a rejected link.
+    writeChain = writeChain.then(() => writeNow(msg));
+    return writeChain;
+  };
+
+  /** In-flight dispatches; drained before runServer() resolves so no reply is lost at EOF. */
+  const pending = new Set<Promise<void>>();
+  const handleLine = (line: string): void => {
+    const task = (async (): Promise<void> => {
+      const response = await dispatcher.handleMessage(line);
+      if (response !== undefined) await write(response);
+    })();
+    pending.add(task);
+    // Settle-time removal; a handler bug must not take the transport down with an unhandled rejection.
+    void task.then(
+      () => pending.delete(task),
+      (e: unknown) => {
+        pending.delete(task);
+        try {
+          (process.stderr.write as (...a: unknown[]) => boolean)(`kb mcp: handler failed: ${(e as Error)?.message ?? String(e)}\n`);
+        } catch {
+          // stderr is gone too; nowhere left to report to.
+        }
+      },
+    );
+  };
+  const drain = async (): Promise<void> => {
+    while (pending.size > 0) await Promise.all([...pending]);
+    await writeChain;
   };
 
   const decoder = new StringDecoder("utf8");
   let buffer = "";
-  for await (const chunk of stdin) {
-    buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
-    let nl = buffer.indexOf("\n");
-    while (nl >= 0) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-      if (line) await handleLine(line);
-      nl = buffer.indexOf("\n");
+  // Set while discarding the tail of a line we already rejected for being oversized.
+  let dropping = false;
+  try {
+    for await (const chunk of stdin) {
+      buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
+      if (dropping) {
+        const end = buffer.indexOf("\n");
+        buffer = end < 0 ? "" : buffer.slice(end + 1);
+        dropping = end < 0;
+      }
+      let nl = buffer.indexOf("\n");
+      while (nl >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (line.length > MAX_LINE_LENGTH) void write(tooLong());
+        else if (line) handleLine(line);
+        nl = buffer.indexOf("\n");
+      }
+      // A trailing line with no newline is never parsed, so nothing bounds it without this check.
+      if (buffer.length > MAX_LINE_LENGTH) {
+        buffer = "";
+        dropping = true;
+        void write(tooLong());
+      }
     }
+    const rest = dropping ? "" : (buffer + decoder.end()).trim();
+    if (rest) handleLine(rest);
+    // Shutdown/EOF: let every in-flight dispatch finish and flush before resolving.
+    await drain();
+  } finally {
+    restoreStdout?.();
   }
-  const rest = (buffer + decoder.end()).trim();
-  if (rest) await handleLine(rest);
 }

@@ -38,6 +38,8 @@ export interface RunningServer {
 const DEFAULT_PORT = 4747;
 const PORT_TRIES = 50;
 const MAX_BODY = 1024 * 1024;
+/** how long an oversize request may keep (not) sending while we discard its remainder */
+const DRAIN_GRACE_MS = 3000;
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -64,7 +66,10 @@ class HttpError extends Error {
   }
 }
 
-function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+/** thrown by `readBody` when it already wrote the response itself and the caller must not answer again */
+class BodyAnswered extends Error {}
+
+function sendJson(res: http.ServerResponse, status: number, body: unknown, end = true): void {
   const data = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -73,34 +78,61 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
     "Content-Length": Buffer.byteLength(data),
     ...(status === 413 ? { Connection: "close" } : {}),
   });
-  res.end(data);
+  if (end) res.end(data);
+  else res.write(data);
 }
 
-function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+function readBody(req: http.IncomingMessage, res: http.ServerResponse): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     let tooLarge = false;
+    let settled = false;
+    const settle = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+    // The 413 is written (headers and body) as soon as the first oversize chunk arrives, so the
+    // client sees it even if it never finishes writing. The response is *ended* only once the
+    // remainder has been drained: ending it while the peer is still writing makes Node tear the
+    // socket down mid-write, and the client then sees ECONNRESET instead of the 413.
+    const overflow = (): void => {
+      tooLarge = true;
+      chunks.length = 0; // memory stays bounded: nothing beyond MAX_BODY is ever buffered
+      sendJson(res, 413, { error: "request body too large (max 1 MB)", code: "too-large" }, false);
+      // Bound the drain: a client that sends >1 MB and then stalls must not pin the socket open.
+      const timer = setTimeout(() => req.destroy(), DRAIN_GRACE_MS);
+      timer.unref();
+      const flush = (): void => {
+        clearTimeout(timer);
+        if (!res.writableEnded) res.end();
+      };
+      req.once("end", flush);
+      req.once("close", () => clearTimeout(timer));
+      req.once("error", () => clearTimeout(timer));
+      settle(() => reject(new BodyAnswered()));
+    };
     req.on("data", (c: Buffer) => {
+      if (tooLarge) return; // discarding the remainder
       size += c.length;
-      if (size > MAX_BODY) {
-        tooLarge = true; // keep draining (discarding) so the response can be delivered
-        chunks.length = 0;
-      } else if (!tooLarge) chunks.push(c);
+      if (size > MAX_BODY) overflow();
+      else chunks.push(c);
     });
-    req.on("error", reject);
-    req.on("end", () => {
-      if (tooLarge) return reject(new HttpError(413, "too-large", "request body too large (max 1 MB)"));
-      const text = Buffer.concat(chunks).toString("utf8");
-      if (text.trim() === "") return resolve({});
-      try {
-        const v: unknown = JSON.parse(text);
-        if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error("not an object");
-        resolve(v as Record<string, unknown>);
-      } catch {
-        reject(new HttpError(400, "bad-json", "request body must be a JSON object"));
-      }
-    });
+    req.on("error", (e: Error) => settle(() => reject(e)));
+    req.on("end", () =>
+      settle(() => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        if (text.trim() === "") return resolve({});
+        try {
+          const v: unknown = JSON.parse(text);
+          if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error("not an object");
+          resolve(v as Record<string, unknown>);
+        } catch {
+          reject(new HttpError(400, "bad-json", "request body must be a JSON object"));
+        }
+      }),
+    );
   });
 }
 
@@ -164,6 +196,12 @@ function listen(server: http.Server, host: string, port: number): Promise<void> 
     server.once("error", onError);
     server.listen(port, host, () => {
       server.off("error", onError);
+      // A listening server must keep an error handler: late socket errors (EMFILE, EACCES) would
+      // otherwise be thrown as uncaught exceptions and take the process down.
+      server.on("error", (e: Error) => {
+        console.error(`kb web: server error: ${e.message}`);
+        server.close();
+      });
       resolve();
     });
   });
@@ -176,6 +214,10 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const hub = new EventHub(dir);
   const events = opts.events ?? createEventLog(dir);
   const offRuns = opts.live?.onChange(() => hub.notifyRuns());
+  const cleanup = (): void => {
+    offRuns?.();
+    hub.close();
+  };
   const loopback = ["127.0.0.1", "::1", "localhost"].includes(host.toLowerCase());
   const pending = new Set<Promise<void>>();
   let allowedHosts: Set<string> | undefined; // set once the port is known; undefined = no check
@@ -206,7 +248,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       if (method !== "GET") return sendJson(res, 405, { error: "method not allowed", code: "method-not-allowed" });
       return hub.add(res);
     }
-    const body = method === "GET" || method === "HEAD" ? {} : await readBody(req);
+    const body = method === "GET" || method === "HEAD" ? {} : await readBody(req, res);
     const kb = createKanban({
       dir,
       now: opts.now,
@@ -231,6 +273,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
 
   const server = http.createServer((req, res) => {
     handler(req, res).catch((e: unknown) => {
+      if (e instanceof BodyAnswered) return; // readBody already sent the 413 and will end it
       if (res.headersSent) return res.destroy();
       if (e instanceof HttpError) sendJson(res, e.status, { error: e.message, code: e.code });
       else {
@@ -248,7 +291,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     } catch (e) {
       const busy = (e as NodeJS.ErrnoException).code === "EADDRINUSE";
       if (!busy || opts.strictPort || wanted === 0 || i >= PORT_TRIES) {
-        hub.close();
+        cleanup();
         throw busy ? new Error(`port ${port} is in use${opts.strictPort || wanted === 0 ? "" : ` (tried ${wanted}-${port})`}`) : e;
       }
       port++;
@@ -269,8 +312,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
-        offRuns?.();
-        hub.close();
+        cleanup();
         server.close((err) => (err ? reject(err) : resolve()));
         server.closeAllConnections();
       }),
