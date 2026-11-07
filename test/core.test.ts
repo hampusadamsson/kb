@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseDocument } from "yaml";
 import { beforeEach, describe, expect, it } from "vitest";
 import { columnsFor, loadConfig, type Config } from "../src/core/config.js";
-import { addComment, createFile, readFile, updateFile } from "../src/core/frontmatter.js";
+import { addComment, createFile, readFile, splitFrontmatter, updateFile } from "../src/core/frontmatter.js";
 import { matchesTicketGlob, boardNames, duplicates, findById, nextId, numericId, scan, sortTickets } from "../src/core/tickets.js";
 import { filenameFor, padId, slugify } from "../src/core/util.js";
 import { parseProperty } from "../src/core/parse.js";
@@ -39,6 +39,24 @@ describe("config", () => {
     expect(() => loadConfig(dir)).toThrow(/columns/);
     w("kanban.yaml", "columns: [a\n");
     expect(() => loadConfig(dir)).toThrow(/invalid YAML/);
+  });
+  it("rejects duplicate column names", () => {
+    w("kanban.yaml", "columns: [todo, doing, todo]\n");
+    expect(() => loadConfig(dir)).toThrow(/columns must be unique/);
+  });
+  it("rejects empty and whitespace-only column names", () => {
+    w("kanban.yaml", 'columns: [todo, ""]\n');
+    expect(() => loadConfig(dir)).toThrow(/column name must not be empty/);
+    w("kanban.yaml", 'columns: [todo, "  "]\n');
+    expect(() => loadConfig(dir)).toThrow(/column name must not be empty/);
+  });
+  it("rejects an invalid top-level glob, accepts a valid one", () => {
+    w("kanban.yaml", 'columns: [a]\nglob: "**/{a"\n');
+    expect(() => loadConfig(dir)).toThrow(/glob must be a valid glob pattern/);
+    w("kanban.yaml", 'columns: [a]\nglob: "**/*.md"\n');
+    expect(loadConfig(dir).glob).toBe("**/*.md");
+    w("kanban.yaml", "columns: [a]\n");
+    expect(loadConfig(dir).glob).toBe("*.md");
   });
   it("columnsFor uses board override", () => {
     const c = cfg({ boards: { x: { columns: ["q"] } } });
@@ -169,6 +187,45 @@ describe("frontmatter", () => {
     expect(out).toContain("# top comment");
     expect(out).not.toContain("zeta");
     expect(out.endsWith("\n# h\n")).toBe(true);
+  });
+  it("file without frontmatter stays frontmatter-free when the doc is still empty", () => {
+    w("plain.md", "plain text\n");
+    const f = path.join(dir, "plain.md");
+    updateFile(f, (d) => {
+      d.set("tmp", 1);
+      d.delete("tmp");
+    });
+    const out = fs.readFileSync(f, "utf8");
+    expect(out).toBe("plain text\n");
+    expect(splitFrontmatter(out).yaml).toBeUndefined();
+    expect(splitFrontmatter(out).body).toBe("plain text\n");
+  });
+  it("file without frontmatter gains a block once keys are written", () => {
+    w("plain.md", "plain text\n");
+    const f = path.join(dir, "plain.md");
+    updateFile(f, (d) => d.set("status", "done"));
+    expect(fs.readFileSync(f, "utf8")).toBe("---\nstatus: done\n---\nplain text\n");
+  });
+  it("file whose frontmatter loses its last key no longer emits an empty block", () => {
+    w("t.md", "---\ntype: ticket\nid: 1\n---\nbody\n");
+    const f = path.join(dir, "t.md");
+    updateFile(f, (d) => {
+      d.delete("type");
+      d.delete("id");
+    });
+    const out = fs.readFileSync(f, "utf8");
+    expect(out).toBe("body\n");
+    expect(out).not.toContain("{}");
+    expect(splitFrontmatter(out).yaml).toBeUndefined();
+  });
+  it("empty document with a surviving comment keeps a block instead of dropping it", () => {
+    w("t.md", "---\ntype: ticket\n# keep me\n---\nbody\n");
+    const f = path.join(dir, "t.md");
+    updateFile(f, (d) => d.delete("type"));
+    const out = fs.readFileSync(f, "utf8");
+    expect(out).toContain("keep me");
+    expect(out.endsWith("---\nbody\n")).toBe(true);
+    expect(readFile(f).body).toBe("body\n");
   });
   it("createFile writes parseable ticket", () => {
     const f = path.join(dir, "n/new.md");

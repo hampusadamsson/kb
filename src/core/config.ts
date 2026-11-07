@@ -7,7 +7,11 @@ import { YAML_OPTS } from "./frontmatter.js";
 
 export const CONFIG_FILE = "kanban.yaml";
 
-const columnsSchema = z.array(z.string()).min(1, "columns must not be empty");
+const columnName = z.string().trim().min(1, "column name must not be empty");
+const columnsSchema = z
+  .array(columnName)
+  .min(1, "columns must not be empty")
+  .refine((c) => new Set(c).size === c.length, "columns must be unique");
 
 export const MAX_TIMEOUT_SECONDS = 86400;
 const TIMEOUT_MSG = `timeout must be a whole number of seconds from 0 to ${MAX_TIMEOUT_SECONDS} (0 = no timeout)`;
@@ -223,7 +227,7 @@ export const webSchema = z.object({
 const configSchema = z.object({
   name: z.string().default("default"),
   columns: columnsSchema,
-  glob: z.string().default("*.md"),
+  glob: z.string().default("*.md").refine(isValidGlob, "glob must be a valid glob pattern (balanced [] and {})"),
   tickets: ticketRulesSchema.optional(),
   automations: automationsSchema,
   boards: z.record(z.string(), z.object({ columns: columnsSchema, automations: automationsSchema })).optional(),

@@ -31,8 +31,22 @@ export function readFile(file: string): { doc: Document; body: string; crlf: boo
   return { doc: parseDocument(yaml ?? "", YAML_OPTS), body, crlf: text.startsWith("---\r\n") };
 }
 
+/**
+ * Nothing worth writing: null contents (no frontmatter text at all) or an empty map,
+ * and no comments that would be dropped along with the block.
+ */
+function isEmptyDocument(doc: Document): boolean {
+  const c = doc.contents;
+  if (!(c === null || c === undefined || (c instanceof YAMLMap && c.items.length === 0))) return false;
+  const map = c instanceof YAMLMap ? c : undefined;
+  const hasComments = !!(doc.comment || doc.commentBefore || map?.comment || map?.commentBefore);
+  return !hasComments;
+}
+
 /** Render frontmatter + body. With crlf, frontmatter uses CRLF; body is untouched. */
 export function render(doc: Document, body: string, crlf = false): string {
+  // Nothing to serialise: keep the body verbatim instead of emitting a stray `--- {} ---` block.
+  if (isEmptyDocument(doc)) return body;
   const fm = `---\n${doc.toString({ lineWidth: 0 })}---\n`;
   return (crlf ? fm.replace(/\n/g, "\r\n") : fm) + body;
 }

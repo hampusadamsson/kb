@@ -325,7 +325,20 @@ export class Kanban {
     while (this.inflight.size) await Promise.allSettled([...this.inflight]);
   }
 
-  /** Writes a rule's entry; `runs` is incremented when `bump`, otherwise carried over from the existing entry. */
+  /** Report a failed automation-state write on the audit channel (a swallowed failure would hide a runaway loop). */
+  private reportStatusFailure(rel: string, id: unknown, rule: string, reason: string, message: string, bump: boolean): void {
+    this.emit(
+      "automation.skipped",
+      `automation "${rule}" state not saved on #${String(id)} (${message})`,
+      { rule, reason, error: message, bumped: bump },
+      { ticketId: String(id), path: rel },
+    );
+  }
+
+  /**
+   * Writes a rule's entry; `runs` is incremented when `bump`, otherwise carried over from the existing entry.
+   * Returns false when the state could not be persisted; the failure is reported on the audit channel.
+   */
   private writeAutomationStatus(rel: string, id: unknown, rule: string, entry: Record<string, unknown>, bump = false): boolean {
     try {
       const idOf = (file: string): unknown => readFile(file).doc.get("id");
@@ -338,7 +351,10 @@ export class Kanban {
       }
       if (!ok) {
         const found = scan(this.dir, loadConfig(this.dir)).tickets.find((t) => hasId(t) && idKey(t.id) === idKey(id));
-        if (!found) return false;
+        if (!found) {
+          this.reportStatusFailure(rel, id, rule, "ticket-not-found", "ticket not found", bump);
+          return false;
+        }
         abs = path.join(this.dir, found.path);
       }
       updateFile(abs, (doc) => {
@@ -351,7 +367,8 @@ export class Kanban {
         doc.setIn(["automations", rule], doc.createNode({ ...entry, at, runs: prevRuns + (bump ? 1 : 0) }));
       });
       return true;
-    } catch {
+    } catch (e) {
+      this.reportStatusFailure(rel, id, rule, "state-write-failed", (e as Error).message, bump);
       return false;
     }
   }
@@ -394,11 +411,15 @@ export class Kanban {
             continue;
           }
         }
-        started++;
         const startMs = this.now().getTime();
         const startedAt = commentKey(this.now(), true);
+        // The `runs` counter backs the loop guard: if it cannot be persisted, stop rather than dispatch
+        // blind (a self-retriggering rule would never reach the limit, and the failure would be invisible).
+        if (!this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "running", at: startedAt }, true)) {
+          continue;
+        }
+        started++;
         this.emit("automation.started", `automation "${rule.name}" started on #${String(ticket.id)}`, { rule: rule.name, event }, ref);
-        this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "running", at: startedAt }, true);
         const rec = (command: string, result: RunResult): AutomationRecord => ({
           board: ticket.board,
           rule: rule.name,
@@ -637,6 +658,12 @@ export class Kanban {
     }
 
     const warnings: Warning[] = [];
+    if (input.board !== undefined) {
+      const known = [config.name, ...Object.keys(config.boards ?? {})];
+      if (!known.includes(input.board)) {
+        throw new KanbanError("invalid", `unknown board "${input.board}" (known: ${known.join(", ")})`);
+      }
+    }
     const board = input.board ?? config.name;
     const cols = columnsFor(config, board);
     const status = input.status ?? cols[0];
@@ -705,6 +732,11 @@ export class Kanban {
     }
     const extra = checkProps(patch.setProps);
     if (!hasChanges(patch)) throw new KanbanError("invalid", "no changes requested");
+    const removed = new Set(patch.removeLabels ?? []);
+    const both = [...new Set(patch.addLabels ?? [])].filter((l) => removed.has(l));
+    if (both.length) {
+      throw new KanbanError("invalid", `labels both added and removed: ${both.join(", ")}`);
+    }
 
     const warnings: Warning[] = [];
     const { doc, body: oldBody, crlf } = readFile(abs);
