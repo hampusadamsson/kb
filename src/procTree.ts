@@ -20,6 +20,7 @@ export function listProcs(): Proc[] {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 8 * 1024 * 1024,
+      timeout: 2000,
     });
     const procs: Proc[] = [];
     for (const line of out.split("\n")) {
@@ -33,7 +34,7 @@ export function listProcs(): Proc[] {
 }
 
 export interface Tree {
-  /** the roots given (existing only) */
+  /** the roots that will be signalled (roots missing from the snapshot included) */
   pids: number[];
   /** roots plus every descendant, deepest last */
   all: number[];
@@ -70,7 +71,11 @@ export function collectTree(roots: number[], procs: Proc[], reserved: number[] =
     blocked.add(r);
   }
 
-  const present = roots.filter((r) => known.has(r) && !blocked.has(r));
+  // Keep roots the snapshot did not show: `ps` may be unavailable, and a root can be younger than
+  // the snapshot. Dropping them left `all`/`pgids` empty, so killTree returned without signalling
+  // anything and the run outlived its own kill. Their descendants are unknown, so it is the root's
+  // own pid (and, when the snapshot knows it, its group) that keeps it killable.
+  const present = roots.filter((r) => r > 1 && !blocked.has(r));
   const all: number[] = [];
   const seen = new Set<number>();
   const walk = (pid: number): void => {
@@ -81,10 +86,18 @@ export function collectTree(roots: number[], procs: Proc[], reserved: number[] =
   };
   for (const r of present) walk(r);
 
+  // Groups are signalled with kill(-pgid), which reaches every member — including this process and
+  // its shell when a run shares our group. Never collect a group that holds a reserved pid, and
+  // never a reserved pid that is a group leader (its group is its own pid).
+  const protectedGroups = new Set<number>(reserved);
+  for (const r of reserved) {
+    const g = pgidOf.get(r);
+    if (g !== undefined && g > 1) protectedGroups.add(g);
+  }
   const pgids = new Set<number>();
   for (const pid of all) {
     const g = pgidOf.get(pid);
-    if (g !== undefined && g > 1) pgids.add(g);
+    if (g !== undefined && g > 1 && !protectedGroups.has(g)) pgids.add(g);
   }
   return { pids: present, all, pgids: [...pgids] };
 }
@@ -155,8 +168,15 @@ export async function killTree(roots: number[], opts: KillTreeOptions = {}): Pro
   const waitMs = opts.waitMs ?? 3000;
   const reserved = [process.pid, ...(opts.reserved ?? [])];
   // Snapshot first: signalling the shell can orphan its children, after which the tree is unfindable.
-  const tree = collectTree(roots, opts.procs ?? listProcs(), reserved);
-  const { all, pgids } = tree;
+  const procs = opts.procs ?? listProcs();
+  const tree = collectTree(roots, procs, reserved);
+  // collectTree keeps roots the snapshot did not show, so drop the ones that turn out to be gone:
+  // an unknown root has no known descendants, and a dead pid must not be reported as signalled.
+  const known = new Set(procs.map((p) => p.pid));
+  const gone = new Set(tree.pids.filter((p) => !known.has(p) && !exists(p)));
+  const pids = tree.pids.filter((p) => !gone.has(p));
+  const all = gone.size ? tree.all.filter((p) => !gone.has(p)) : tree.all;
+  const pgids = tree.pgids;
   if (!all.length) return { pids: [], all: [], pgids: [], survivors: [] };
 
   const termAll = (): void => {
@@ -172,7 +192,7 @@ export async function killTree(roots: number[], opts: KillTreeOptions = {}): Pro
   termAll();
   const t0 = Date.now();
   while (!opts.immediate && Date.now() - t0 < graceMs) {
-    if (!all.some(exists)) return { pids: tree.pids, all, pgids, survivors: [] };
+    if (!all.some(exists)) return { pids, all, pgids, survivors: [] };
     await delay(50);
   }
   killAll();
@@ -182,5 +202,5 @@ export async function killTree(roots: number[], opts: KillTreeOptions = {}): Pro
     await delay(50);
     survivors = survivors.filter(exists);
   }
-  return { pids: tree.pids, all, pgids, survivors };
+  return { pids, all, pgids, survivors };
 }

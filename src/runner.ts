@@ -53,6 +53,8 @@ function killGroup(child: ChildProcess): void {
 }
 
 const TERM_GRACE_MS = 2000;
+/** Upper bound on how long the timeout path waits for its kill before reporting anyway. */
+const KILL_CAP_MS = TERM_GRACE_MS + 5000;
 
 export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRuns } = {}): AutomationRunner & { killAll(): void } {
   /** global override (tests); normally the timeout comes per run from the rule */
@@ -75,12 +77,18 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
           if (done) return;
           done = true;
           clearTimeout(timer);
+          clearTimeout(killCap);
           handle?.remove();
           resolve({ ...r, stdout: out.text(), stderr: err.text() });
         };
         let timer: NodeJS.Timeout | undefined;
+        let killCap: NodeJS.Timeout | undefined;
         let handle: LiveHandle | undefined;
         let killedByUser = false;
+        /** set as soon as the timeout fires: the timeout path finishes the run, once the tree is dead */
+        let timingOut = false;
+        /** a real exit that arrived while timingOut was set; it wins over the synthetic timeout result */
+        let pendingExit: Omit<RunResult, "stdout" | "stderr"> | undefined;
         try {
           const child = spawn("bash", ["-s"], {
             cwd: o.cwd,
@@ -143,7 +151,12 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
               clearTimeout(g);
               child.stdout.destroy();
               child.stderr.destroy();
-              finish(r);
+              // While a timeout is in progress the tree may still be alive: the timeout path finishes
+              // the run after the kill, so reporting it here would hide a still-running tree. The exit
+              // result is queued instead and wins over the synthetic timeout result, so a child that
+              // exits by itself during the timeout window is reported with its real exit code.
+              if (timingOut) pendingExit = r;
+              else finish(r);
             };
             const g = setTimeout(end, GRACE_MS);
             const pending = [child.stdout, child.stderr].filter((s) => !s.destroyed);
@@ -158,8 +171,31 @@ export function createShellRunner(opts: { timeoutMs?: number; registry?: LiveRun
           if (timeoutMs !== undefined) {
             timer = setTimeout(() => {
               // SIGTERM the tree, then SIGKILL whatever survives (killTree escalates on its own).
-              void killTree([child.pid ?? 0].filter(Boolean), { graceMs: TERM_GRACE_MS, waitMs: 0 });
-              finish({ exitCode: null, error: `timed out after ${timeoutMs / 1000}s`, timedOut: true });
+              // Await it: finishing first would report the run done while its tree is still alive, and
+              // a one-shot CLI exit would never send the SIGKILL, leaving the run orphaned.
+              timingOut = true;
+              const pid = child.pid;
+              const timedOut = (): void => {
+                finish({ exitCode: null, error: `timed out after ${timeoutMs / 1000}s`, timedOut: true });
+              };
+              // The kill is awaited so the report is not sent while the tree is still alive, but it
+              // must not be able to swallow the report: killTree snapshots the tree with a blocking
+              // `ps` (procTree.listProcs) that has no timeout, so a wedged ps never settles. Cap the
+              // wait; if the cap wins, report anyway. finish is guarded by `done`, so a double report is
+              // impossible.
+              //
+              // Only an exit that is NOT an error/signal-kill (i.e. the child exited on its own with a
+              // real exit code) wins over the synthetic timeout result. An exit caused by our own
+              // SIGTERM (error: "killed by SIGTERM") must NOT mask `timedOut: true`: that exit is this
+              // timeout path's own kill, not the child deciding to stop, so a normal timeout would
+              // otherwise be misreported as a SIGTERM kill.
+              const report = (): void => {
+                timingOut = false;
+                if (pendingExit && !pendingExit.error) finish(pendingExit);
+                else timedOut();
+              };
+              killCap = setTimeout(report, KILL_CAP_MS);
+              void killTree(pid ? [pid] : [], { graceMs: TERM_GRACE_MS, waitMs: 0 }).then(report, report);
             }, timeoutMs);
           }
         } catch (e) {

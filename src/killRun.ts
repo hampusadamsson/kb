@@ -5,7 +5,7 @@
 // (alive, expected process group, shell command) before anything is sent.
 import { execFileSync } from "node:child_process";
 import os from "node:os";
-import { markKilled } from "./killMarker.js";
+import { consumeKilled, markKilled } from "./killMarker.js";
 import { killTree, signalGroup, signalPid } from "./procTree.js";
 
 export interface KillTarget {
@@ -92,16 +92,26 @@ export async function killRun(t: KillTarget, opts: KillOptions): Promise<KillRes
     }
   }
 
-  // Tell the owner to record this as a user kill rather than a SIGTERM crash.
+  // Tell the owner to record this as a user kill rather than a SIGTERM crash. Written *before* the
+  // signal on purpose: the owner sees the exit as soon as SIGTERM lands, long before killTree's
+  // grace period is over, so a marker written afterwards would never be consumed. Every failure
+  // path withdraws it again, so a failed attempt cannot relabel a later, unrelated death.
   markKilled(opts.root, pid);
+  const fail = (reason: string): KillResult => {
+    consumeKilled(opts.root, pid);
+    return { ok: false, reason };
+  };
 
   // Kill the tree, not just the group: children that called setsid()/spawned detached keep running
   // in their own group and would otherwise survive, leaving the agent loop going after a "kill".
-  const r = await killTree([pid], { graceMs, waitMs, reserved: opts.reserved });
-  if (!r.all.length) return { ok: false, reason: `cannot signal pid ${pid} (permission denied?)` };
-  if (r.survivors.length) {
-    return { ok: false, reason: `pid ${pid} survived SIGKILL (still running: ${r.survivors.join(", ")})` };
+  let r: Awaited<ReturnType<typeof killTree>>;
+  try {
+    r = await killTree([pid], { graceMs, waitMs, reserved: opts.reserved });
+  } catch (e) {
+    return fail(`cannot signal pid ${pid} (${(e as Error).message})`);
   }
+  if (!r.all.length) return fail(`cannot signal pid ${pid} (permission denied?)`);
+  if (r.survivors.length) return fail(`pid ${pid} survived SIGKILL (still running: ${r.survivors.join(", ")})`);
   // The run's own group is always reported so callers can show what was targeted.
   signalGroup(pgid, 0);
   return { ok: true, pid, pgid, all: r.all };
