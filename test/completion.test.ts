@@ -27,6 +27,16 @@ describe("generated scripts cover the program", () => {
       for (const o of p.options) expect(s).toContain(o.long!);
     });
   }
+  it("bash escapes dynamic words; zsh does not", () => {
+    const b = generate(p, "bash");
+    expect(b).toContain("_kb_esc");
+    expect(b).toContain("while IFS= read -r l; do");
+    expect(b).toContain("l=${l// /\\\\ }");
+    expect(b).toMatch(/__complete "\$@" 2>\/dev\/null \| _kb_esc/);
+    const z = generate(p, "zsh");
+    expect(z).not.toContain("_kb_esc");
+  });
+
   it("zsh has descriptions; unknown shell throws", () => {
     const s = generate(p, "zsh");
     for (const c of cmds) expect(s).toContain(c.description().replace(/'/g, "'\\''"));
@@ -48,12 +58,21 @@ describe("__complete", () => {
     tk("b.md", "id: 2\nname: B\nstatus: active\nboard: other\nlabels: [ui]");
     expect(complete(dir, "ids").sort()).toEqual(["1", "2"]);
     expect(complete(dir, "ids", "named")).toContain("1:A b");
+    expect(complete(dir, "ids", "named")).toContain("2:B");
     expect(complete(dir, "columns", "1")).toEqual(["todo", "done"]);
     expect(complete(dir, "columns", "2")).toEqual(["backlog", "active"]);
     expect(complete(dir, "columns").sort()).toEqual(["active", "backlog", "done", "todo"]);
     expect(complete(dir, "boards").length).toBe(2);
     expect(complete(dir, "labels")).toEqual(["bug", "ui"]);
     expect(complete(dir, "propkeys")).toEqual(["priority:"]);
+  });
+
+  it("returns raw names in named ids", () => {
+    fs.writeFileSync(path.join(dir, "kanban.yaml"), "columns: [todo]\n");
+    const name = 'Fix $HOME `x` "q" it\'s C:\\tmp';
+    tk("a.md", `id: 1\nname: ${JSON.stringify(name)}\nstatus: todo`);
+    // values are unescaped: shell layers (bash _kb_esc, zsh compadd -a) quote them
+    expect(complete(dir, "ids", "named")).toEqual([`1:${name}`]);
   });
 
   it("is silent without kanban.yaml", () => {

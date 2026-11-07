@@ -2,7 +2,10 @@ import { columnsFor, createKanban } from "../../core/index.js";
 
 const uniq = (xs: string[]): string[] => [...new Set(xs)];
 
-/** Candidates for shell completion. Never throws; returns [] on any error. */
+/**
+ * Candidates for shell completion. Never throws; returns [] on any error.
+ * Values are RAW (unescaped): each shell layer does its own quoting.
+ */
 export function complete(cwd: string, kind: string, arg?: string): string[] {
   try {
     const { config, tickets } = createKanban({ dir: cwd }).load();
