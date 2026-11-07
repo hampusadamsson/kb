@@ -20,6 +20,11 @@ interface Run {
 
 /** Spawns `kb mcp --dir <dir>`, feeds the messages as newline-delimited JSON, and collects both streams. */
 function run(messages: unknown[]): Promise<Run> {
+  return runRaw(messages.map((m) => JSON.stringify(m) + "\n"));
+}
+
+/** Same, but with raw stdin text, so a line can be oversized or deliberately malformed. */
+function runRaw(chunks: string[]): Promise<Run> {
   const main = path.resolve(import.meta.dirname, "../dist/cli/main.js");
   const child = spawn(process.execPath, [main, "mcp", "--dir", dir], { cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";
@@ -27,10 +32,22 @@ function run(messages: unknown[]): Promise<Run> {
   child.stdout.setEncoding("utf8").on("data", (c: string) => (stdout += c));
   child.stderr.setEncoding("utf8").on("data", (c: string) => (stderr += c));
   const exited = new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
-  for (const m of messages) child.stdin.write(JSON.stringify(m) + "\n");
+  for (const c of chunks) child.stdin.write(c);
   // Closing stdin is how an MCP client shuts the server down; it must exit on its own.
   child.stdin.end();
   return exited.then((code) => ({ stdout, stderr, code }));
+}
+
+/** Every stdout line must be a complete JSON-RPC 2.0 message; nothing may be interleaved with it. */
+function responses(r: Run): Record<string, any>[] {
+  return r.stdout
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => {
+      const msg = JSON.parse(l) as Record<string, any>;
+      expect(msg.jsonrpc).toBe("2.0");
+      return msg;
+    });
 }
 
 describe("kb mcp over stdio", () => {
@@ -68,5 +85,39 @@ describe("kb mcp over stdio", () => {
     expect(fs.readFileSync(path.join(dir, "001-from-mcp.md"), "utf8")).toContain("From MCP");
     expect(r.code).toBe(0);
     expect(r.stderr).not.toContain("error:");
+  }, 20000);
+
+  it("survives an oversized line: reports a parse error and keeps serving", async () => {
+    const r = await runRaw(["z".repeat(9 * 1024 * 1024) + "\n", JSON.stringify({ jsonrpc: "2.0", id: 7, method: "ping" }) + "\n"]);
+    const msgs = responses(r);
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]).toMatchObject({ id: null, error: { code: -32700 } });
+    expect(msgs[1]).toMatchObject({ id: 7, result: {} });
+    expect(r.code).toBe(0);
+  }, 20000);
+
+  it("rejects a non-string label instead of silently dropping it", async () => {
+    const r = await run([
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "kb_search", arguments: { label: ["bug", 1] } } },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "kb_create", arguments: { name: "Bad", labels: ["ui", 2] } } },
+    ]);
+    const [search, create] = responses(r);
+    expect(search.result.isError).toBe(true);
+    expect(search.result.structuredContent.code).toBe("invalid");
+    expect(search.result.content[0].text).toContain("label");
+    expect(create.result.isError).toBe(true);
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith(".md"))).toHaveLength(0);
+    expect(r.code).toBe(0);
+  }, 20000);
+
+  it("clamps limit to 200", async () => {
+    const r = await run([
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "kb_create", arguments: { name: "One" } } },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "kb_search", arguments: { limit: 10_000 } } },
+    ]);
+    const search = responses(r)[1];
+    expect(search.result.structuredContent.limit).toBe(200);
+    expect(search.result.structuredContent.tickets).toHaveLength(1);
+    expect(r.code).toBe(0);
   }, 20000);
 });

@@ -13,6 +13,8 @@ import { runServer, type ToolCallResult, type ToolDefinition } from "./protocol.
 
 const WARN = "⚠ ";
 const DEFAULT_SEARCH_LIMIT = 20;
+/** Mirrors `maximum: 200` on kb_search's `limit` schema. */
+const MAX_SEARCH_LIMIT = 200;
 
 const INSTRUCTIONS = [
   "A kb board is a directory of markdown tickets: YAML frontmatter holds id, status, labels and properties, the markdown body holds the description.",
@@ -41,10 +43,25 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-const strList = (v: unknown): unknown => {
-  if (typeof v === "string") return [v];
-  if (Array.isArray(v)) return v.filter((x) => typeof x === "string");
-  return undefined;
+/**
+ * Parses a schema argument that is "a string or an array of strings" (`label`, `labels`, ...).
+ * Absent means undefined; anything else that is not a string list is a validation error, because
+ * silently dropping the bad members turns `["bug", 1]` into an unfiltered search and a ticket
+ * written without the labels the caller asked for.
+ */
+const strList = (v: unknown, arg: string): { values: string[] } | { error: string } | undefined => {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === "string") return { values: [v] };
+  if (!Array.isArray(v)) return { error: `${arg} must be a string or an array of strings` };
+  const values: string[] = [];
+  for (const x of v) {
+    if (typeof x !== "string") {
+      const got = x === null ? "null" : Array.isArray(x) ? "array" : typeof x;
+      return { error: `${arg} must contain only strings (got ${got})` };
+    }
+    values.push(x);
+  }
+  return { values };
 };
 
 /** Core warnings are objects ({kind, path, message}); tools advertise them as plain strings. */
@@ -215,13 +232,20 @@ export function createTools(ctx: ToolContext): ToolDefinition[] {
       },
       annotations: annotations(true, false, true),
       handler: async (args) => {
+        const labels = strList(args.label, "label");
+        if (labels && "error" in labels) return failure(400, { error: labels.error, code: "invalid" });
+        const properties = strList(args.property, "property");
+        if (properties && "error" in properties) return failure(400, { error: properties.error, code: "invalid" });
         const query = new URLSearchParams();
         if (str(args.text)) query.set("text", str(args.text) as string);
         if (str(args.board)) query.set("board", str(args.board) as string);
-        for (const l of (strList(args.label) as string[] | undefined) ?? []) query.append("label", l);
-        for (const p of (strList(args.property) as string[] | undefined) ?? []) query.append("property", p);
+        for (const l of labels?.values ?? []) query.append("label", l);
+        for (const p of properties?.values ?? []) query.append("property", p);
+        // The schema advertises maximum: 200, so a larger limit is clamped rather than honoured.
         const limit =
-          typeof args.limit === "number" && Number.isFinite(args.limit) ? Math.max(1, Math.trunc(args.limit)) : DEFAULT_SEARCH_LIMIT;
+          typeof args.limit === "number" && Number.isFinite(args.limit)
+            ? Math.min(MAX_SEARCH_LIMIT, Math.max(1, Math.trunc(args.limit)))
+            : DEFAULT_SEARCH_LIMIT;
         const r = await call("GET", "/api/board", { query });
         if (!isOk(r.status)) return failure(r.status, r.body);
         const all = boardTickets(r.body).map((t) => ({
@@ -301,8 +325,9 @@ export function createTools(ctx: ToolContext): ToolDefinition[] {
         for (const k of ["status", "board", "properties", "body", "comment", "file", "id"] as const) {
           if (args[k] !== undefined) body[k] = args[k];
         }
-        const labels = strList(args.labels);
-        if (labels !== undefined) body.labels = labels;
+        const labels = strList(args.labels, "labels");
+        if (labels && "error" in labels) return failure(400, { error: labels.error, code: "invalid" });
+        if (labels) body.labels = labels.values;
         const r = await call("POST", "/api/tickets", { body });
         if (!isOk(r.status)) return failure(r.status, r.body);
         const rec = isRecord(r.body) ? r.body : {};
@@ -340,8 +365,9 @@ export function createTools(ctx: ToolContext): ToolDefinition[] {
           if (args[k] !== undefined) body[k] = args[k];
         }
         for (const k of ["addLabels", "removeLabels"] as const) {
-          const v = strList(args[k]);
-          if (v !== undefined) body[k] = v;
+          const v = strList(args[k], k);
+          if (v && "error" in v) return failure(400, { error: v.error, code: "invalid" });
+          if (v) body[k] = v.values;
         }
         const r = await call("PATCH", p, { body });
         if (!isOk(r.status)) return failure(r.status, r.body);

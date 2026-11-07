@@ -7,7 +7,14 @@ import { createEventLog } from "../src/eventLog.js";
 import { LiveRuns } from "../src/liveRuns.js";
 import { createShellRunner } from "../src/runner.js";
 import { createTools, type ToolContext } from "../src/mcp/server.js";
-import { PROTOCOL_VERSIONS, createDispatcher, type Dispatcher, type JsonRpcSuccess, type ToolCallResult } from "../src/mcp/protocol.js";
+import {
+  PROTOCOL_VERSIONS,
+  createDispatcher,
+  runServer,
+  type Dispatcher,
+  type JsonRpcSuccess,
+  type ToolCallResult,
+} from "../src/mcp/protocol.js";
 
 const TOOL_NAMES = [
   "kb_boards",
@@ -281,6 +288,220 @@ describe("tools/call", () => {
   });
 });
 
+describe("validation", () => {
+  it("rejects non-string list members instead of silently dropping them", async () => {
+    await call("kb_create", { name: "Labeled", body: "x", labels: ["bug"] });
+    // A filtered-out non-string member used to degrade into "no filter" / "no labels requested".
+    const search = await call("kb_search", { label: ["bug", 1] });
+    expect(search.isError).toBe(true);
+    expect(sc(search).code).toBe("invalid");
+    expect(text(search)).toContain("label");
+    expect(text(search)).toContain("strings");
+
+    const create = await call("kb_create", { name: "Bad labels", labels: ["ui", 2] });
+    expect(create.isError).toBe(true);
+    expect(text(create)).toContain("labels");
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith(".md"))).toHaveLength(1);
+
+    const update = await call("kb_update", { id: "001", addLabels: ["api", null] });
+    expect(update.isError).toBe(true);
+    expect(text(update)).toContain("addLabels");
+    expect(sc(await call("kb_read", { id: "001" }))).toMatchObject({ labels: ["bug"] });
+
+    const property = await call("kb_search", { property: { a: 1 } });
+    expect(property.isError).toBe(true);
+    expect(text(property)).toContain("property");
+  });
+
+  it("clamps limit to the advertised maximum of 200", async () => {
+    for (const n of ["one", "two", "three"]) await call("kb_create", { name: n });
+    const r = await call("kb_search", { limit: 5000 });
+    expect(r.isError).toBeUndefined();
+    expect(sc(r)).toMatchObject({ total: 3, limit: 200, truncated: false });
+    expect(sc(r).tickets).toHaveLength(3);
+    // below the minimum the floor still applies
+    expect(sc(await call("kb_search", { limit: 0 }))).toMatchObject({ limit: 1, truncated: true });
+  });
+});
+
+describe("stdio transport", () => {
+  /** Drives runServer with an injected stdin/stdout pair and collects the framed responses. */
+  async function transport(chunks: string[]): Promise<{ responses: Record<string, any>[]; raw: string }> {
+    let raw = "";
+    const stdin = (async function* () {
+      for (const c of chunks) yield c;
+    })();
+    await runServer({
+      tools: createTools(context(dir)),
+      stdin,
+      stdout: {
+        write(chunk: string) {
+          raw += chunk;
+          return true;
+        },
+      },
+    });
+    const responses = raw
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as Record<string, any>);
+    return { responses, raw };
+  }
+
+  it("caps an oversized line, drops it and reports a parse error", async () => {
+    const huge = "x".repeat(9 * 1024 * 1024);
+    const { responses, raw } = await transport([
+      huge,
+      // the newline only arrives on a later chunk; the tail must be discarded, not parsed
+      `"tail-of-the-dropped-line"}\n`,
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) + "\n",
+    ]);
+    expect(raw.length).toBeLessThan(huge.length);
+    expect(responses).toHaveLength(2);
+    expect(responses[0]).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32700 } });
+    expect(responses[0].error.message).toContain("too long");
+    expect(responses[1]).toMatchObject({ jsonrpc: "2.0", id: 1, result: {} });
+  });
+
+  it("keeps accepting lines after an oversized one is dropped", async () => {
+    const { responses } = await transport([
+      "y".repeat(9 * 1024 * 1024) + "\n",
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }) + "\n",
+    ]);
+    expect(responses).toHaveLength(2);
+    expect(responses[0].error.code).toBe(-32700);
+    expect((responses[1].result as { tools: unknown[] }).tools).toHaveLength(TOOL_NAMES.length);
+  });
+
+  it("leaves the process globals alone when stdout is injected, and restores them otherwise", async () => {
+    const originalWrite = process.stdout.write;
+    const originalLog = console.log;
+    // injected stdout: nothing may be redirected, not even for the duration of the call
+    const seen: string[] = [];
+    const stdin = (async function* () {
+      yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) + "\n";
+    })();
+    await runServer({
+      stdin,
+      stdout: {
+        write: (chunk: string) => (seen.push(chunk), true),
+      },
+    });
+    expect(process.stdout.write).toBe(originalWrite);
+    expect(console.log).toBe(originalLog);
+    expect(seen.join("")).toContain('"id":1');
+
+    // default stdout (the real process.stdout): redirected during the run, restored after it
+    let redirectedDuringRun = false;
+    const empty = (async function* () {
+      yield "";
+      redirectedDuringRun = process.stdout.write !== originalWrite && console.log !== originalLog;
+    })();
+    await runServer({ stdin: empty });
+    expect(redirectedDuringRun).toBe(true);
+    expect(process.stdout.write).toBe(originalWrite);
+    expect(console.log).toBe(originalLog);
+  });
+
+  it("swallows a failing write (EPIPE / unserialisable) instead of throwing", async () => {
+    const stdin = (async function* () {
+      yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) + "\n";
+      yield JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\n";
+    })();
+    let calls = 0;
+    await expect(
+      runServer({
+        stdin,
+        stdout: {
+          write() {
+            calls += 1;
+            throw new Error("EPIPE");
+          },
+        },
+      }),
+    ).resolves.toBeUndefined();
+    // both responses were attempted; neither failure escaped
+    expect(calls).toBe(2);
+  });
+
+  it("does not let a slow tool call block later lines (ping / notifications/cancelled stay responsive)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const tools = [
+      {
+        name: "slow",
+        handler: async () => {
+          await gate;
+          return { content: [] };
+        },
+      },
+    ];
+    let raw = "";
+    const until = async (cond: () => boolean): Promise<void> => {
+      const deadline = Date.now() + 5000;
+      while (!cond()) {
+        if (Date.now() > deadline) throw new Error("timed out waiting for the server");
+        await new Promise((r) => setTimeout(r, 5));
+      }
+    };
+    const stdin = (async function* () {
+      yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "slow" } }) + "\n";
+      yield JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 1 } }) + "\n";
+      yield JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\n";
+      // Both later lines must have been read and answered while `slow` is still blocked.
+      await until(() => raw.includes('"id":2'));
+      expect(raw).not.toContain('"id":1');
+      release();
+    })();
+    await expect(
+      runServer({
+        tools,
+        stdin,
+        stdout: {
+          write(chunk: string) {
+            raw += chunk;
+            return true;
+          },
+        },
+      }),
+    ).resolves.toBeUndefined();
+    release();
+    const lines = raw.split("\n").filter((l) => l.trim() !== "");
+    // The notification answered nothing, the ping answered first, the slow call answered last.
+    expect(lines.filter((l) => l.includes('"method"'))).toHaveLength(0);
+    expect(lines.map((l) => JSON.parse(l).id)).toEqual([2, 1]);
+  }, 10000);
+
+  it("swallows an unserialisable response (BigInt in structuredContent)", async () => {
+    const tools = [
+      {
+        name: "big",
+        handler: () => ({ content: [], structuredContent: { n: 1n as unknown as number } }),
+      },
+    ];
+    let raw = "";
+    const stdin = (async function* () {
+      yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "big" } }) + "\n";
+      yield JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\n";
+    })();
+    await expect(
+      runServer({
+        tools,
+        stdin,
+        stdout: {
+          write(chunk: string) {
+            raw += chunk;
+            return true;
+          },
+        },
+      }),
+    ).resolves.toBeUndefined();
+    // The bad response is dropped, the server keeps going.
+    expect(raw).not.toContain('"id":1');
+    expect(raw).toContain('"id":2');
+  });
+});
+
 describe("errors", () => {
   it("kb_read on a missing id is an isError result with an actionable hint, not a throw", async () => {
     const pending = rpc("tools/call", { name: "kb_read", arguments: { id: "404" } });
@@ -300,6 +521,32 @@ describe("errors", () => {
     const noStatus = await call("kb_move", { id: "001" });
     expect(noStatus.isError).toBe(true);
     expect(text(noStatus)).toContain("status is required");
+  });
+
+  it("a present but malformed id is an invalid request, not a coerced null", async () => {
+    for (const bad of [true, {}, [], false]) {
+      const res = (await dispatcher.handleMessage({ jsonrpc: "2.0", id: bad, method: "ping" })) as any;
+      expect(res.jsonrpc, JSON.stringify(bad)).toBe("2.0");
+      expect(res.id, JSON.stringify(bad)).toBeNull();
+      expect(res.error.code, JSON.stringify(bad)).toBe(-32600);
+      expect(res.error.message).toContain("id");
+      expect(res.result).toBeUndefined();
+    }
+    // A null id is legal and must still be echoed, not rejected.
+    const nul = (await dispatcher.handleMessage({ jsonrpc: "2.0", id: null, method: "ping" })) as any;
+    expect(nul).toMatchObject({ jsonrpc: "2.0", id: null, result: {} });
+  });
+
+  it("a request whose handler resolves to undefined gets -32603 instead of silence", async () => {
+    const silence = createDispatcher({
+      tools: [{ name: "void", handler: () => undefined as unknown as ToolCallResult }],
+    });
+    const res = (await silence.handleMessage({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "void" } })) as any;
+    expect(res.id).toBe(9);
+    expect(res.error.code).toBe(-32603);
+    expect(res.result).toBeUndefined();
+    // Notifications stay silent: a client that sent none is not waiting for a reply.
+    await expect(silence.handleMessage({ jsonrpc: "2.0", method: "tools/call", params: { name: "void" } })).resolves.toBeUndefined();
   });
 
   it("unknown tools are JSON-RPC errors (invalid params)", async () => {
