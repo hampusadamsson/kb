@@ -46,9 +46,20 @@ const body = (opt: string | undefined, io: Io): string | undefined => (opt === "
 
 const warnAll = (ws: Warning[], io: Io): void => ws.forEach((w) => io.warn(fmtWarning(w)));
 
+/**
+ * Turn an $EDITOR value into a command + argv, without a shell.
+ * Editor values with arguments are a real usage pattern (`EDITOR="code -w"`), so split on
+ * whitespace. The file is passed as a single argv element, so spaces, `$`, backticks and
+ * quotes in the path are never interpreted.
+ */
+export function editorArgv(editor: string, file: string): { command: string; args: string[] } {
+  const [command = "vi", ...args] = editor.trim().split(/\s+/).filter(Boolean);
+  return { command, args: [...args, file] };
+}
+
 export function openEditor(file: string): void {
-  const editor = process.env.EDITOR || "vi";
-  const r = spawnSync(`${editor} "${file.replace(/"/g, '\\"')}"`, { stdio: "inherit", shell: true });
+  const { command, args } = editorArgv(process.env.EDITOR || "vi", file);
+  const r = spawnSync(command, args, { stdio: "inherit" });
   if (r.error) throw r.error;
   if (r.status) throw new Error(`editor exited with status ${r.status}`);
 }

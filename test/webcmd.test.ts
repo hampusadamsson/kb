@@ -1,12 +1,50 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { automationExposureWarning, runWeb, type WebIO } from "../src/cli/commands/web.js";
+import { automationExposureWarning, resolvePort, runWeb, type WebIO } from "../src/cli/commands/web.js";
 import { createKanban } from "../src/core/index.js";
 import type { RunningServer } from "../src/web/server.js";
+
+// Toggle to inject a server whose settled() rejects or never resolves, and count killAll calls.
+// Both mocks delegate to the real implementations unless the flags are set.
+const mock = vi.hoisted(() => ({ fail: "none" as "none" | "reject" | "hang", killAll: 0 }));
+
+vi.mock("../src/runner.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/runner.js")>();
+  return {
+    ...actual,
+    createShellRunner: (o?: Parameters<typeof actual.createShellRunner>[0]) => {
+      const real = actual.createShellRunner(o);
+      return {
+        ...real,
+        killAll: () => {
+          mock.killAll++;
+          real.killAll();
+        },
+      };
+    },
+  };
+});
+
+vi.mock("../src/web/server.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/web/server.js")>();
+  return {
+    ...actual,
+    startServer: async (o: Parameters<typeof actual.startServer>[0]) => {
+      if (mock.fail === "none") return actual.startServer(o);
+      return {
+        url: "http://127.0.0.1:1",
+        port: 1,
+        host: "127.0.0.1",
+        settled: () => (mock.fail === "reject" ? Promise.reject(new Error("settled boom")) : new Promise<void>(() => {})),
+        close: async () => {},
+      };
+    },
+  };
+});
 
 const dirs: string[] = [];
 const servers: { close(): Promise<void> }[] = [];
@@ -121,6 +159,38 @@ describe("runWeb", () => {
       const dir = tmp();
       webCfg(dir, `web:\n  port: ${bad}\n`);
       await expect(runWeb(dir, { open: false }, io().i)).rejects.toThrow(/invalid config.*web\.port/);
+    }
+  });
+  it("resolvePort routes flag and config through parsePort", () => {
+    expect(resolvePort(undefined, undefined)).toBeUndefined();
+    expect(resolvePort(undefined, 0)).toBe(0);
+    expect(resolvePort(undefined, 8080)).toBe(8080);
+    expect(resolvePort(8080, 9090)).toBe(8080);
+    expect(resolvePort("8080", 9090)).toBe(8080);
+    for (const bad of [70000, -1, 1.5, Number.NaN, "4747x", ""]) {
+      expect(() => resolvePort(undefined, bad as number)).toThrow(/invalid port/);
+    }
+  });
+  it("shutdown still kills automations when settled() rejects", async () => {
+    mock.fail = "reject";
+    mock.killAll = 0;
+    try {
+      const s = await runWeb(tmp(), { port: 0, open: false }, io().i);
+      await expect(s.shutdown(200)).rejects.toThrow(/settled boom/);
+      expect(mock.killAll).toBe(1);
+    } finally {
+      mock.fail = "none";
+    }
+  });
+  it("shutdown still kills automations when the deadline wins", async () => {
+    mock.fail = "hang";
+    mock.killAll = 0;
+    try {
+      const s = await runWeb(tmp(), { port: 0, open: false }, io().i);
+      await s.shutdown(20);
+      expect(mock.killAll).toBe(1);
+    } finally {
+      mock.fail = "none";
     }
   });
   it("busy port: explicit errors, default auto-increments", async () => {
