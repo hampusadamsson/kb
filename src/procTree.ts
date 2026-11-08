@@ -102,13 +102,16 @@ export function collectTree(roots: number[], procs: Proc[], reserved: number[] =
   return { pids: present, all, pgids: [...pgids] };
 }
 
-/** True when `pid` exists (signal 0 probe). */
+/**
+ * True when `pid` exists (signal 0 probe). Only ESRCH means "gone": EPERM means the pid is alive but
+ * owned by someone else, and treating that as gone silently made kills of foreign trees a no-op.
+ */
 export function exists(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ESRCH";
   }
 }
 
@@ -172,8 +175,10 @@ export async function killTree(roots: number[], opts: KillTreeOptions = {}): Pro
   const tree = collectTree(roots, procs, reserved);
   // collectTree keeps roots the snapshot did not show, so drop the ones that turn out to be gone:
   // an unknown root has no known descendants, and a dead pid must not be reported as signalled.
+  // Without a snapshot (`ps` failed or timed out) nothing can be verified, so no root is dropped —
+  // filtering there turned every kill into a silent no-op.
   const known = new Set(procs.map((p) => p.pid));
-  const gone = new Set(tree.pids.filter((p) => !known.has(p) && !exists(p)));
+  const gone = new Set(procs.length ? tree.pids.filter((p) => !known.has(p) && !exists(p)) : []);
   const pids = tree.pids.filter((p) => !gone.has(p));
   const all = gone.size ? tree.all.filter((p) => !gone.has(p)) : tree.all;
   const pgids = tree.pgids;

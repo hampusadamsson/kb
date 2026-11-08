@@ -92,23 +92,34 @@ export async function runWeb(
   const exposure = automationExposureWarning(host, runner !== undefined);
   if (exposure) io.err(exposure);
   if (opts.open !== false) io.opener(url);
+  // Shared across calls, so a second SIGINT/SIGTERM reuses the first shutdown instead of
+  // hitting server.close() on a closed server (that would turn a clean exit into exit(1)).
+  let shuttingDown: Promise<void> | undefined;
+  const once = async (deadlineMs: number): Promise<void> => {
+    try {
+      await server.close();
+    } finally {
+      let t: NodeJS.Timeout | undefined;
+      const deadline = new Promise<void>((r) => (t = setTimeout(r, deadlineMs)));
+      // A deadline win leaves settled() pending: swallow a late rejection so shutdown can
+      // never surface as an unhandled rejection.
+      const settled = server.settled();
+      settled.catch(() => {});
+      try {
+        await Promise.race([settled, deadline]);
+      } finally {
+        // runs even when settled() rejects or the deadline wins: never leave the timer
+        // pending or automation children alive.
+        clearTimeout(t);
+        runner?.killAll();
+      }
+    }
+  };
   return {
     ...server,
-    async shutdown(deadlineMs = SHUTDOWN_DEADLINE_MS) {
-      try {
-        await server.close();
-      } finally {
-        let t: NodeJS.Timeout | undefined;
-        const deadline = new Promise<void>((r) => (t = setTimeout(r, deadlineMs)));
-        try {
-          await Promise.race([server.settled(), deadline]);
-        } finally {
-          // runs even when settled() rejects or the deadline wins: never leave the timer
-          // pending or automation children alive.
-          clearTimeout(t);
-          runner?.killAll();
-        }
-      }
+    shutdown(deadlineMs = SHUTDOWN_DEADLINE_MS) {
+      shuttingDown ??= once(deadlineMs);
+      return shuttingDown;
     },
   };
 }

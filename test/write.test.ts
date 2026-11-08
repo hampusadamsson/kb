@@ -210,6 +210,19 @@ describe("comment & edit", () => {
       else delete process.env.EDITOR;
     }
   });
+  it("openEditor treats a signal-killed editor as failure", () => {
+    const old = process.env.EDITOR;
+    // a signal-killed child has status null (falsy) but signal set: must still throw
+    const script = path.join(dir, "suicide.sh");
+    fs.writeFileSync(script, "#!/bin/sh\nkill -TERM $$\n", { mode: 0o755 });
+    process.env.EDITOR = script;
+    try {
+      expect(() => openEditor("f.md")).toThrow(/editor was killed by SIGTERM/);
+    } finally {
+      if (old !== undefined) process.env.EDITOR = old;
+      else delete process.env.EDITOR;
+    }
+  });
   it("edit uses EDITOR", () => {
     add(dir, "A", {}, io);
     const script = path.join(dir, "ed.sh");

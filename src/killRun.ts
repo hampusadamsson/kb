@@ -75,6 +75,14 @@ export async function killRun(t: KillTarget, opts: KillOptions): Promise<KillRes
     return { ok: false, reason: `pid ${pid} is not reachable (gone, or owned by another user)` };
   }
   const pgid = t.pgid ?? pid;
+  // `ps` is unavailable but the pid answers signal 0, so neither reuse guard below can run. Fail
+  // closed: without a `pgid` or `elapsedMs` on the entry there is nothing to corroborate identity, and
+  // signalling would hit whatever process now owns the recycled pid. With one of them present we
+  // proceed on the entry's own evidence (the owner wrote it at spawn time), accepting that the guards
+  // could not be double-checked.
+  if (!info && t.pgid === undefined && t.elapsedMs === undefined) {
+    return { ok: false, reason: `cannot verify pid ${pid} belongs to this run (ps unavailable)` };
+  }
   if (info) {
     if (info.pgid !== pgid) {
       return { ok: false, reason: `pid ${pid} is now in group ${info.pgid}, expected ${pgid} (pid reused)` };
