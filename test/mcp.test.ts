@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,8 @@ import { LiveRuns } from "../src/liveRuns.js";
 import { createShellRunner } from "../src/runner.js";
 import { createTools, type ToolContext } from "../src/mcp/server.js";
 import {
+  DRAIN_DEADLINE_MS,
+  MAX_INFLIGHT,
   PROTOCOL_VERSIONS,
   createDispatcher,
   runServer,
@@ -500,6 +503,156 @@ describe("stdio transport", () => {
     expect(raw).not.toContain('"id":1');
     expect(raw).toContain('"id":2');
   });
+
+  /** Polls until `cond` holds, so a test never has to guess how many ticks the transport needs. */
+  const until = async (cond: () => boolean, what = "condition"): Promise<void> => {
+    const deadline = Date.now() + 5000;
+    while (!cond()) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  };
+
+  /** An injected stdout that can also emit stream events, like a pipe to a dead client. */
+  class FakeStdout extends EventEmitter {
+    calls: string[] = [];
+    write(chunk: string): boolean {
+      this.calls.push(chunk);
+      return true;
+    }
+  }
+
+  /** Runs `body` while capturing everything written to stderr, so the transport's logs are assertable. */
+  const captureStderr = async <T>(body: () => Promise<T>): Promise<{ result: T; logged: string }> => {
+    const spy = vi.spyOn(process.stderr, "write");
+    try {
+      const result = await body();
+      return { result, logged: spy.mock.calls.map((c) => String(c[0])).join("") };
+    } finally {
+      spy.mockRestore();
+    }
+  };
+
+  it("survives an asynchronous `error` on stdout and stops writing (EPIPE must not crash the server)", async () => {
+    const out = new FakeStdout();
+    const stdin = (async function* () {
+      yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) + "\n";
+      await until(() => out.calls.length === 1, "the first reply");
+      // A closed pipe reports EPIPE as an event, never as a throw from write(); with no `error`
+      // listener Node turns this into an uncaught exception that kills the process.
+      out.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+      yield JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\n";
+    })();
+
+    const { result, logged } = await captureStderr(() => runServer({ stdin, stdout: out }));
+    expect(result).toBeUndefined();
+    // The reply written before the failure went out; the one after it must not be attempted.
+    expect(out.calls).toHaveLength(1);
+    expect(out.calls[0]).toContain('"id":1');
+    // Reported once, on stderr — never thrown.
+    expect(logged).toContain("output stream failed");
+  });
+
+  it("stops a hung shutdown at the drain deadline instead of waiting forever", async () => {
+    // Never settles: a wedged tool call must not keep `kb mcp` alive after the client hung up.
+    const tools = [
+      {
+        name: "stuck",
+        handler: () =>
+          new Promise<ToolCallResult>(() => {
+            /* deliberately never settles */
+          }),
+      },
+    ];
+    const stdin = (async function* () {
+      yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "stuck" } }) + "\n";
+    })();
+    const startedAt = Date.now();
+    const { logged } = await captureStderr(() =>
+      runServer({
+        tools,
+        stdin,
+        stdout: { write: () => true },
+      }),
+    );
+    // Bounded: the deadline (plus slack), not the hung handler, decides when the run ends.
+    expect(Date.now() - startedAt).toBeLessThan(DRAIN_DEADLINE_MS + 3000);
+    // The deadline must be reported, and it must name how many handlers were still pending.
+    expect(logged).toContain("drain deadline");
+    expect(logged).toContain("1 handler(s) still pending");
+  }, 20000);
+
+  it("throttles pipelined tool calls to MAX_INFLIGHT concurrent handlers", async () => {
+    let running = 0;
+    let peak = 0;
+    let started = 0;
+    // Each call parks until the releaser below lets it go, so overlapping executions are observable.
+    const gates: (() => void)[] = [];
+    const tools = [
+      {
+        name: "hold",
+        handler: () =>
+          new Promise<ToolCallResult>((resolve) => {
+            running += 1;
+            started += 1;
+            peak = Math.max(peak, running);
+            gates.push(() => {
+              running -= 1;
+              resolve({ content: [] });
+            });
+          }),
+      },
+    ];
+    const total = 3 * MAX_INFLIGHT;
+    let raw = "";
+
+    // Pipelined client: every line arrives before any reply is produced. Has to run beside the
+    // server (a read loop at the concurrency cap stops pulling until a handler settles).
+    const stdin = (async function* () {
+      for (let i = 0; i < total; i += 1) {
+        yield JSON.stringify({ jsonrpc: "2.0", id: i + 1, method: "tools/call", params: { name: "hold" } }) + "\n";
+      }
+    })();
+
+    const releaser = (async (): Promise<void> => {
+      await until(() => started > 0, "the first dispatch");
+      // Hold everything: if there were no cap, all `total` lines would have been dispatched by now.
+      await new Promise((r) => setTimeout(r, 100));
+      expect(started).toBe(MAX_INFLIGHT);
+      // Let the rest through in batches, always still bounded by the cap.
+      let done = started >= total && running === 0;
+      while (!done) {
+        for (const release of gates.splice(0)) release();
+        await new Promise((r) => setTimeout(r, 10));
+        done = started >= total && running === 0;
+      }
+    })();
+
+    await expect(
+      Promise.all([
+        runServer({
+          tools,
+          stdin,
+          stdout: {
+            write(chunk: string) {
+              raw += chunk;
+              return true;
+            },
+          },
+        }),
+        releaser,
+      ]),
+    ).resolves.toBeDefined();
+
+    expect(peak).toBeLessThanOrEqual(MAX_INFLIGHT);
+    expect(started).toBe(total);
+    // Every throttled call still got its reply, in some order (completion order is legal JSON-RPC).
+    const ids = raw
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l).id);
+    expect(ids.slice().sort((a, b) => a - b)).toEqual(Array.from({ length: total }, (_, i) => i + 1));
+  }, 20000);
 });
 
 describe("errors", () => {

@@ -31,6 +31,11 @@ function psInfo(pid: number): { pgid: number; ageMs: number } | undefined {
     const out = execFileSync("ps", ["-p", String(pid), "-o", "pgid=,etime="], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 1024 * 1024,
+      // A blocking execFileSync never yields to the event loop, so an unkillable/hung `ps` would
+      // freeze the caller (and, in tests, the vitest worker) past any timeout. Bound it: on timeout
+      // the catch below degrades to "ps unavailable" exactly like a missing ps.
+      timeout: 2000,
     }).trim();
     const m = /^(\d+)\s+(\S+)$/.exec(out);
     if (!m) return undefined;

@@ -44,8 +44,13 @@ const nowLocal = (): string => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
 
-/** Start a real detached shell like the runner does. */
-const spawnShell = (cmd = "sleep 30"): ChildProcess => spawn("bash", ["-c", cmd], { detached: true, stdio: "ignore" });
+/** Start a real detached shell like the runner does. Unref'd so the child handle never pins the worker. */
+const spawnShell = (cmd = "sleep 30"): ChildProcess => {
+  const child = spawn("bash", ["-c", cmd], { detached: true, stdio: "ignore" });
+  // Like every other spawner in the suite: a lingering child handle must not keep the worker alive.
+  child.unref();
+  return child;
+};
 
 const entry = (pid: number, extra = ""): string =>
   `automations:\n  slow: { status: running, at: "${nowLocal()}", pid: ${pid}, pgid: ${pid}${extra}, runs: 1 }\n`;
@@ -147,12 +152,47 @@ describe("killRun", () => {
     const probe = setInterval(() => {
       if (alive(pid) && fs.existsSync(path.join(dir, ".kb", "killed", String(pid)))) markedDuringGrace = true;
     }, 10);
-    const r = await killRun({ pid, pgid: pid }, { root: dir, graceMs: 300, waitMs: 3000 });
-    clearInterval(probe);
-    expect(r.ok).toBe(true);
-    expect(markedDuringGrace).toBe(true);
+    let r: Awaited<ReturnType<typeof killRun>>;
+    try {
+      r = await killRun({ pid, pgid: pid }, { root: dir, graceMs: 300, waitMs: 3000 });
+      expect(r.ok).toBe(true);
+      expect(markedDuringGrace).toBe(true);
+      await until(() => !alive(pid));
+      expect(consumeKilled(dir, pid)).toBe(true);
+    } finally {
+      // A failing assertion must not leave a 10 ms interval spinning for the rest of the run.
+      clearInterval(probe);
+    }
+  });
+  it("returns promptly when ps is slow instead of blocking the event loop", async () => {
+    // Regression: the `ps` lookup used to be an unbounded execFileSync, which froze the event loop
+    // so hard that no test timeout could fire. A stub `ps` that sleeps forever stands in for a wedged
+    // ps; the lookup must give up (bounded) and the kill must fail closed, not hang.
+    const child = spawnShell();
+    const pid = child.pid!;
+    await until(() => alive(pid));
+    const stubDir = path.join(dir, "bin");
+    fs.mkdirSync(stubDir, { recursive: true });
+    const stub = path.join(stubDir, "ps");
+    fs.writeFileSync(stub, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${stubDir}${path.delimiter}${savedPath}`;
+    const t0 = Date.now();
+    let r: Awaited<ReturnType<typeof killRun>>;
+    try {
+      r = await killRun({ pid }, { root: dir, graceMs: 0, waitMs: 0 });
+    } finally {
+      process.env.PATH = savedPath;
+    }
+    const elapsed = Date.now() - t0;
+    // Well under testTimeout: the point is that it returns at all, and that the bound is honoured.
+    expect(elapsed).toBeLessThan(15_000);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/cannot verify pid \d+ belongs to this run \(ps unavailable\)/);
+    expect(alive(pid)).toBe(true); // nothing was signalled
+    expect(consumeKilled(dir, pid)).toBe(false);
+    child.kill("SIGKILL");
     await until(() => !alive(pid));
-    expect(consumeKilled(dir, pid)).toBe(true);
   });
 });
 

@@ -89,11 +89,20 @@ export interface Dispatcher {
   handleMessage(msg: unknown): Promise<unknown | undefined>;
 }
 
+/**
+ * The response sink. Only `write` is required; `on` lets the transport observe asynchronous stream
+ * failures (EPIPE surfaces as an `error` event, never as a throw from `write`).
+ */
+export interface StdioSink {
+  write(chunk: string): unknown;
+  on?(event: "error", listener: (err: unknown) => void): unknown;
+}
+
 export interface RunServerOptions extends DispatcherHandlers {
   /** defaults to process.stdin; injectable for tests */
   stdin?: AsyncIterable<Uint8Array | string>;
   /** defaults to process.stdout; receives one compact JSON line per response and nothing else */
-  stdout?: { write(chunk: string): unknown };
+  stdout?: StdioSink;
 }
 
 const OPEN_SCHEMA: Record<string, unknown> = { type: "object", properties: {} };
@@ -263,8 +272,41 @@ export function redirectStdoutToStderr(): () => void {
  */
 const MAX_LINE_LENGTH = 8 * 1024 * 1024;
 
+/**
+ * Hard cap on concurrently running dispatches. Every tool call may spawn a process, so a pipelining
+ * client could otherwise start one handler per line and exhaust the machine; past this many the
+ * read loop simply stops reading until a handler settles (backpressure, not a reordering queue).
+ */
+export const MAX_INFLIGHT = 8;
+
+/**
+ * How long shutdown waits for in-flight handlers after stdin closes. A handler that never settles
+ * must not keep the process alive forever, so past this the remaining ones are abandoned.
+ */
+export const DRAIN_DEADLINE_MS = 5000;
+
 /** The answer to a line we refuse to buffer (or refused to parse) because it is too long. */
 const tooLong = (): JsonRpcFailure => fail(null, ErrorCode.parseError, "parse error: line too long");
+
+/** Resolves true once `promise` settles (either way), false if that takes longer than `ms`. */
+async function settleWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([
+      promise.then(
+        () => true as const,
+        () => true as const,
+      ),
+      deadline,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 /**
  * stdio transport: read newline-delimited JSON-RPC from `stdin`, write one compact JSON line per
@@ -276,26 +318,44 @@ export async function runServer(opts: RunServerOptions = {}): Promise<void> {
   // Capture the real write function BEFORE redirecting stdout to stderr, which replaces
   // process.stdout.write on the very object captured below.
   const writeRaw = out.write.bind(out);
+  const logStderr = (line: string): void => {
+    try {
+      (process.stderr.write as (...a: unknown[]) => boolean)(line);
+    } catch {
+      // stderr is gone too; nowhere left to report to.
+    }
+  };
   const dispatcher = createDispatcher(opts);
 
   // Only own the real stdout. An injected `stdout` (tests, embedding) belongs to the caller, and
   // rewriting the process's stdout on its behalf would leak out of this call and never be undone.
   const restoreStdout = opts.stdout === undefined ? redirectStdoutToStderr() : undefined;
 
+  // A pipe the client has closed reports EPIPE as an asynchronous `error` event on the stream, not
+  // as a throw from write(); with no listener that event is an uncaught exception that kills the
+  // server. Mark the transport dead instead (and stop writing) so the run ends quietly.
+  let dead = false;
+  const onOutError = (e: unknown): void => {
+    if (dead) return;
+    dead = true;
+    logStderr(`kb mcp: output stream failed, stopping writes: ${(e as Error)?.message ?? String(e)}\n`);
+  };
+  // Deliberately never detached: an EPIPE for the last write we issued can be emitted after drain()
+  // returns, and an `error` event with no listener is an uncaught exception.
+  if (typeof out.on === "function") out.on("error", onOutError);
+
   // Handlers run concurrently (a slow tool must not stall reading the next line), so the frames they
   // produce are serialised through this promise chain: two concurrent replies can never interleave.
   let writeChain: Promise<void> = Promise.resolve();
   const writeNow = (msg: unknown): void => {
+    // The stream already failed: another write would only raise a second EPIPE.
+    if (dead) return;
     try {
       writeRaw(JSON.stringify(msg) + "\n");
     } catch (e) {
       // A response we cannot serialise (circular structuredContent, a BigInt) or a stdout that has
       // gone away (EPIPE once the client exited) must not surface as an unhandled rejection.
-      try {
-        (process.stderr.write as (...a: unknown[]) => boolean)(`kb mcp: failed to write response: ${(e as Error)?.message ?? String(e)}\n`);
-      } catch {
-        // stderr is gone too; nowhere left to report to.
-      }
+      logStderr(`kb mcp: failed to write response: ${(e as Error)?.message ?? String(e)}\n`);
     }
   };
   const write = (msg: unknown): Promise<void> => {
@@ -306,7 +366,17 @@ export async function runServer(opts: RunServerOptions = {}): Promise<void> {
 
   /** In-flight dispatches; drained before runServer() resolves so no reply is lost at EOF. */
   const pending = new Set<Promise<void>>();
-  const handleLine = (line: string): void => {
+  /** Resolves once every currently pending dispatch has settled; never rejects. */
+  const settled = (): Promise<unknown> => Promise.all([...pending].map((t) => t.catch(() => {})));
+  /** Resolves as soon as the first pending dispatch settles; only call with a non-empty set. */
+  const anySettled = (): Promise<unknown> => Promise.race([...pending].map((t) => t.catch(() => {})));
+
+  const atCapacity = (): boolean => !dead && pending.size >= MAX_INFLIGHT;
+  const handleLine = async (line: string): Promise<void> => {
+    // Backpressure: with MAX_INFLIGHT handlers already running, do not start another one — the read
+    // loop waits here instead, which also stops pulling more lines off the pipe. A dead transport
+    // stops nothing but the writes, so the wait is skipped there to keep shutdown moving.
+    while (atCapacity()) await anySettled();
     const task = (async (): Promise<void> => {
       const response = await dispatcher.handleMessage(line);
       if (response !== undefined) await write(response);
@@ -317,16 +387,18 @@ export async function runServer(opts: RunServerOptions = {}): Promise<void> {
       () => pending.delete(task),
       (e: unknown) => {
         pending.delete(task);
-        try {
-          (process.stderr.write as (...a: unknown[]) => boolean)(`kb mcp: handler failed: ${(e as Error)?.message ?? String(e)}\n`);
-        } catch {
-          // stderr is gone too; nowhere left to report to.
-        }
+        logStderr(`kb mcp: handler failed: ${(e as Error)?.message ?? String(e)}\n`);
       },
     );
   };
   const drain = async (): Promise<void> => {
-    while (pending.size > 0) await Promise.all([...pending]);
+    while (pending.size > 0) {
+      // A handler that never settles must not turn shutdown into a hang, so the wait is capped.
+      if (!(await settleWithin(settled(), DRAIN_DEADLINE_MS))) {
+        logStderr(`kb mcp: drain deadline reached with ${pending.size} handler(s) still pending\n`);
+        break;
+      }
+    }
     await writeChain;
   };
 
@@ -347,7 +419,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<void> {
         const line = buffer.slice(0, nl).trim();
         buffer = buffer.slice(nl + 1);
         if (line.length > MAX_LINE_LENGTH) void write(tooLong());
-        else if (line) handleLine(line);
+        else if (line) await handleLine(line);
         nl = buffer.indexOf("\n");
       }
       // A trailing line with no newline is never parsed, so nothing bounds it without this check.
@@ -358,7 +430,7 @@ export async function runServer(opts: RunServerOptions = {}): Promise<void> {
       }
     }
     const rest = dropping ? "" : (buffer + decoder.end()).trim();
-    if (rest) handleLine(rest);
+    if (rest) await handleLine(rest);
     // Shutdown/EOF: let every in-flight dispatch finish and flush before resolving.
     await drain();
   } finally {
