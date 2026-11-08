@@ -1,6 +1,6 @@
 {
   "name": "kbkan",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local markdown kanban CLI and web UI: tickets are plain .md files, the board is kanban.yaml.",
   "type": "module",
   "main": "dist/index.js",
