@@ -96,6 +96,28 @@ describe("killRun", () => {
     if (!r.ok) expect(r.reason).toMatch(/not reachable|gone/);
     expect(consumeKilled(dir, pid)).toBe(false); // nothing was signalled
   });
+  it("refuses a live pid it cannot verify when ps is unavailable", async () => {
+    // `ps` failing means both reuse guards are skipped. With no pgid/elapsedMs on the entry there is
+    // nothing to corroborate identity, so the kill must fail closed instead of firing at whatever now
+    // owns the pid. PATH is emptied for the duration so the module's execFileSync("ps") throws.
+    const child = spawnShell();
+    const pid = child.pid!;
+    await until(() => alive(pid));
+    const savedPath = process.env.PATH;
+    process.env.PATH = "/nonexistent-kb-ps";
+    let r: Awaited<ReturnType<typeof killRun>>;
+    try {
+      r = await killRun({ pid }, { root: dir, graceMs: 0, waitMs: 0 });
+    } finally {
+      process.env.PATH = savedPath;
+    }
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/cannot verify pid \d+ belongs to this run \(ps unavailable\)/);
+    expect(alive(pid)).toBe(true);
+    expect(consumeKilled(dir, pid)).toBe(false); // nothing was signalled
+    child.kill("SIGKILL");
+    await until(() => !alive(pid));
+  });
   it("refuses a reused pid (not a shell / wrong group)", async () => {
     // process.pid is this node process: right owner, wrong group and wrong command
     const r = await killRun({ pid: process.pid, pgid: 1 }, { root: dir });

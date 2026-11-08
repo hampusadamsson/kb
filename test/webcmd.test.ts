@@ -10,7 +10,7 @@ import type { RunningServer } from "../src/web/server.js";
 
 // Toggle to inject a server whose settled() rejects or never resolves, and count killAll calls.
 // Both mocks delegate to the real implementations unless the flags are set.
-const mock = vi.hoisted(() => ({ fail: "none" as "none" | "reject" | "hang", killAll: 0 }));
+const mock = vi.hoisted(() => ({ fail: "none" as "none" | "reject" | "hang" | "late", killAll: 0 }));
 
 vi.mock("../src/runner.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/runner.js")>();
@@ -39,7 +39,13 @@ vi.mock("../src/web/server.js", async (importOriginal) => {
         url: "http://127.0.0.1:1",
         port: 1,
         host: "127.0.0.1",
-        settled: () => (mock.fail === "reject" ? Promise.reject(new Error("settled boom")) : new Promise<void>(() => {})),
+        settled: () =>
+          mock.fail === "reject"
+            ? Promise.reject(new Error("settled boom"))
+            : mock.fail === "late"
+              ? // rejects only AFTER the shutdown deadline has already won the race
+                new Promise<void>((_, rej) => setTimeout(() => rej(new Error("late boom")), 50))
+              : new Promise<void>(() => {}),
         close: async () => {},
       };
     },
@@ -192,6 +198,31 @@ describe("runWeb", () => {
     } finally {
       mock.fail = "none";
     }
+  });
+  // Regression guard, NOT a proof of a pre-fix bug: Promise.race attaches a handler to its
+  // inputs, so a late settled() rejection was already "handled" before this fix. The explicit
+  // .catch(() => {}) in shutdown is defence-in-depth for the deadline-wins path.
+  it("a late settled() rejection after the deadline stays handled", async () => {
+    mock.fail = "late";
+    const rejects: unknown[] = [];
+    const onUnhandled = (e: unknown): void => {
+      rejects.push(e);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const s = await runWeb(tmp(), { port: 0, open: false }, io().i);
+      await s.shutdown(5); // deadline wins here; settled() rejects 50ms later
+      await new Promise((r) => setTimeout(r, 150));
+      expect(rejects).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      mock.fail = "none";
+    }
+  });
+  it("shutdown is re-entrant: a second call does not fail on a closed server", async () => {
+    const s = await runWeb(tmp(), { port: 0, open: false }, io().i);
+    await s.shutdown(200);
+    await expect(s.shutdown(200)).resolves.toBeUndefined();
   });
   it("busy port: explicit errors, default auto-increments", async () => {
     const blocker = net.createServer();

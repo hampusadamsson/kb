@@ -61,6 +61,8 @@ export function openEditor(file: string): void {
   const { command, args } = editorArgv(process.env.EDITOR || "vi", file);
   const r = spawnSync(command, args, { stdio: "inherit" });
   if (r.error) throw r.error;
+  // a signal-killed editor has status null, which is falsy: check the signal explicitly
+  if (r.signal) throw new Error(`editor was killed by ${r.signal}`);
   if (r.status) throw new Error(`editor exited with status ${r.status}`);
 }
 

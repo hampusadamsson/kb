@@ -27,14 +27,41 @@ describe("generated scripts cover the program", () => {
       for (const o of p.options) expect(s).toContain(o.long!);
     });
   }
-  it("bash escapes dynamic words; zsh does not", () => {
+  it("bash assigns COMPREPLY per line so spaces survive; zsh has no escaper", () => {
     const b = generate(p, "bash");
-    expect(b).toContain("_kb_esc");
-    expect(b).toContain("while IFS= read -r l; do");
-    expect(b).toContain("l=${l// /\\\\ }");
-    expect(b).toMatch(/__complete "\$@" 2>\/dev\/null \| _kb_esc/);
+    // one array element per output line, no word-splitting round trip
+    expect(b).toContain('COMPREPLY+=("$l")');
+    expect(b).toContain('done < <(kb __complete "$@" 2>/dev/null)');
+    expect(b).not.toContain("COMPREPLY=($(_kb_dyn");
+    expect(b).not.toContain("_kb_esc"); // no longer needed: nothing re-splits the values
     const z = generate(p, "zsh");
     expect(z).not.toContain("_kb_esc");
+  });
+
+  it.skipIf(!has("bash"))("bash keeps a space-containing dynamic candidate as ONE word", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kbcsh-"));
+    try {
+      const stub = path.join(dir, "kb");
+      fs.writeFileSync(stub, "#!/bin/sh\nprintf '%s\\n' \"Board Name\"\n", { mode: 0o755 });
+      const script = path.join(dir, "kb.bash");
+      fs.writeFileSync(script, generate(p, "bash"));
+      // `_kb` is the real generated function; only the `kb` binary is stubbed.
+      const driver = [
+        `source ${JSON.stringify(script)}`,
+        'COMP_WORDS=(kb add --board "Bo")',
+        "COMP_CWORD=3",
+        "_kb",
+        'printf \'%s\\n\' "${#COMPREPLY[@]}" "${COMPREPLY[@]}"',
+      ].join("\n");
+      const r = spawnSync("bash", ["-c", driver], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe("1\nBoard Name\n");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("zsh has descriptions; unknown shell throws", () => {
@@ -71,7 +98,7 @@ describe("__complete", () => {
     fs.writeFileSync(path.join(dir, "kanban.yaml"), "columns: [todo]\n");
     const name = 'Fix $HOME `x` "q" it\'s C:\\tmp';
     tk("a.md", `id: 1\nname: ${JSON.stringify(name)}\nstatus: todo`);
-    // values are unescaped: shell layers (bash _kb_esc, zsh compadd -a) quote them
+    // values are unescaped: shell layers (bash COMPREPLY per line, zsh compadd -a) quote them
     expect(complete(dir, "ids", "named")).toEqual([`1:${name}`]);
   });
 

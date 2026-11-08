@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { collectTree, killTree, listProcs, type Proc } from "../src/procTree.js";
+import { collectTree, exists, killTree, listProcs, type Proc } from "../src/procTree.js";
 import { killRun } from "../src/killRun.js";
 
 const alive = (pid: number): boolean => {
@@ -143,6 +143,28 @@ describe("collectTree (pure)", () => {
   });
 });
 
+describe("exists", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("counts a pid that raises EPERM as existing", () => {
+    // A live pid owned by another user answers signal 0 with EPERM. Reporting it as gone dropped it
+    // from `all`, so killTree signalled nothing yet claimed success.
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    });
+    expect(exists(4242)).toBe(true);
+  });
+
+  it("counts ESRCH as gone", () => {
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+    });
+    expect(exists(4242)).toBe(false);
+  });
+});
+
 describe("killTree", () => {
   it("kills a child that moved to its own process group", async () => {
     // Mirrors an agent harness: a live parent that spawns a detached grandchild.
@@ -192,6 +214,30 @@ describe("killTree", () => {
     expect(r.all).toEqual([root.pid!]);
     expect(r.survivors).toEqual([]);
     await until(() => !alive(root.pid!));
+  });
+
+  it("signals a live root even when its liveness probe raises EPERM", async () => {
+    // With `procs: []` and an unreadable pid (EPERM = alive, not ours) the old code classified the
+    // root as gone and returned without signalling: a silent no-op. It must still be killed.
+    const root = spawn("bash", ["-c", "while true; do sleep 1; done"], { detached: true, stdio: "ignore" });
+    track(root.pid);
+    const pid = root.pid!;
+    await until(() => alive(pid));
+    let probeThrows = true;
+    const realKill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((target: number, sig?: string | number) => {
+      if (target === pid && (sig === 0 || sig === "SIGTERM") && probeThrows) {
+        if (sig === 0) throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+        // the real signal still goes through, and from then on the probe is readable again
+        probeThrows = false;
+      }
+      return realKill(target, sig as NodeJS.Signals | 0);
+    });
+    const r = await killTree([pid], { graceMs: 200, waitMs: 2000, procs: [] });
+    vi.restoreAllMocks();
+    expect(r.all).toEqual([pid]);
+    expect(r.survivors).toEqual([]);
+    await until(() => !alive(pid));
   });
 
   it("reports nothing to do for a dead pid", async () => {
