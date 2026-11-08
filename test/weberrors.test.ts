@@ -199,16 +199,20 @@ describe("EventHub watcher errors", () => {
 
 describe("EventHub after close", () => {
   it("ignores a queued fs callback: no debounce timer, no broadcast", async () => {
+    // EventHub is the only caller passing { recursive: true }. On Linux, Node implements
+    // recursive watching in JS (internal/fs/recursive_watch) and watches each subdirectory
+    // itself, so counting fs.watch calls is platform-dependent; capture the hub's own
+    // callback instead and use the most recently created watcher.
     const callbacks: Array<(ev: string, filename: string) => void> = [];
     const realWatch = fs.watch.bind(fs) as typeof fs.watch;
     const watchSpy = vi.spyOn(fs, "watch").mockImplementation(((p: any, o: any, cb: any) => {
-      if (typeof cb === "function") callbacks.push(cb);
+      if (typeof cb === "function" && (o as fs.WatchOptions | undefined)?.recursive === true) callbacks.push(cb);
       return realWatch(p, o, cb);
     }) as typeof fs.watch);
     const hub = new EventHub(dir);
     try {
-      expect(callbacks).toHaveLength(1);
-      const onFile = callbacks[0];
+      expect(callbacks.length).toBeGreaterThan(0);
+      const onFile = callbacks[callbacks.length - 1];
       const timerOf = () => (hub as unknown as { timer?: NodeJS.Timeout }).timer;
 
       // sanity: before close() the same callback does arm the debounce timer

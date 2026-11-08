@@ -67,8 +67,16 @@ describe("killMarker", () => {
     expect(consumeKilled(dir, 1234)).toBe(false);
   });
   it("never throws on a bad root", () => {
-    expect(() => markKilled("/proc/nope/does/not/exist", 1)).not.toThrow();
-    expect(consumeKilled("/proc/nope/does/not/exist", 1)).toBe(false);
+    // The root has to be a path that fails fast and correctly on *every* platform. `/proc/...` is
+    // not usable here: procfs reports ENOENT on stat for missing components, so libuv's recursive
+    // mkdir retries forever and the call never returns on Linux. A path under a regular file yields
+    // ENOTDIR immediately, and a plain nonexistent root exercises the same bail-out.
+    const notADir = path.join(dir, "not-a-dir");
+    fs.writeFileSync(notADir, "");
+    for (const root of [path.join(notADir, "child"), path.join(notADir, "a", "b", "c"), path.join(dir, "missing")]) {
+      expect(() => markKilled(root, 1)).not.toThrow();
+      expect(consumeKilled(root, 1)).toBe(false);
+    }
   });
 });
 
@@ -145,24 +153,39 @@ describe("killRun", () => {
   it("marks the kill as soon as it signals, and consumes it once", async () => {
     // The marker has to be there while the tree is still dying: the owner consumes it when the child
     // exits, which happens during killTree's SIGTERM grace, not after killTree resolves.
-    const child = spawnShell();
+    //
+    // Polling for "alive && marker exists" cannot test that: for `bash -c "sleep 30"` SIGTERM is
+    // fatal immediately (bash execs the sleep, so there is a single process), and the pid is already
+    // gone by the first 10 ms probe tick. The observation window is therefore empty and the interval
+    // only measured SIGTERM delivery latency. The child is used as its own witness instead: it
+    // records whether its marker exists at the instant SIGTERM is *delivered*, which is by definition
+    // inside the grace period and while it is still alive. A single node process also keeps the kill
+    // tree child-free, so no orphaned descendant can be left behind as an unreaped zombie.
+    const check = [
+      `const fs = require("fs");`,
+      `const [root, witness, ready] = process.argv.slice(1);`,
+      `const marker = root + "/.kb/killed/" + process.pid;`,
+      `process.on("SIGTERM", () => {`,
+      `  fs.writeFileSync(witness, fs.existsSync(marker) ? "marked" : "missing");`,
+      `  process.exit(0);`,
+      `});`,
+      `fs.writeFileSync(ready, "");`,
+      `setInterval(() => {}, 1000);`,
+    ].join("\n");
+    const witness = path.join(dir, "witness");
+    const ready = path.join(dir, "ready");
+    const child = spawn(process.execPath, ["-e", check, dir, witness, ready], { detached: true, stdio: "ignore" });
+    child.unref();
     const pid = child.pid!;
-    await until(() => alive(pid));
-    let markedDuringGrace = false;
-    const probe = setInterval(() => {
-      if (alive(pid) && fs.existsSync(path.join(dir, ".kb", "killed", String(pid)))) markedDuringGrace = true;
-    }, 10);
-    let r: Awaited<ReturnType<typeof killRun>>;
-    try {
-      r = await killRun({ pid, pgid: pid }, { root: dir, graceMs: 300, waitMs: 3000 });
-      expect(r.ok).toBe(true);
-      expect(markedDuringGrace).toBe(true);
-      await until(() => !alive(pid));
-      expect(consumeKilled(dir, pid)).toBe(true);
-    } finally {
-      // A failing assertion must not leave a 10 ms interval spinning for the rest of the run.
-      clearInterval(probe);
-    }
+    // Wait for the handler to be installed, or the SIGTERM could kill the child before it can report.
+    await until(() => fs.existsSync(ready));
+    expect(alive(pid)).toBe(true);
+    const r = await killRun({ pid, pgid: pid }, { root: dir, graceMs: 300, waitMs: 3000 });
+    expect(r.ok).toBe(true);
+    expect(fs.readFileSync(witness, "utf8")).toBe("marked");
+    await until(() => !alive(pid));
+    expect(consumeKilled(dir, pid)).toBe(true);
+    expect(consumeKilled(dir, pid)).toBe(false);
   });
   it("returns promptly when ps is slow instead of blocking the event loop", async () => {
     // Regression: the `ps` lookup used to be an unbounded execFileSync, which froze the event loop
