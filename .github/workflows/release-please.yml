@@ -1,8 +1,8 @@
 name: Release Please
 
 # Release Please keeps a release PR open on main (bump + CHANGELOG). Merging it creates the
-# v<version> tag and the GitHub release. The tag is created with GITHUB_TOKEN, which does not
-# trigger other workflows, so the publish job is chained here instead of relying on `push: tags`.
+# v<version> tag and the GitHub release. Tags created by release-please do not reliably trigger
+# other workflows, so the publish job is chained here instead of relying on `push: tags`.
 on:
   push:
     branches: [main]
@@ -28,6 +28,11 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # A PAT (or GitHub App token) is required: PRs opened with GITHUB_TOKEN are blocked
+          # unless the repo enables "Allow GitHub Actions to create and approve pull requests",
+          # and they never trigger other workflows (so CI would skip the release PR).
+          # Falls back to GITHUB_TOKEN so the workflow still runs if the secret is absent.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   publish:
     needs: release-please
