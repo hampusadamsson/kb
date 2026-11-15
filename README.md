@@ -108,13 +108,106 @@ Ids accept a number: `7` matches `"007"`. Use `kb <command> --help` for every fl
 ```yaml
 name: default
 columns: [todo, doing, done]
-glob: "*.md" # which files are scanned, relative to the config dir
+glob: "*.md" # which files are scanned for tickets, relative to the config dir
 boards: {} # per-board column and automation overrides
-tickets: {} # what counts as a ticket: baseline, include, exclude rules
+tickets: {} # optional: which of the scanned files count as tickets (see below)
 automations: [] # shell commands to run on moves/creates
 ```
 
 See [`example/`](example/) for a working board with four columns and automations.
+
+## Which files count as tickets
+
+By default a file is a ticket when **both** are true:
+
+1. it is inside `glob` (`*.md` = markdown in the config dir, not in subdirectories), and
+2. its frontmatter says `type: ticket`.
+
+```markdown
+---
+id: "001"
+status: todo
+type: ticket
+---
+Fix the login form.
+```
+
+`tickets:` lets you change that rule. It has three keys:
+
+| key        | default | meaning                                                    |
+| ---------- | ------- | ---------------------------------------------------------- |
+| `baseline` | `true`  | keep the default rule above (`type: ticket` inside `glob`) |
+| `include`  | `[]`    | extra rules: a match here is a ticket, `glob` or not       |
+| `exclude`  | `[]`    | a match here is never a ticket; it beats everything else   |
+
+Each rule is an object with at least one condition — `glob` (path), `prefix` (file-name start), `props` (frontmatter value equals, `!value` = is not), `has` (frontmatter key present, `!key` = absent). Conditions in one rule are ANDed; rules in a list are ORed.
+
+Include rules that name a `glob` also **widen the scan** — that path is searched too, so subdirectories become reachable. Only `.md` files can be included.
+
+### Examples
+
+**Everything in `glob`, no `type: ticket` needed** — drop the baseline:
+
+```yaml
+tickets:
+  baseline: false
+  include:
+    - glob: "*.md"
+```
+
+**All markdown, including subdirectories:**
+
+```yaml
+tickets:
+  baseline: false
+  include:
+    - glob: "**/*.md" # any .md at any depth
+```
+
+This pulls in plain notes too, which then need an `id` and `status` — `kb validate` lists them and `kb fix` assigns ids.
+
+**All markdown, except an archive folder:**
+
+```yaml
+tickets:
+  baseline: false
+  include:
+    - glob: "**/*.md"
+  exclude:
+    - glob: "archive/**"
+```
+
+**Default rule, but also treat every `notes/*.md` as a ticket** (add `props: { type: ticket }` to keep requiring frontmatter):
+
+```yaml
+tickets:
+  include:
+    - glob: "notes/*.md"
+```
+
+**Only frontmatter-typed tickets, and never archived ones:**
+
+```yaml
+tickets:
+  exclude:
+    - props:
+        archived: true # matches `archived: true`, not tickets without the key
+```
+
+**Ignore scratch files:** `test-*` notes that do not declare themselves tickets, and markdown with no frontmatter at all:
+
+```yaml
+tickets:
+  exclude:
+    - prefix: test
+      props:
+        type: "!ticket"
+    - glob: "**/*.md"
+      has:
+        - "!type"
+```
+
+`node_modules/` and `.kb/` are always skipped. Check a change with `kb validate` or the Settings preview in `kb web`, which shows files gained and lost before saving.
 
 ## Automations
 
