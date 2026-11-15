@@ -18,23 +18,31 @@ const state = {
   view: "board", // board | automations | live | logs
 };
 
-const filters = createFilters($("filters"), (f) => {
+const filters = createFilters($("filters"), $("f-text"), (f) => {
   state.filters = { ...state.filters, ...f };
   writeHash();
 });
 
-// Filters row is collapsible on narrow screens (CSS hides the toggle on wide ones).
+// The search box is always visible; the toggle reveals the narrower label/property filters.
 const toggleFilters = $("filters-toggle");
 const setFiltersOpen = (on) => {
-  document.querySelector(".top").classList.toggle("filters-open", on);
+  $("filters").hidden = !on;
   toggleFilters.setAttribute("aria-expanded", String(on));
 };
 toggleFilters.addEventListener("click", () => setFiltersOpen(toggleFilters.getAttribute("aria-expanded") !== "true"));
+let filtersAutoShown = false;
 function renderFilterCount() {
   const f = state.filters;
   const n = (f.text ? 1 : 0) + f.labels.length + f.props.length;
   $("filters-count").textContent = String(n);
   $("filters-count").hidden = n === 0;
+  // Show that results are filtered even while the extra filters are collapsed.
+  toggleFilters.classList.toggle("has-filters", n > 0);
+  // Reveal the label/property filters once when the URL already filters, then respect the user's toggle.
+  if (n > 0 && !filtersAutoShown) {
+    filtersAutoShown = true;
+    setFiltersOpen(true);
+  }
 }
 
 // ---- routing ----

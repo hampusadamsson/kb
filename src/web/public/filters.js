@@ -199,11 +199,11 @@ export function labelFilter({ onChange }) {
 }
 
 /**
- * `root` is the #filters element. onChange({text, labels, props}) fires 250 ms after the last edit.
- * Property filter is still a chip input; labels use checkbox + searchable dropdown.
+ * `root` is the #filters element (labels + properties). `search` is the always-visible header
+ * input. onChange({text, labels, props}) fires 250 ms after the last edit.
  */
-export function createFilters(root, onChange) {
-  const text = root.querySelector("#f-text");
+export function createFilters(root, search, onChange) {
+  const text = search;
   const clearBtn = root.querySelector("#f-clear");
   const emit = debounce(() => onChange({ text: text.value.trim(), labels: labels.get(), props: props.get() }), 250);
   const labels = labelFilter({ onChange: emit });

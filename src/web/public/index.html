@@ -15,12 +15,15 @@
         <h1 id="title">kb</h1>
         <div id="tabs" class="tabs" role="tablist" aria-label="Boards"></div>
         <span class="spacer"></span>
-        <button id="filters-toggle" type="button" class="btn only-narrow" aria-expanded="false" aria-controls="filters">
+        <label class="search">
+          <input id="f-text" type="search" placeholder="Search tickets…" aria-label="Search tickets" autocomplete="off" />
+        </label>
+        <button id="filters-toggle" type="button" class="btn" aria-expanded="false" aria-controls="filters">
           Filters <span id="filters-count" class="badge-count" hidden>0</span>
         </button>
-        <span id="live" class="live" role="status"
-          ><span class="dot" aria-hidden="true"></span><span class="live-text">connecting…</span></span
-        >
+        <span id="live" class="live" role="status">
+          <span class="dot" aria-hidden="true"></span><span class="live-text">connecting…</span>
+        </span>
         <button id="menu-toggle" type="button" class="btn only-narrow" aria-expanded="false" aria-controls="menu" aria-label="Menu">
           ☰
         </button>
@@ -35,8 +38,7 @@
           </button>
         </nav>
       </div>
-      <div id="filters" class="filters">
-        <label class="f"><span>Text</span><input id="f-text" type="search" placeholder="search" /></label>
+      <div id="filters" class="filters" hidden>
         <div class="f">
           <span>Labels</span>
           <div id="f-labels" role="group" aria-label="Labels"></div>
@@ -45,7 +47,7 @@
           <span>Properties</span>
           <div id="f-props"></div>
         </div>
-        <button id="f-clear" type="button" class="btn small" hidden>Clear</button>
+        <button id="f-clear" type="button" class="btn small" hidden>Clear filters</button>
       </div>
     </header>
 

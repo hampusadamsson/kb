@@ -86,7 +86,7 @@ class Session {
     );
     this.labels = chipInput({ label: "Add label", placeholder: "add label ⏎", readOnly: ro });
     this.propList = h("div", { class: "prop-rows" });
-    this.body = h("textarea", { id: "t-body", rows: 8, disabled: ro });
+    this.body = h("textarea", { id: "t-body", rows: create ? 5 : 6, disabled: ro });
     this.board.addEventListener("change", () => this.refreshStatusOptions(this.status.value));
 
     const addProp = h("button", {
@@ -121,9 +121,7 @@ class Session {
           h("dd", { class: "mono", text: this.detail.path }),
           h("dt", { text: "Id" }),
           h("dd", { class: "mono", text: this.detail.hasId ? display(this.detail.id) : "(none)" }),
-          h("dt", { text: "Type" }),
-          h("dd", { class: "mono", text: display(this.detail.data?.type ?? "ticket") }),
-          (this.autoWrap = automationsWrap(this.detail.automations)),
+          h("div", { class: "meta-autos" }, (this.autoWrap = automationsWrap(this.detail.automations))),
         );
 
     this.commentList = h("ul", { class: "comments", "aria-label": "Comments", "aria-live": "polite" });
@@ -150,10 +148,10 @@ class Session {
       ? field("Comment", "t-comment", this.commentInput)
       : h(
           "div",
-          { class: "field" },
+          { class: "field comments-field" },
           h("label", { for: "t-comment" }, "Comments", " ", this.commentCount),
           this.commentList,
-          ro ? null : h("div", { class: "composer" }, this.commentInput),
+          ro ? null : this.commentInput,
         );
 
     this.saveBtn = h("button", { type: "submit", class: "btn primary", text: create ? "Create" : "Save", hidden: ro });
@@ -191,8 +189,13 @@ class Session {
         field("Board", "t-board", this.board),
         h("div", { class: "field grow" }, h("span", { class: "lbl", text: "Labels" }), this.labels.el),
       ),
+      h(
+        "div",
+        { class: "field props-field" },
+        h("div", { class: "lbl-row" }, h("span", { class: "lbl", text: "Properties" }), addProp),
+        this.propList,
+      ),
       boards,
-      h("div", { class: "field" }, h("span", { class: "lbl", text: "Properties" }), this.propList, addProp),
       field("Body", "t-body", this.body),
       commentRow,
       this.error,

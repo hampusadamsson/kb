@@ -371,3 +371,39 @@ describe("mobile guards", () => {
     expect(js).toContain("handlers.move(t, to)");
   });
 });
+
+describe("compact layout", () => {
+  const pub = (f: string) => fs.readFileSync(path.join(import.meta.dirname, "../src/web/public", f), "utf8");
+
+  it("the search box lives in the header, not in the collapsible filters", () => {
+    const html = pub("index.html");
+    const header = html.slice(html.indexOf('<div class="top-row">'), html.indexOf('<div id="filters"'));
+    expect(header).toContain('id="f-text"');
+    // the filters row only carries the narrower label/property controls
+    const filters = html.slice(html.indexOf('<div id="filters"'));
+    expect(filters.slice(0, filters.indexOf("</header>"))).not.toContain('id="f-text"');
+    // collapsed by default, and toggled by the Filters button at every width
+    expect(html).toMatch(/<div id="filters" class="filters" hidden>/);
+    expect(html).toMatch(/id="filters-toggle"[^>]*aria-controls="filters"/);
+    expect(pub("style.css")).not.toContain(".filters-toggle");
+  });
+
+  it("filters.js takes the search input from outside #filters", () => {
+    const js = pub("filters.js");
+    expect(js).toContain("export function createFilters(root, search, onChange)");
+    expect(pub("app.js")).toContain('createFilters($("filters"), $("f-text"),');
+  });
+
+  it("cards lead with the title and keep the id as secondary metadata", () => {
+    const js = pub("board.js");
+    const card = js.slice(js.indexOf("function renderCard"), js.indexOf("function moveSelect"));
+    expect(card.indexOf('class: "name"')).toBeLessThan(card.indexOf('class: "id"'));
+  });
+
+  it("keeps controls at the 24px minimum target size", () => {
+    const css = pub("style.css");
+    const icon = css.slice(css.indexOf(".icon-btn {"), css.indexOf(".icon-btn:hover"));
+    expect(icon).toContain("width: 24px");
+    expect(icon).toContain("height: 24px");
+  });
+});

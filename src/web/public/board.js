@@ -30,18 +30,19 @@ function renderBoard(board, handlers, showTitle) {
 
 function renderColumn(board, col, handlers, unsorted, names) {
   const key = `${board.name}\u0000${col.name}`;
+  const n = col.tickets.length;
   const body = h("div", { class: "cards", "data-scroll": key });
   const targets = moveTargets(names, unsorted ? null : col.name);
   for (const t of col.tickets) body.append(renderCard(t, handlers, targets));
   if (!col.tickets.length) body.append(h("p", { class: "empty-col", text: "—" }));
   const el = h(
     "div",
-    { class: "column" + (unsorted ? " unsorted" : ""), role: "group", "aria-label": `${col.name}, ${col.tickets.length} tickets` },
+    { class: "column" + (unsorted ? " unsorted" : ""), role: "group", "aria-label": `${col.name}, ${n} ${n === 1 ? "ticket" : "tickets"}` },
     h(
       "header",
       { class: "col-head" },
       h("h3", { text: col.name }),
-      h("span", { class: "count", text: String(col.tickets.length) }),
+      h("span", { class: "count", text: String(n) }),
       unsorted
         ? null
         : h("button", {
@@ -86,6 +87,7 @@ function wireDrop(el, boardName, colName, handlers) {
 function renderCard(t, handlers, targets) {
   const idText = t.hasId ? `#${display(t.id)}` : "#?";
   const ind = cardIndicator(t.autos);
+  const hasMeta = t.labels.length || Object.keys(t.props).length || t.duplicate || !t.hasId;
   const card = h(
     "article",
     {
@@ -97,22 +99,19 @@ function renderCard(t, handlers, targets) {
       "aria-label": ind ? `${idText} ${t.name}, ${ind.text}` : `${idText} ${t.name}`,
       title: ind ? ind.text : null,
     },
-    h(
-      "div",
-      { class: "card-top" },
-      h("span", { class: "id", text: idText }),
-      t.duplicate ? h("span", { class: "badge warn", text: "⚠ duplicate id" }) : null,
-      !t.hasId ? h("span", { class: "badge warn", text: "⚠ no id" }) : null,
-      h("span", { class: "name", text: t.name }),
-    ),
-    t.labels.length || Object.keys(t.props).length
+    // Title first: it is what people scan. The id is secondary metadata below.
+    h("span", { class: "name", text: t.name }),
+    hasMeta
       ? h(
           "div",
           { class: "meta" },
-          t.labels.map((l) => h("span", { class: "chip label", text: `[${l}]` })),
+          h("span", { class: "id", text: idText }),
+          t.duplicate ? h("span", { class: "badge warn", text: "dup id" }) : null,
+          !t.hasId ? h("span", { class: "badge warn", text: "no id" }) : null,
+          t.labels.map((l) => h("span", { class: "chip label", text: l })),
           Object.entries(t.props).map(([k, v]) => h("span", { class: "chip prop", text: `${k}:${display(v)}` })),
         )
-      : null,
+      : h("div", { class: "meta" }, h("span", { class: "id", text: idText })),
     ind ? ind.el : null,
     t.readOnly || !targets.length ? null : moveSelect(t, targets, handlers),
   );
