@@ -188,6 +188,16 @@ const fix: Handler = (kb, req) => {
   if (raw !== undefined && typeof raw !== "boolean") throw new KanbanError("invalid", "dryRun must be a boolean");
   // dry-run stays the default for an absent flag, but say so explicitly instead of reporting plain success.
   const dryRun = raw === undefined ? true : raw;
+  // `kb fix` writes `id:` into the frontmatter and never renames files, so with filename ids there is
+  // nothing it can do — say why instead of reporting a silent "nothing to fix".
+  if (kb.load().config.ticketId === "filename") {
+    return ok({
+      dryRun,
+      applied: false,
+      changes: [],
+      notice: "ticketId is filename: ids come from file names, so ids cannot be fixed here — rename the files instead",
+    });
+  }
   const changes = kb.fix({ dryRun });
   return ok(
     dryRun ? { dryRun: true, applied: false, hint: "pass dryRun:false to apply", changes } : { dryRun: false, applied: true, changes },

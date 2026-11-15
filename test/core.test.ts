@@ -29,7 +29,7 @@ const cfg = (over: Partial<Config> = {}): Config => ({
 describe("config", () => {
   it("loads with defaults", () => {
     w("kanban.yaml", "columns: [a, b]\n");
-    expect(loadConfig(dir)).toEqual({ name: "default", columns: ["a", "b"], glob: "*.md" });
+    expect(loadConfig(dir)).toEqual({ name: "default", columns: ["a", "b"], glob: "*.md", ticketId: "props" });
   });
   it("errors when missing with hint", () => {
     expect(() => loadConfig(dir)).toThrow(/kb init/);

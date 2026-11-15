@@ -179,6 +179,8 @@ export function configToForm(c) {
   return {
     name: c.name,
     glob: c.glob,
+    // "props" (default) or "filename"; carried through so saving never drops it
+    ticketId: c.ticketId === "filename" ? "filename" : "props",
     // not editable in the form: carried through so saving never drops the user's web: block
     web: c.web,
     columns: colRows(c.columns),
@@ -254,6 +256,8 @@ function renamedColumns(rows) {
 /** Form state → PUT /api/config payload parts: { config, renames }. */
 export function formToPayload(f) {
   const config = { name: f.name.trim(), glob: f.glob.trim(), columns: colValues(f.columns), boards: {} };
+  // omitted when "props": the default, and older servers keep their current value
+  if (f.ticketId === "filename") config.ticketId = "filename";
   if (f.web) config.web = { ...f.web }; // untouched: the form does not edit it
   // always sent: the server keeps the current rules when the key is omitted (default object resets them)
   config.tickets = ticketsToConfig(f.tickets ?? ticketsToForm(undefined));

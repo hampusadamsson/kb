@@ -472,9 +472,10 @@ export function createTools(ctx: ToolContext): ToolDefinition[] {
           const to = String(c.to ?? "?");
           return `${str(c.path) ?? "?"}: ${from} → ${to}`;
         });
+        const body = isRecord(r.body) ? r.body : {};
         const head =
           changes.length === 0
-            ? "ok: nothing to fix"
+            ? (str(body.notice) ?? "ok: nothing to fix")
             : `${dryRun ? "dry run: " : ""}${changes.length} id change(s)${dryRun ? " — pass dryRun: false to apply" : ""}`;
         return success(r.body, [head, ...lines].join("\n"));
       },

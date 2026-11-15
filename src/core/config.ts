@@ -112,6 +112,16 @@ export function parseTicketRules(raw: unknown): TicketRules {
 
 export const DEFAULT_TICKET_RULES: TicketRules = { baseline: true, include: [], exclude: [] };
 
+/**
+ * Where a ticket's identity comes from. The two are mutually exclusive: whichever is configured
+ * wins, the other is ignored (a disagreeing `id:` in the frontmatter is only a `validate` warning).
+ * `filename` never renames files, so duplicate ids cannot be repaired with `kb fix`.
+ */
+export const ticketIdSchema = z.enum(["props", "filename"], {
+  error: 'ticketId must be "props" or "filename"',
+});
+export type TicketIdSource = z.infer<typeof ticketIdSchema>;
+
 export const isDefaultTicketRules = (t: TicketRulesInput | undefined): boolean =>
   !t || ((t.baseline ?? true) && !(t.include ?? []).length && !(t.exclude ?? []).length);
 
@@ -239,6 +249,8 @@ const configSchema = z.object({
   name: z.string().default("default"),
   columns: columnsSchema,
   glob: globSchema,
+  /** ticket identity: frontmatter `id` (default) or the file name */
+  ticketId: ticketIdSchema.default("props"),
   tickets: ticketRulesSchema.optional(),
   automations: automationsSchema,
   boards: z.record(z.string(), z.object({ columns: columnsSchema, automations: automationsSchema })).optional(),
@@ -252,6 +264,20 @@ export const STARTER_CONFIG = `name: default
 columns: [todo, doing, done]
 glob: "*.md"
 `;
+
+/** Id derived from a ticket path: the file name without `.md`, unchanged (NFC). */
+export function idFromFilename(rel: string): string {
+  return path.posix.basename(rel.split(path.sep).join("/"), ".md").normalize("NFC");
+}
+
+/**
+ * The id of a ticket file under the configured source. `props` reads `id:` from the frontmatter;
+ * `filename` uses the file name and ignores any frontmatter id (filename wins).
+ */
+export function ticketIdOf(config: { ticketId?: TicketIdSource }, rel: string, data: Record<string, unknown> | undefined): unknown {
+  if ((config.ticketId ?? "props") === "filename") return idFromFilename(rel);
+  return data?.id;
+}
 
 export function loadConfig(cwd: string): Config {
   const file = path.join(cwd, CONFIG_FILE);

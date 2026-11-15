@@ -25,10 +25,12 @@ import {
   automationsFor,
   columnsFor,
   CONFIG_FILE,
+  idFromFilename,
   isTicketFile,
   isValidGlob,
   loadConfig,
   STARTER_CONFIG,
+  ticketIdOf,
   ticketRules,
   type Config,
 } from "./config.js";
@@ -72,7 +74,7 @@ import {
   type UpdateConfigOptions,
   type UpdateConfigResult,
 } from "./settings.js";
-import { filenameFor, padId } from "./util.js";
+import { filenameFor, padId, slugify } from "./util.js";
 
 // ---- types ----
 
@@ -344,7 +346,9 @@ export class Kanban {
    */
   private writeAutomationStatus(rel: string, id: unknown, rule: string, entry: Record<string, unknown>, bump = false): boolean {
     try {
-      const idOf = (file: string): unknown => readFile(file).doc.get("id");
+      const config = loadConfig(this.dir);
+      const relOf = (file: string): string => path.relative(this.dir, file).split(path.sep).join("/");
+      const idOf = (file: string): unknown => ticketIdOf(config, relOf(file), readFile(file).doc.toJS());
       let abs = path.join(this.dir, rel);
       let ok = false;
       try {
@@ -353,7 +357,7 @@ export class Kanban {
         ok = false;
       }
       if (!ok) {
-        const found = scan(this.dir, loadConfig(this.dir)).tickets.find((t) => hasId(t) && idKey(t.id) === idKey(id));
+        const found = scan(this.dir, config).tickets.find((t) => hasId(t) && idKey(t.id) === idKey(id));
         if (!found) {
           this.reportStatusFailure(rel, id, rule, "ticket-not-found", "ticket not found", bump);
           return false;
@@ -649,16 +653,34 @@ export class Kanban {
     }
     const { config, tickets } = this.load();
     const extra = checkProps(input.properties);
+    const fromFilename = config.ticketId === "filename";
 
+    if (input.id === "") throw new KanbanError("invalid", "empty --id");
+
+    // In filename mode the identity IS the file name, so it is decided first and `--id` seeds that
+    // name (it is not a separate value that could disagree with the path).
+    let rel: string;
     let id: string;
-    if (input.id !== undefined) {
-      if (input.id === "") throw new KanbanError("invalid", "empty --id");
-      id = input.id;
-      if (tickets.some((t) => hasId(t) && idKey(t.id) === idKey(id))) {
-        throw new KanbanError("exists", `id ${id} already in use`);
+    if (fromFilename) {
+      const stem = input.id ?? slugify(input.name);
+      if (/[\\/]/.test(stem) || stem === "." || stem === "..") {
+        throw new KanbanError("invalid", `id must be a plain file name when ticketId is filename: "${stem}"`);
+      }
+      rel = input.file ?? `${stem}.md`;
+      id = idFromFilename(rel);
+      if (input.file !== undefined && input.id !== undefined && id !== input.id) {
+        throw new KanbanError("invalid", `id "${input.id}" does not match file name "${id}" (ticketId: filename)`);
       }
     } else {
-      id = padId(nextId(tickets));
+      id = input.id ?? padId(nextId(tickets));
+      rel = input.file ?? filenameFor(id, input.name);
+    }
+
+    // Same check in both modes: an id may exist once. In filename mode this also catches a file name
+    // that collides with an existing ticket in another directory. `kb fix` never renames, so a
+    // collision cannot be repaired later and is refused here.
+    if (tickets.some((t) => hasId(t) && idKey(t.id) === idKey(id))) {
+      throw new KanbanError("exists", `id ${id} already in use`);
     }
 
     const warnings: Warning[] = [];
@@ -677,7 +699,12 @@ export class Kanban {
     const status = input.status ?? cols[0];
     if (!cols.includes(status)) warnings.push(unsortedWarning(board, status));
 
-    const data: Record<string, unknown> = { type: "ticket", id: idScalar(id), name: input.name, status };
+    const data: Record<string, unknown> = { type: "ticket" };
+    // `id:` is the source of truth in props mode. In filename mode it is redundant and would drift
+    // from the file name, so it is not written at all.
+    if (!fromFilename) data.id = idScalar(id);
+    data.name = input.name;
+    data.status = status;
     if (board !== config.name) data.board = board;
     const labels = [...new Set(input.labels ?? [])];
     if (labels.length) data.labels = labels;
@@ -686,12 +713,12 @@ export class Kanban {
     const doc = new Document(data);
     if (input.comment !== undefined) addComment(doc, input.comment, this.now());
 
-    const rel = input.file ?? filenameFor(id, input.name);
-    const abs = path.resolve(this.dir, rel);
+    const relFinal = rel;
+    const abs = path.resolve(this.dir, relFinal);
     if (input.file !== undefined) {
       const inside = path.relative(path.resolve(this.dir), abs);
       if (inside === "" || inside.startsWith("..") || path.isAbsolute(inside) || !abs.endsWith(".md")) {
-        throw new KanbanError("invalid", `file must be a .md path inside the board directory: ${rel}`);
+        throw new KanbanError("invalid", `file must be a .md path inside the board directory: ${relFinal}`);
       }
     }
     const rel0 = path.relative(path.resolve(this.dir), abs).split(path.sep).join("/");
@@ -707,7 +734,7 @@ export class Kanban {
     try {
       fs.writeFileSync(abs, render(doc, body), { flag: "wx" });
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new KanbanError("exists", `${rel} already exists`);
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new KanbanError("exists", `${relFinal} already exists`);
       throw e;
     }
     const rel2 = path.relative(this.dir, abs);
@@ -907,6 +934,10 @@ export class Kanban {
 
     for (const t of tickets) {
       if (!hasId(t)) err(t.path, "missing id");
+      if (config.ticketId === "filename" && t.data.id !== undefined && String(t.data.id) !== String(t.id)) {
+        // Not an error: the mode says the file name wins, so the stale `id:` is only dead weight.
+        warn(t.path, `frontmatter id ${JSON.stringify(t.data.id)} is ignored (ticketId: filename, id is "${String(t.id)}")`);
+      }
       if (t.status === undefined) err(t.path, "missing status");
       else if (!columnsFor(config, t.board).includes(t.status)) {
         err(t.path, `status "${t.status}" is not a column of board "${t.board}"`);
@@ -944,9 +975,14 @@ export class Kanban {
     return result();
   }
 
-  /** Repair missing/duplicate ids. With dryRun, only report. */
+  /**
+   * Repair missing/duplicate ids by writing `id:` into the frontmatter. Files are never renamed, so
+   * this only applies to props mode; with `ticketId: filename` the id IS the file name and there is
+   * nothing to write — collisions stay invalid until a human renames a file.
+   */
   fix({ dryRun = false }: { dryRun?: boolean } = {}): Change[] {
-    const { tickets } = this.load();
+    const { config, tickets } = this.load();
+    if (config.ticketId === "filename") return [];
 
     const used = new Set(tickets.filter(hasId).map((t) => idKey(t.id)));
     // ids known so far, including ones assigned in this run

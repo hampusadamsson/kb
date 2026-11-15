@@ -13,10 +13,12 @@ import {
   isValidGlob,
   loadConfig,
   parseTicketRules,
+  ticketIdSchema,
   ticketRules,
   webSchema,
   type Automation,
   type Config,
+  type TicketIdSource,
   type TicketRules,
   type WebConfig,
 } from "./config.js";
@@ -29,6 +31,8 @@ export interface ConfigInput {
   name: string;
   columns: string[];
   glob: string;
+  /** where ticket ids come from; omitted when default ("props") */
+  ticketId?: TicketIdSource;
   /** ticket definition; omitted when default (baseline only, no rules) */
   tickets?: TicketRules;
   automations?: Automation[];
@@ -104,6 +108,7 @@ const inputSchema = z.object({
   name: nonEmpty("name"),
   glob: globSchema,
   columns: columnsSchema,
+  ticketId: ticketIdSchema.optional(),
   automations: z.array(automationSchema).optional(),
   tickets: z.unknown().optional(),
   web: webSchema.optional(),
@@ -282,6 +287,13 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
     doc.set("glob", next.glob);
     changed = true;
   }
+  // Omitted = keep what is on disk; "props" is the default, so it is not written out.
+  const nextTicketId = next.ticketId ?? old.ticketId;
+  if (nextTicketId !== old.ticketId) {
+    if (nextTicketId === "props") doc.delete("ticketId");
+    else doc.set("ticketId", nextTicketId);
+    changed = true;
+  }
   if (JSON.stringify(next.web ?? {}) !== JSON.stringify(old.web ?? {})) {
     if (next.web && Object.keys(next.web).length > 0) doc.set("web", doc.createNode(next.web));
     else doc.delete("web");
@@ -397,6 +409,7 @@ export function getConfigSnapshot(dir: string): ConfigSnapshot {
     if (v.automations?.length) boards[k].automations = structuredClone(v.automations);
   }
   const config: ConfigInput = { name: c.name, columns: [...c.columns], glob: c.glob, boards };
+  if (c.ticketId === "filename") config.ticketId = "filename";
   if (c.web) config.web = { ...c.web };
   if (c.automations?.length) config.automations = structuredClone(c.automations);
   if (!isDefaultTicketRules(c.tickets)) config.tickets = structuredClone(ticketRules(c));
@@ -408,6 +421,10 @@ export function getConfigSnapshot(dir: string): ConfigSnapshot {
 
 export function updateConfigFile(dir: string, raw: unknown, opts: UpdateConfigOptions = {}): UpdateConfigResult {
   const next = parseWith(inputSchema, "config", raw) as unknown as ConfigInput;
+  if ((raw as { ticketId?: unknown })?.ticketId === undefined) {
+    // Omitted by an older client: keep what is on disk rather than silently flipping the mode.
+    delete next.ticketId;
+  }
   if ((raw as { tickets?: unknown })?.tickets !== undefined) {
     next.tickets = parseTicketRules((raw as { tickets: unknown }).tickets);
     for (const kind of ["include", "exclude"] as const) {

@@ -1,7 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
-import { columnsFor, globMatches, isPathExcluded, isPathIncluded, isTicketFile, scanGlobs, ticketRules, type Config } from "./config.js";
+import {
+  columnsFor,
+  globMatches,
+  isPathExcluded,
+  isPathIncluded,
+  isTicketFile,
+  scanGlobs,
+  ticketIdOf,
+  ticketRules,
+  type Config,
+} from "./config.js";
 import { KanbanError } from "./errors.js";
 import { splitFrontmatter, YAML_OPTS } from "./frontmatter.js";
 import { parsePropertyFilter, splitNegation } from "./parse.js";
@@ -100,7 +110,7 @@ function toTicket(rel: string, data: Record<string, unknown>, body: string, raw:
 
   return {
     path: rel,
-    id: data.id,
+    id: ticketIdOf(config, rel, data),
     name: data.name != null ? String(data.name) : path.posix.basename(rel, path.posix.extname(rel)),
     status,
     column,

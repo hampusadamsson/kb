@@ -150,7 +150,12 @@ const COMMANDS: Record<string, Content> = {
     examples: ['kb comment 1 "blocked on X"', 'kb comment 1 "unblocked, retrying"'],
   },
   fix: {
-    sections: [["Notes", "Gives tickets with a missing or duplicate id a new id; files are not renamed. Use --dry-run to preview."]],
+    sections: [
+      [
+        "Notes",
+        "Gives tickets with a missing or duplicate id a new id by writing `id:` into the frontmatter. Files are never renamed, so this does nothing when `ticketId: filename` (there the file name is the id — rename the file instead). Use --dry-run to preview.",
+      ],
+    ],
     examples: ["kb fix --dry-run", "kb fix"],
   },
   validate: {

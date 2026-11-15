@@ -336,6 +336,20 @@ function configPanel() {
         h("label", { text: "Ticket files (glob)" }),
         input(form.glob, (v) => ((form.glob = v), onDirty()), "Glob"),
       ),
+      h(
+        "div",
+        { class: "field" },
+        h("label", { text: "Ticket ids from" }),
+        h(
+          "select",
+          {
+            "aria-label": "Ticket ids from",
+            onchange: (e) => ((form.ticketId = e.target.value), onDirty(), rerenderConfig()),
+          },
+          h("option", { value: "props", selected: form.ticketId !== "filename", text: "frontmatter id: (default)" }),
+          h("option", { value: "filename", selected: form.ticketId === "filename", text: "file name" }),
+        ),
+      ),
     ),
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Columns (in order)" }), columnList(form.columns, onDirty)),
     h("span", { class: "lbl", text: "Per-board column overrides (optional)" }),
@@ -585,7 +599,9 @@ function fixBox() {
   const box = h("div", { class: "fix-box" });
   if (!fixPlan) return box;
   if (fixPlan.error) return (box.append(h("p", { class: "form-error", role: "alert", text: fixPlan.error })), box);
-  if (!fixPlan.changes.length) return (box.append(h("p", { class: "muted", text: "Nothing to fix." })), box);
+  if (!fixPlan.changes.length) {
+    return (box.append(h("p", { class: "muted", text: fixPlan.notice ?? "Nothing to fix." })), box);
+  }
   box.append(
     h("p", { text: `${fixPlan.changes.length} change(s) planned:` }),
     h(

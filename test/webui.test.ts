@@ -207,6 +207,23 @@ describe("automation form logic", async () => {
     expect(L.formToPayload(L.configToForm(plain)).config).toEqual({ ...plain, tickets: { baseline: true, include: [], exclude: [] } });
   });
 
+  it("carries ticketId through the form, omitting the default", () => {
+    const plain = { name: "default", glob: "*.md", columns: ["todo"], boards: {} };
+    // "props" is the default: not written back, so an unset key stays unset
+    expect(L.configToForm(plain).ticketId).toBe("props");
+    expect(L.formToPayload(L.configToForm(plain)).config.ticketId).toBeUndefined();
+    expect(L.formDirty(L.configToForm(plain), plain)).toBe(false);
+
+    const fn = { ...plain, ticketId: "filename" };
+    expect(L.configToForm(fn).ticketId).toBe("filename");
+    expect(L.formToPayload(L.configToForm(fn)).config.ticketId).toBe("filename");
+    expect(L.formDirty(L.configToForm(fn), fn)).toBe(false);
+    // switching the select marks the form dirty
+    const edited = L.configToForm(plain);
+    edited.ticketId = "filename";
+    expect(L.formDirty(edited, plain)).toBe(true);
+  });
+
   it("retargets rules on column rename and edits props", () => {
     const f = L.configToForm(cfg());
     f.columns[1].value = "shipped";

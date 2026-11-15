@@ -62,7 +62,7 @@ A ticket is a markdown file; the frontmatter is the data, the body is free markd
 ```markdown
 ---
 type: ticket
-id: "001"
+id: "001" # only when ticketId: props (the default)
 name: Fix login bug
 status: todo
 labels: [bug]
@@ -76,9 +76,27 @@ Free-form markdown body.
 ```
 
 - `status` drives the column. Unknown or missing status lands the ticket in an `unsorted` group with a warning.
-- `id` lives in the frontmatter, not the filename. Ids are zero-padded strings (`"001"`); `kb show 1` finds it.
-- The filename is irrelevant for identity. Files are never renamed.
+- **Where the id comes from** is set by `ticketId` in `kanban.yaml` — `props` (default) or `filename`. The two are mutually exclusive: whichever is configured wins and the other is ignored. See [Ticket ids](#ticket-ids).
+- With `props`, ids are zero-padded strings in the frontmatter (`"001"`); `kb show 1` finds it. The filename is irrelevant for identity.
+- With `filename`, the id is the file name without `.md` (`001-fix-login.md` → `001-fix-login`); a frontmatter `id:` is ignored.
+- Files are never renamed, in either mode.
 - Non-reserved keys (`priority`, anything else) are rendered as labels. Comments are a map keyed by local time.
+
+## Ticket ids
+
+```yaml
+ticketId: props # default: the `id:` frontmatter key
+# ticketId: filename      # the file name, without .md
+```
+
+| `ticketId` | id is                       | colliding ids | `kb fix`                        |
+| ---------- | --------------------------- | ------------- | ------------------------------- |
+| `props`    | `id:` in the frontmatter    | invalid       | writes a new `id:` into the file |
+| `filename` | the file name, minus `.md`  | invalid       | can't (it never renames files)  |
+
+Either way **an id must be unique**, and a collision is an error in `kb validate` — not something that is silently resolved. With `filename` ids this means two files named `001.md` in different directories collide even though the paths differ.
+
+Switching modes does not rewrite anything: with `filename`, a `type: ticket` file whose stem is `007` is ticket `007` no matter what its frontmatter says, and a stale `id:` only earns a `validate` warning. Note that `kb add` writes no `id:` in this mode, and `kb fix` explains that renaming the file is the only way to change the id.
 
 ## Commands
 
@@ -99,7 +117,7 @@ Free-form markdown body.
 | `kb mcp`                | Run kb as an MCP server on stdio for an editor or agent.          |
 | `kb completion <shell>` | Print a completion script for bash or zsh.                        |
 
-Ids accept a number: `7` matches `"007"`. Use `kb <command> --help` for every flag.
+Ids accept a number: `7` matches `"007"`. With `ticketId: filename` the id is the file name minus `.md`, so pass e.g. `kb show 001-fix-login`. Use `kb <command> --help` for every flag.
 
 ## Configuration
 
@@ -109,6 +127,7 @@ Ids accept a number: `7` matches `"007"`. Use `kb <command> --help` for every fl
 name: default
 columns: [todo, doing, done]
 glob: "*.md" # which files are scanned for tickets, relative to the config dir
+ticketId: props # where ids come from: props (frontmatter `id:`) or filename
 boards: {} # per-board column and automation overrides
 tickets: {} # optional: which of the scanned files count as tickets (see below)
 automations: [] # shell commands to run on moves/creates
@@ -164,7 +183,7 @@ tickets:
     - glob: "**/*.md" # any .md at any depth
 ```
 
-This pulls in plain notes too, which then need an `id` and `status` — `kb validate` lists them and `kb fix` assigns ids.
+This pulls in plain notes too, which then need an `id` and `status` — `kb validate` lists them and `kb fix` assigns ids. With `ticketId: filename` they need no `id:` at all (the file name is the id), only `status`.
 
 **All markdown, except an archive folder:**
 
