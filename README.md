@@ -10,8 +10,21 @@ A small, local, single-user kanban CLI: tickets are markdown files with YAML fro
 
 - A local, single-user kanban for the terminal. Plain commands, output to stdout — no cloud, no sync, no accounts.
 - Every ticket is a markdown file with YAML frontmatter. Readable, diffable, greppable, yours.
-- A CLI (`kb`) plus an optional local web UI: `kb web` serves the board on `127.0.0.1`.
-- TypeScript on Node 22+, ESM. Dependencies: `commander`, `yaml`, `zod`.
+- A CLI (`kb`), an optional local web UI + HTTP API (`kb web`), and an MCP server (`kb mcp`) — all in this repo, on one core, with no services to run.
+- TypeScript on Node 22+, ESM. Dependencies: `commander`, `yaml`, `zod` — that is all of them.
+
+Four ways in, one board on disk:
+
+| Surface  | Entry point                 | Needs                                      |
+| -------- | --------------------------- | ------------------------------------------ |
+| CLI      | `kb <command>`              | nothing; does not start a server           |
+| HTTP API | `kb web` → `/api/*`, `/mcp` | a running `kb web` process                 |
+| Web UI   | `kb web` → `/`              | the same process (static assets, built in) |
+| MCP      | `kb mcp` (stdio)            | the client spawns it; nothing listens      |
+
+MCP runs over two transports: stdio (`kb mcp`) and HTTP (`POST /mcp` on the same `kb web` process — stateless, no sessions, same tools). The HTTP transport is part of the HTTP API row, not a fifth surface. See [MCP](#mcp).
+
+Plus a library export (`import { createKanban } from "kbkan"`), if you want to script against the same core.
 
 ## Install
 
@@ -113,7 +126,8 @@ Switching modes does not rewrite anything: with `filename`, a `type: ticket` fil
 | `kb validate`           | Check config and tickets; exit code 1 on errors.                  |
 | `kb fix`                | Give tickets a missing or duplicate id (`--dry-run` to preview).  |
 | `kb boards`             | List the boards in use.                                           |
-| `kb web`                | Start the local web UI (`--host`, `--port`, `--no-open`).         |
+| `kb automations [kill]` | List live (or `--all`) automations; `kill` stops runs.            |
+| `kb web`                | Start the local web UI and HTTP API (`--host`, `--port`, `--no-open`). |
 | `kb mcp`                | Run kb as an MCP server on stdio for an editor or agent.          |
 | `kb completion <shell>` | Print a completion script for bash or zsh.                        |
 
@@ -262,7 +276,16 @@ Rules run in the background; at most 15 runs per ticket (loop guardrail, `guard:
 
 ## MCP
 
-`kb mcp` runs kb as an MCP server over stdio, so an editor or agent can read and change tickets. It wraps the same core as the CLI and the web UI — same board, same config, same tickets — with no new dependencies.
+MCP is available over **two transports**, with one shared tool list. Either way it wraps the same core as the CLI and the web UI — same board, same config, same tickets — with no new dependencies.
+
+| Transport | Entry point                        | Shape                                                     |
+| --------- | ---------------------------------- | --------------------------------------------------------- |
+| stdio     | `kb mcp`                           | the client spawns the process; nothing listens            |
+| HTTP      | `POST /mcp` on the `kb web` server | stateless request/response; no sessions, no server stream |
+
+### stdio
+
+`kb mcp` runs kb as an MCP server over stdio, so an editor or agent can read and change tickets.
 
 ```json
 {
@@ -272,8 +295,34 @@ Rules run in the background; at most 15 runs per ticket (loop guardrail, `guard:
 }
 ```
 
+### HTTP
+
+`POST /mcp` on the same port as `kb web`. Stateless: no sessions, no `Mcp-Session-Id`, no server-initiated stream, nothing to keep between requests. One JSON-RPC message or a batch array per request; a notification — or a batch of only notifications — gets `202` with an empty body, and `GET`/`DELETE /mcp` get `405`. The board is the one `kb web` is serving, so there is no `--dir` here.
+
+```sh
+kb web --no-open --port 4747 &
+curl -s -X POST localhost:4747/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
+curl -s -X POST localhost:4747/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
+
+An HTTP entry for a client config (field names differ per client — some use `transport` instead of `type`):
+
+```json
+{
+  "mcpServers": {
+    "kb": { "type": "http", "url": "http://127.0.0.1:4747/mcp" }
+  }
+}
+```
+
+### Tools
+
+Both transports expose the same list.
+
 | Tool             | What it does                                                                        |
-| ---------------  | ----------------------------------------------------------------------------------- |
+| ---------------- | ----------------------------------------------------------------------------------- |
 | `kb_boards`      | List boards and their columns (no tickets).                                         |
 | `kb_search`      | Search tickets by text, board, label or property; summaries only, no bodies.        |
 | `kb_read`        | Read one ticket: frontmatter, body, comments and automation status.                 |
@@ -285,10 +334,114 @@ Rules run in the background; at most 15 runs per ticket (loop guardrail, `guard:
 | `kb_fix`         | Repair missing or duplicate ids; dry-run unless you ask it to write.                |
 | `kb_automations` | List automation runs currently in progress.                                         |
 
-- **Stdio only.** The client spawns the process; nothing listens on a port and stdout carries only JSON-RPC.
-- `--dir` picks the board directory (default: the current directory). A missing `kanban.yaml` fails at startup rather than on the first tool call.
+- **Same tools on both transports**, wired the same way; a tool call gets a fresh board view either way.
+- `/mcp` takes the same write guards as `/api/*`: a JSON `Content-Type` and a same-origin `Origin`. No auth, so anyone who can reach the port can read and edit tickets — same rule as the web UI.
+- `--dir` picks the board directory for `kb mcp` (default: the current directory). A missing `kanban.yaml` fails at startup rather than on the first tool call; over HTTP it is the board `kb web` was started on, and a missing config fails `kb web`.
 - Automations are fire-and-forget: a write returns before its rule finishes — check `kb_read` or `kb_automations` for the result.
 - `kb_fix` defaults to dry-run, so nothing is written until you pass `dryRun: false`.
+
+## HTTP API
+
+`kb web` serves a JSON API on the same port as the UI. It is not a separate daemon: **there is no API unless `kb web` is running.** No auth — loopback by default, so anyone who can reach the port can read and edit tickets.
+
+All routes are under `/api`. Errors are `{ "error": "…", "code": "…" }` with a status from `not-found`→404, `ambiguous`/`exists`/`stale`→409, `invalid`/`parse`→400, `config`→500; unexpected throws are redacted to `500 {"error":"internal error"}`.
+
+| Method | Path                            | What it does                                                               |
+| ------ | ------------------------------- | -------------------------------------------------------------------------- |
+| `GET`  | `/api/health`                   | `{"ok":true,"version":"…"}`; liveness probe, loads no config               |
+| `GET`  | `/api/board`                    | Board view; query `board`, `text`, `label`, `property` (repeatable, `!` negates) |
+| `POST` | `/api/tickets`                  | Create a ticket (`name` required; `status`, `board`, `labels`, `properties`, `body`, `comment`, `file`, `id`) |
+| `GET`  | `/api/tickets/:id`              | One ticket: frontmatter, body, comments, automation status                 |
+| `PATCH`| `/api/tickets/:id`              | Update fields; send `mtime` to get `409 stale` on a concurrent edit        |
+| `POST` | `/api/tickets/:id/comments`     | Append a comment (`text`, optional `mtime`)                                |
+| `GET`  | `/api/validate`                 | Errors and warnings for config and tickets                                 |
+| `POST` | `/api/fix`                      | Repair ids; `dryRun` defaults to **true**                                  |
+| `GET`  | `/api/config`                   | Editable `kanban.yaml` view plus its `mtime`                               |
+| `PUT`  | `/api/config`                   | Replace config; `renames`, `mtime`, `dryRun`                               |
+| `POST` | `/api/config/preview-tickets`   | How proposed `tickets:` rules change the set                               |
+| `GET`  | `/api/events`                   | Audit log; `q`, `type`, `ticket`, `board`, `source`, `before`, `limit`     |
+| `GET`  | `/api/automation/log`           | Legacy: last 20 finished runs                                              |
+| `POST` | `/api/automation/test`          | Render and run a rule against a sample ticket                              |
+| `GET`  | `/api/automation/runs`          | Runs in progress, including other processes'                               |
+| `POST` | `/api/automation/runs/:id/kill` | Kill a run (202 accepted)                                                  |
+
+`GET /api/health` is the liveness probe: it touches no config and no tickets, so polling it is cheap and it answers even while the board is mid-edit. The Docker `HEALTHCHECK` and the Kubernetes probes use it.
+
+Writes (anything but `GET`/`HEAD`) need `Content-Type: application/json`, a same-origin `Origin`, and `Sec-Fetch-Site: same-origin`/`none`; otherwise `415` or `403`. Request bodies are capped at 1 MB (`413`).
+
+`GET /api/stream` is a separate SSE endpoint on the same server: it emits `event: changed` when a ticket or config file changes and `event: runs` when the set of running automations changes. It is how the UI stays live when you edit a ticket from the CLI.
+
+```sh
+kb web --no-open --port 4747 &
+curl -s localhost:4747/api/board?label=bug
+curl -s -X POST localhost:4747/api/tickets \
+  -H 'Content-Type: application/json' -d '{"name":"Fix login","labels":["bug"]}'
+```
+
+## Library
+
+The package also exports its core, so a script can use the same code path as the CLI and web UI:
+
+```ts
+import { createKanban } from "kbkan";
+
+const kb = createKanban({ dir: "/path/to/board" });
+for (const b of kb.list().boards) console.log(b.name, b.columns.length);
+```
+
+Pass `runner` only if you want automations to execute; without it the core reads and writes tickets but never runs a command, which is what makes it safe to embed.
+
+## Docker
+
+The image runs `kb web` and nothing else: no Node install on the host, no global link.
+
+```sh
+mkdir -p board
+chmod 0777 board                                 # the container runs as uid 10001
+docker run --rm -v "$PWD/board:/data" kb kb init  # write a starter kanban.yaml
+docker run -d --name kb -p 4747:4747 -v "$PWD/board:/data" kb
+```
+
+- Build it with `docker build -t kb .` from the repo root.
+- **`/data` is the board directory**, not scratch space: `kanban.yaml`, the ticket `.md` files, and `.kb/` (event and automation logs, created on demand) all live there. Mount a directory that already has `kanban.yaml` — `kb web` refuses to start without one; `kb init` writes the starter one.
+- The process runs as **uid 10001** (unprivileged, user `kb`), so the mounted directory must be writable by it: `chmod 0777 board`, `chown -R 10001 board`, or run with `--user "$(id -u):$(id -g)"`. A host dir owned by root and not writable by 10001 fails with `EACCES` on `kanban.yaml`.
+- Port **4747**, fixed by the entry point's `--host 0.0.0.0 --port 4747 --no-open` flags — `--host 0.0.0.0` because loopback is unreachable through a published port, and `--port` beats `web.port` in `kanban.yaml`.
+- Health: `GET /api/health`, used by the image's `HEALTHCHECK`; `docker inspect --format '{{.State.Health.Status}}' <container>` reports it.
+- The CLI is on `PATH` inside the container, so `docker exec <container> kb ls` works against the same board.
+
+Published image: `ghcr.io/hampusadamsson/kb`, tagged `sha-<7>` (short commit) and `latest`. The two point at the same digest.
+
+```sh
+docker run -d --name kb -p 4747:4747 -v "$PWD/board:/data" ghcr.io/hampusadamsson/kb:latest
+```
+
+**Kubernetes:** put the board on a PVC mounted at `/data` — the tickets need a writable volume, not an image layer — and keep `kanban.yaml` in a ConfigMap, mounted at `/data/kanban.yaml` via `subPath` so it lands as a file beside the tickets instead of replacing the directory. `subPath` mounts are not updated when the ConfigMap changes; restart the pod to pick up an edit. A ConfigMap volume is read-only, so the Settings config editor cannot save `kanban.yaml` — edit the ConfigMap instead. The volume must be writable by uid 10001, and the usual pod-level `fsGroup: 10001` does **not** solve that here: with a hostPath-based provisioner (e.g. `local-path`) the kubelet cannot apply fsGroup ownership to the volume, so the setting is silently ignored while looking like a fix. Use a root init container that `chown -R 10001:10001 /data` with the same PVC mounted at `/data`, then run the app container as 10001. Point both probes at `/api/health`.
+
+```yaml
+spec:
+  # chown the volume once per pod start, then drop back to 10001 for the app.
+  initContainers:
+    - name: fix-data-ownership
+      image: ghcr.io/hampusadamsson/kb:latest
+      command: ["sh", "-c", "chown -R 10001:10001 /data"]
+      securityContext: { runAsUser: 0, runAsGroup: 0 }
+      volumeMounts:
+        - { name: board, mountPath: /data }
+  containers:
+    - name: kb
+      image: ghcr.io/hampusadamsson/kb:latest
+      ports: [{ containerPort: 4747 }]
+      volumeMounts:
+        - { name: board, mountPath: /data }
+        - { name: config, mountPath: /data/kanban.yaml, subPath: kanban.yaml }
+      livenessProbe: { httpGet: { path: /api/health, port: 4747 } }
+      readinessProbe: { httpGet: { path: /api/health, port: 4747 } }
+  volumes:
+    - name: board
+      persistentVolumeClaim: { claimName: kb-board }
+    - name: config
+      configMap: { name: kb-config }
+```
 
 ## Development
 
@@ -315,4 +468,4 @@ Husky hooks: **pre-commit** runs `lint-staged` (oxlint `--fix` + Prettier on sta
 - `kb --help` and `kb <command> --help` — everyday usage, flags and examples.
 - [`example/`](example/) — a sample board with tickets and automations.
 - [`AGENTS.md`](AGENTS.md) — commit conventions and repo rules.
-- The REST API, activity-log event reference and internal architecture are documented in the source under `src/`.
+- The activity-log event reference and internal architecture are documented in the source under `src/` (`src/api/api.ts` is the HTTP router, `src/mcp/protocol.ts` the MCP transport).

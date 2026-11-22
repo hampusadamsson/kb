@@ -16,7 +16,8 @@ const DEFAULT_SEARCH_LIMIT = 20;
 /** Mirrors `maximum: 200` on kb_search's `limit` schema. */
 const MAX_SEARCH_LIMIT = 200;
 
-const INSTRUCTIONS = [
+/** Usage guidance advertised by `initialize`, over both the stdio and the HTTP transport. */
+export const INSTRUCTIONS = [
   "A kb board is a directory of markdown tickets: YAML frontmatter holds id, status, labels and properties, the markdown body holds the description.",
   "`status` is the column; moving a ticket between columns is kb_move. Ids look like 001 and a short id such as 7 matches 007.",
   "Search first (kb_search) to find ids, then kb_read before kb_update/kb_move; pass the mtime from kb_read to detect concurrent edits.",

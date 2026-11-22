@@ -7,6 +7,7 @@ import type { AutomationRunner } from "../core/automation.js";
 import { pidAlive } from "../killRun.js";
 import type { LiveRuns } from "../liveRuns.js";
 import { errorResponse, handleApi } from "../api/api.js";
+import { createMcpHttpContext, handleMcpHttp } from "../mcp/http.js";
 import { isDir, PUBLIC_DIR, readPublic } from "./assets.js";
 import { EventHub } from "./watch.js";
 
@@ -82,7 +83,13 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown, end =
   else res.write(data);
 }
 
-function readBody(req: http.IncomingMessage, res: http.ServerResponse): Promise<Record<string, unknown>> {
+/** A 202/204 style reply: status and headers only, not even `null` as a body. */
+function sendEmpty(res: http.ServerResponse, status: number): void {
+  res.writeHead(status, { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Length": 0 });
+  res.end();
+}
+
+function readBody(req: http.IncomingMessage, res: http.ServerResponse, opts: { allowArray?: boolean } = {}): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -126,8 +133,10 @@ function readBody(req: http.IncomingMessage, res: http.ServerResponse): Promise<
         if (text.trim() === "") return resolve({});
         try {
           const v: unknown = JSON.parse(text);
-          if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error("not an object");
-          resolve(v as Record<string, unknown>);
+          if (v === null || typeof v !== "object") throw new Error("not an object");
+          // `/api/` takes one object; a JSON-RPC batch is an array, so only MCP may ask for arrays.
+          if (!opts.allowArray && Array.isArray(v)) throw new Error("not an object");
+          resolve(v);
         } catch {
           reject(new HttpError(400, "bad-json", "request body must be a JSON object"));
         }
@@ -228,10 +237,15 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     if (!hostAllowed(req, allowedHosts)) {
       return sendJson(res, 421, { error: "host not allowed", code: "host-not-allowed" });
     }
-    if (!url.pathname.startsWith("/api/") && url.pathname !== "/api") {
+    if (!url.pathname.startsWith("/api/") && url.pathname !== "/api" && url.pathname !== "/mcp") {
       return serveStatic(req, res, url.pathname);
     }
     res.setHeader("Cache-Control", "no-store");
+    // MCP over HTTP is request/response only: there is no server-initiated stream to GET and no
+    // session to DELETE, so every method but POST is refused before any body is read.
+    if (url.pathname === "/mcp" && method !== "POST") {
+      return sendJson(res, 405, { error: "method not allowed", code: "method-not-allowed" });
+    }
     const writes = method !== "GET" && method !== "HEAD";
     if (writes && (!sameOrigin(req) || !secFetchOk(req))) {
       return sendJson(res, 403, { error: "cross-origin request refused", code: "forbidden" });
@@ -244,11 +258,20 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     ) {
       return sendJson(res, 415, { error: "content-type must be application/json", code: "unsupported" });
     }
+    if (url.pathname === "/mcp") {
+      // Same guards as `/api/` writes (they were applied above), then the same JSON-RPC dispatcher
+      // the stdio server uses. A batch arrives as an array, so the reader must allow arrays here.
+      const body = await readBody(req, res, { allowArray: true });
+      const ctx = createMcpHttpContext({ dir, runner: opts.runner, events, live: opts.live });
+      const r = await handleMcpHttp(body, ctx);
+      // 202 means "every message was a notification": accepted, and there is nothing to say back.
+      return r.body === undefined ? sendEmpty(res, r.status) : sendJson(res, r.status, r.body);
+    }
     if (url.pathname === "/api/stream") {
       if (method !== "GET") return sendJson(res, 405, { error: "method not allowed", code: "method-not-allowed" });
       return hub.add(res);
     }
-    const body = method === "GET" || method === "HEAD" ? {} : await readBody(req, res);
+    const body = (method === "GET" || method === "HEAD" ? {} : await readBody(req, res)) as Record<string, unknown>;
     const kb = createKanban({
       dir,
       now: opts.now,

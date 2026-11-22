@@ -1,0 +1,47 @@
+# Keep the build context to what the image actually needs: src/, package.json,
+# package-lock.json and tsconfig*.json. Everything below is either reinstalled in
+# the image, host-specific, or dead weight.
+
+# installed / generated in the image
+node_modules
+dist
+coverage
+artifacts
+build
+*.tsbuildinfo
+
+# vcs + CI
+.git
+.github
+.gitignore
+.gitattributes
+.husky
+
+# tests, fixtures and the sample board
+test
+example
+vitest.config.mts
+.oxlintrc.json
+commitlint.config.mjs
+
+# images and other non-runtime docs
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+README.md
+CHANGELOG.md
+AGENTS.md
+LICENSE
+
+# local board data and tooling output
+.kb
+*.log
+.DS_Store
+
+# editor noise
+.vscode
+.idea
+*.swp
+*~

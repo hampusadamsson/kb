@@ -7,6 +7,7 @@ import { renderCommand } from "../core/automation.js";
 import { KanbanError, type Kanban, type Patch, type Ticket } from "../core/index.js";
 import { killRun, pidAlive } from "../killRun.js";
 import type { LiveRuns } from "../liveRuns.js";
+import { VERSION } from "../version.js";
 import { duplicateKeys, toDetail, toView } from "./view.js";
 
 export interface ApiRequest {
@@ -180,6 +181,13 @@ const comment: Handler = (kb, req, [id]) => {
   const key = kb.comment(id, text);
   return ok({ key, mtime: kb.get(id).mtime }, 201);
 };
+
+/**
+ * Liveness probe: deliberately touches nothing. Startup already fails loudly when kanban.yaml is
+ * missing, so a health check that loaded the config would only report the same failure twice — and
+ * polling it would re-scan every ticket file on each hit.
+ */
+const health: Handler = () => ok({ ok: true, version: VERSION });
 
 const validate: Handler = (kb) => ok(kb.validate());
 
@@ -412,6 +420,7 @@ const route = (method: string, pattern: string, handler: Handler): Route => ({
 });
 
 const routes: Route[] = [
+  route("GET", "/api/health", health),
   route("GET", "/api/board", board),
   route("POST", "/api/tickets", create),
   route("GET", "/api/tickets/:id", detail),
