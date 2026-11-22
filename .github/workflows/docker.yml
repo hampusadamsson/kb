@@ -1,0 +1,214 @@
+name: docker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Computes the lowercased GHCR image name and the immutable sha-<7> tag.
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.vars.outputs.image }}
+      sha_tag: ${{ steps.vars.outputs.sha_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: vars
+        name: Compute image name and tags
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # GHCR requires a lowercase repository path.
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=sha-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # main: push by digest only; the human-readable tags are applied in merge.
+      - name: Build and push by digest
+        id: build
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          outputs: type=image,name=${{ needs.prepare.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.title=kb
+            org.opencontainers.image.description=Local markdown kanban CLI and web UI: tickets are plain .md files, the board is kanban.yaml.
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,mode=max,scope=amd64
+
+      # PRs (and manual runs): build locally so the image can be smoke tested. Never pushes.
+      - name: Build image locally (no push)
+        if: github.event_name != 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: ${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.sha_tag }}
+          labels: |
+            org.opencontainers.image.title=kb
+            org.opencontainers.image.description=Local markdown kanban CLI and web UI: tickets are plain .md files, the board is kanban.yaml.
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,mode=max,scope=amd64
+
+      # Exercises the image the way it is actually run: a board directory mounted at
+      # /data, the web UI reachable through the published port, and the CLI working
+      # against that same board.
+      - name: Smoke test (health, kb add, kb ls)
+        if: github.event_name != 'push'
+        env:
+          IMAGE: ${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.sha_tag }}
+          BOARD: ${{ runner.temp }}/board
+        run: |
+          set -uo pipefail
+          fail() {
+            echo "::error::$1"
+            docker logs kb-smoke 2>&1 || true
+            docker rm -f kb-smoke >/dev/null 2>&1 || true
+            exit 1
+          }
+
+          docker run --rm "$IMAGE" kb --version || fail "kb --version failed"
+
+          # The runtime user is unprivileged (uid 10001), so the mounted board must be writable.
+          mkdir -p "$BOARD"
+          chmod 0777 "$BOARD"
+          docker run --rm -v "$BOARD:/data" "$IMAGE" kb init || fail "kb init failed in the container"
+          test -f "$BOARD/kanban.yaml" || fail "kb init did not write kanban.yaml into the mounted board"
+
+          docker run -d --name kb-smoke -p 4747:4747 -v "$BOARD:/data" "$IMAGE" || fail "container did not start"
+
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:4747/api/health >/dev/null; then
+              echo "health OK"
+              break
+            fi
+            sleep 2
+          done
+          curl -sf http://localhost:4747/api/health >/dev/null || fail "GET /api/health did not become ready within 60s"
+
+          # CLI round-trip against the mounted board, inside the running container.
+          docker exec kb-smoke kb add "smoke test" || fail "kb add failed in the container"
+          docker exec kb-smoke kb ls | tee /dev/stderr || fail "kb ls failed in the container"
+          docker exec kb-smoke kb ls | grep -q "smoke test" || fail "kb ls does not list the new ticket"
+
+          # ... and the ticket is a real markdown file on the host side of the mount.
+          found=""
+          for f in "$BOARD"/*.md; do
+            [ -e "$f" ] || continue
+            found="$f"
+            echo "ticket file: $f"
+          done
+          [ -n "$found" ] || fail "no ticket .md file appeared in the mounted board"
+
+          docker rm -f kb-smoke >/dev/null || fail "container cleanup failed"
+
+      - name: Export digest
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/digests"
+          touch "${{ runner.temp }}/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-amd64
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Applies the human-readable tags to the pushed digest.
+  merge:
+    needs: [prepare, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push tags
+        env:
+          IMAGE: ${{ needs.prepare.outputs.image }}
+          SHA_TAG: ${{ needs.prepare.outputs.sha_tag }}
+        run: |
+          set -euo pipefail
+          cd "${{ runner.temp }}/digests"
+          digest=""
+          for f in *; do digest="$f"; break; done
+          if [ -z "$digest" ]; then echo "::error::no digest artifact found"; exit 1; fi
+          tags=(-t "$IMAGE:$SHA_TAG" -t "$IMAGE:latest")
+          docker buildx imagetools create "${tags[@]}" "$IMAGE@sha256:$digest"
+          docker buildx imagetools inspect "$IMAGE:$SHA_TAG"
