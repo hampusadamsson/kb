@@ -149,6 +149,20 @@ describe("Kanban core API", () => {
     expect(fs.readFileSync(path.join(dir, "noid.md"), "utf8")).toContain("id:");
   });
 
+  it("health reports the version without touching the board", async () => {
+    const r = await handleApi(kb, { method: "GET", path: "/api/health", query: new URLSearchParams(), body: {} });
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ ok: true, version: expect.any(String) });
+    // no config load, no ticket scan: a broken board must still answer the probe
+    const broken = createKanban({ dir: fs.mkdtempSync(path.join(os.tmpdir(), "kb-api-")) });
+    try {
+      const h = await handleApi(broken, { method: "GET", path: "/api/health", query: new URLSearchParams(), body: {} });
+      expect(h).toMatchObject({ status: 200, body: { ok: true } });
+    } finally {
+      fs.rmSync(broken.dir, { recursive: true, force: true });
+    }
+  });
+
   it("filters", () => {
     kb.add({ name: "One", labels: ["bug"], properties: { priority: "high" } });
     kb.add({ name: "Two", labels: ["ui"], properties: { priority: "low" } });
