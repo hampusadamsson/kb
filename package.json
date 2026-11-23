@@ -2,6 +2,7 @@
   "name": "kbkan",
   "version": "0.1.0",
   "description": "Local markdown kanban CLI and web UI: tickets are plain .md files, the board is kanban.yaml.",
+  "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
