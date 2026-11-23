@@ -275,11 +275,77 @@ automations:
 ```
 
 - Fires once **per matching ticket** each time the cron matches; there is no ticket-less schedule.
-- Runs **only while `kb web` or `kb mcp` is running** with automations enabled — not for plain CLI commands, and not with `--no-automation`. Run only one of them per board: each has its own scheduler, so both running risks double-firing (the still-running check only mitigates this).
+- Runs **only while `kb web` or `kb mcp` is running** with automations enabled — not for plain CLI commands, and not with `--no-automation`. See [Where it runs](#where-it-runs).
 - Uses the machine's local time, minute precision. Missed ticks are not caught up. A rule never fires twice in the same minute, and a ticket is skipped while the previous run of that rule on it is still running. DST: a repeated minute at fall-back fires once; minutes skipped at spring-forward are not caught up.
 - The loop guard is **off** for scheduled rules; set `guard: true` to enable it.
 - `{{ from }}` and `{{ to }}` are not available; `{{ event }}` is `schedule`.
 - Cron: 5 fields (minute hour day-of-month month day-of-week) with `*`, lists, ranges, steps, month/day names; `7` is Sunday. If both day-of-month and day-of-week are restricted, either matching fires (OR). No seconds, no `@daily`-style macros. An invalid expression is reported by `kb validate`.
+
+#### Quick start
+
+1. Add the rule to `kanban.yaml` (as above).
+2. `kb validate` — reports an invalid cron expression, or `{{ from }}`/`{{ to }}` in a schedule rule.
+3. Start a scheduler process: `kb web --no-open` (or `kb mcp`).
+4. At the next minute boundary that matches the cron (checked 0.25 s past the minute), one run starts per matching ticket. Check with `kb automations --all --format text` (see [Observing](#observing)).
+
+With no ticket in the `in` column nothing happens, and that is not an error.
+
+#### Where it runs
+
+The scheduler is a timer inside the `kb web` or `kb mcp` process. Plain `kb` commands (`kb mv`, `kb ls`, …) never fire it, and it stops when the process exits. To keep it going, leave it running in a terminal or tmux, under a process supervisor, or in Docker. The image's default command is `kb web --host 0.0.0.0 --port 4747 --no-open`, so a running container is a running scheduler:
+
+```sh
+kb web --no-open                                    # local: leave it running
+docker run -d -p 4747:4747 -v "$PWD/board:/data" kb  # container: scheduler included
+```
+
+- `--no-automation` (on `kb web` or `kb mcp`) does not start the scheduler.
+- `kb mcp` over stdio lives only as long as the client keeps it spawned. `POST /mcp` is served by `kb web`, so it adds no second scheduler.
+- Run **one** scheduler process per board. Each process dedupes same-minute firing only for itself, so two (`kb web` + `kb mcp`, two `kb web`s, two containers on one mounted board) fire every rule twice. The still-running check only mitigates this.
+- Stopping `kb web` (Ctrl-C/SIGTERM) kills the runs it started.
+
+#### Time zone
+
+Cron uses the local time of the process: your system zone on your own machine. The Dockerfile sets no `TZ`, so a container uses its default zone (normally UTC). Check with `docker run --rm kb date` and write the cron expression in that zone.
+
+#### Observing
+
+Scheduled runs are recorded like any other automation run.
+
+- **Ticket frontmatter**: an `automations:` entry per rule with `status` (`running`, `done`, `failed`, `skipped`), `at`, `exit` and, for failures, `error` and `step`.
+- **CLI**: `kb automations` (same as `kb automations ls`) lists runs in progress right now; `kb automations --all` lists every rule with its last run and a running count. Output is JSON; add `--format text` for a table.
+- **Web**: **Automations** shows each rule's last run, **Live** shows runs in progress (elapsed time, a Kill button), and **Logs** is the activity log, including `automation.finished` and `automation.skipped` events (e.g. reason `still-running`).
+- **Files** in `.kb/`: `events.log` (what Logs shows; written by `kb web` and `kb mcp`) and `automation.log` (legacy; finished runs, written by `kb web` only).
+- **Kill a run**: the Kill button in Live, or from any terminal `kb automations kill -t <id> -r <rule>` (`--dry-run` to preview, `-a` to kill every match).
+
+#### Testing and disabling
+
+To try a rule without waiting for the clock, open it in the web **Automations** view and press **Run test**. It really executes the command against a sample ticket with event `schedule`, shows the result, writes no log entry and touches no ticket. The same is available as `POST /api/automation/test`; it answers `503` under `--no-automation` and `429` while two tests are already running.
+
+To pause a rule, set `enabled: false`. A disabled scheduled rule is skipped before any ticket is scanned: nothing runs and nothing is recorded on tickets.
+
+```yaml
+- name: nag-review
+  enabled: false
+  when: { schedule: "0 9 * * mon-fri", in: review }
+  run: echo {{ id }} still in review >> nag.log
+```
+
+#### Config edits
+
+The scheduler's long-lived instance re-reads `kanban.yaml` and rescans tickets on every tick, so added, edited, disabled or removed rules apply at the next minute without a restart. A tick whose config fails to load does nothing (errors are swallowed), so run `kb validate` after editing by hand.
+
+#### Troubleshooting
+
+| Symptom                  | Check                                                                                                                                                |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nothing fires            | Is a `kb web`/`kb mcp` process running? Started with `--no-automation`?                                                                              |
+| Nothing fires            | Wrong time zone: the process (e.g. a container in UTC) is not in the zone you wrote the cron for.                                                    |
+| Nothing fires            | `kb validate`: an invalid cron expression is skipped silently at run time, and a config that fails to load stops every tick.                          |
+| Nothing fires            | Rule has `enabled: false`? No ticket in the `in` column, or none matching `labels`/`props`? (Without `in`, tickets in any column match.)             |
+| Fires on some tickets    | A ticket is skipped while the previous run of that rule on it is still running (`automation.skipped`, `still-running`). See Live or `kb automations`. |
+| Fires twice              | Two scheduler processes on one board (see [Where it runs](#where-it-runs)).                                                                          |
+| Missed while it was down | Not caught up: only the current minute is checked. Keep the process running.                                                                         |
 
 ## Web UI
 
