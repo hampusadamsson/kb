@@ -147,6 +147,16 @@ tickets: {} # optional: which of the scanned files count as tickets (see below)
 automations: [] # shell commands to run on moves/creates
 ```
 
+Optional `web:` block (all keys optional; display options only affect board cards, not the ticket dialog, filters, API or MCP):
+
+```yaml
+web:
+  host: 127.0.0.1
+  port: 4747
+  properties_show: [author, url] # allow-list of property keys shown on cards; absent = all, [] = none
+  properties_collapsed: true # default true: card property chips start collapsed
+```
+
 See [`example/`](example/) for a working board with four columns and automations.
 
 ## Which files count as tickets
@@ -353,6 +363,7 @@ The scheduler's long-lived instance re-reads `kanban.yaml` and rescans tickets o
 
 - `kb web` — serves on `127.0.0.1:4747` (next free port if busy) and opens the browser.
 - Defaults can live in `kanban.yaml`: `web: { host: 127.0.0.1, port: 4747 }`. Flags `--host`, `--port`, `--no-open` and `--no-automation` override config.
+- Cards show labels, id and title always; property chips sit behind a small toggle (chevron + count) that starts collapsed (`web.properties_collapsed`, default `true`). Your toggles are remembered for the session only. `web.properties_show` limits which properties appear (and are counted) on cards; the dialog, filters and API still see all. Settings → **Cards** edits both.
 - Board tabs with columns from your config; drag a card to another column to change its status.
 - Create and edit tickets, add comments, filter by text, labels and properties (URL-hash state).
 - The ticket dialog's metadata (status, board, labels, properties, path) folds away under a one-line summary to give the body more room; the choice is remembered.

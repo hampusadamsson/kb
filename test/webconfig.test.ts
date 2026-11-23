@@ -117,3 +117,10 @@ describe("web config api", () => {
     expect((await call("POST", "/api/config", {})).status).toBe(405);
   });
 });
+
+describe("board response card display config", () => {
+  it("exposes web defaults additively", async () => {
+    const r = await call("GET", "/api/board");
+    expect(r.json.web).toEqual({ propertiesShow: null, propertiesCollapsed: true });
+  });
+});

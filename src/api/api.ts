@@ -123,6 +123,11 @@ const board: Handler = (kb, req) => {
     })),
     boardNames,
     columns,
+    // card display only (additive): the browser filters/collapses card property chips with these
+    web: {
+      propertiesShow: config.web?.properties_show ?? null,
+      propertiesCollapsed: config.web?.properties_collapsed ?? true,
+    },
     warnings: result.warnings,
     labels: labelCounts(tickets, boardName),
   });

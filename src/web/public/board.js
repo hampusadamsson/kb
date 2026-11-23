@@ -1,17 +1,42 @@
 // Board rendering: sections, columns, cards, drag and drop.
 import { h, clear } from "./dom.js";
-import { display, moveTargets } from "./logic.js";
+import { cardProps, display, moveTargets, propsToggleLabel } from "./logic.js";
 import { cardIndicator } from "./status.js";
 
 /**
  * handlers: { open(view), add(board, status), move(view, status), dragState(bool) }
  * boards: [{name, columns:[{name,tickets}], unsorted:[]}]
  */
-export function renderBoards(container, boards, handlers, { showTitles }) {
+export function renderBoards(container, boards, handlers, { showTitles, web = {} }) {
   const keep = captureScroll(container);
   clear(container);
+  cardView = { show: web.propertiesShow ?? null, collapsed: web.propertiesCollapsed !== false };
   for (const b of boards) container.append(renderBoard(b, handlers, showTitles));
   restoreScroll(container, keep);
+}
+
+// Card property display for the current render (from the board response's `web`).
+let cardView = { show: null, collapsed: true };
+// Session-only expand/collapse choices, keyed by ticket path: survives re-renders and SSE refreshes.
+const propsOpen = new Map();
+
+function propsToggle(key, count, expanded, rerender) {
+  const btn = h("button", {
+    type: "button",
+    class: "props-toggle",
+    "aria-expanded": String(expanded),
+    "aria-label": propsToggleLabel(count, expanded),
+    title: propsToggleLabel(count, expanded),
+  });
+  btn.append(h("span", { class: "chev", "aria-hidden": "true", text: "▸" }), h("span", { class: "n", text: String(count) }));
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation(); // do not open the ticket
+    propsOpen.set(key, !expanded);
+    rerender();
+  });
+  // Enter/Space on the button must not bubble to the card's open-on-Enter handler
+  btn.addEventListener("keydown", (e) => e.stopPropagation());
+  return btn;
 }
 
 function renderBoard(board, handlers, showTitle) {
@@ -87,7 +112,9 @@ function wireDrop(el, boardName, colName, handlers) {
 function renderCard(t, handlers, targets) {
   const idText = t.hasId ? `#${display(t.id)}` : "#?";
   const ind = cardIndicator(t.autos);
-  const hasMeta = t.labels.length || Object.keys(t.props).length || t.duplicate || !t.hasId;
+  const shown = cardProps(t.props, cardView.show);
+  const expanded = shown.length > 0 && (propsOpen.get(t.path) ?? !cardView.collapsed);
+  const hasMeta = t.labels.length || shown.length || t.duplicate || !t.hasId;
   const card = h(
     "article",
     {
@@ -109,7 +136,14 @@ function renderCard(t, handlers, targets) {
           t.duplicate ? h("span", { class: "badge warn", text: "dup id" }) : null,
           !t.hasId ? h("span", { class: "badge warn", text: "no id" }) : null,
           t.labels.map((l) => h("span", { class: "chip label", text: l })),
-          Object.entries(t.props).map(([k, v]) => h("span", { class: "chip prop", text: `${k}:${display(v)}` })),
+          shown.length
+            ? propsToggle(t.path, shown.length, expanded, () => {
+                const next = renderCard(t, handlers, targets);
+                card.replaceWith(next);
+                next.querySelector(".props-toggle")?.focus(); // keep keyboard focus on the toggle
+              })
+            : null,
+          expanded ? shown.map(([k, v]) => h("span", { class: "chip prop", text: `${k}:${display(v)}` })) : null,
         )
       : h("div", { class: "meta" }, h("span", { class: "id", text: idText })),
     ind ? ind.el : null,

@@ -37,7 +37,7 @@ export interface ConfigInput {
   tickets?: TicketRules;
   automations?: Automation[];
   boards: Record<string, { columns: string[]; automations?: Automation[] }>;
-  /** web UI host/port defaults; round-tripped untouched by the settings form */
+  /** web UI host/port defaults; host/port and card display (properties_show/properties_collapsed); defaults are not written */
   web?: WebConfig;
 }
 
@@ -294,8 +294,15 @@ function applyConfigToDoc(doc: Document, old: Config, next: ConfigInput, boardRe
     else doc.set("ticketId", nextTicketId);
     changed = true;
   }
-  if (JSON.stringify(next.web ?? {}) !== JSON.stringify(old.web ?? {})) {
-    if (next.web && Object.keys(next.web).length > 0) doc.set("web", doc.createNode(next.web));
+  // properties_collapsed: true is the default, so it is neither written nor counted as a change
+  const normWeb = (w: WebConfig | undefined): WebConfig => {
+    const o = { ...w };
+    if (o.properties_collapsed === true) delete o.properties_collapsed;
+    return o;
+  };
+  if (JSON.stringify(normWeb(next.web)) !== JSON.stringify(normWeb(old.web))) {
+    const nw = normWeb(next.web);
+    if (Object.keys(nw).length > 0) doc.set("web", doc.createNode(nw));
     else doc.delete("web");
     changed = true;
   }
@@ -411,6 +418,7 @@ export function getConfigSnapshot(dir: string): ConfigSnapshot {
   const config: ConfigInput = { name: c.name, columns: [...c.columns], glob: c.glob, boards };
   if (c.ticketId === "filename") config.ticketId = "filename";
   if (c.web) config.web = { ...c.web };
+  if (config.web?.properties_collapsed === true) delete config.web.properties_collapsed;
   if (c.automations?.length) config.automations = structuredClone(c.automations);
   if (!isDefaultTicketRules(c.tickets)) config.tickets = structuredClone(ticketRules(c));
   return {

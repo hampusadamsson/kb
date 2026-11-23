@@ -278,8 +278,15 @@ boards:
 #   host: interface to bind (non-loopback binds print a warning, since
 #         automations can run commands on this machine)
 #   port: 0-65535 (0 lets the OS pick a free port)
+#   properties_show: optional allow-list of property keys shown on board cards
+#         (absent = all, [] = none). Display only: the ticket dialog, filters,
+#         API and MCP still see every property.
+#   properties_collapsed: default true — card property chips start collapsed
+#         behind a small toggle; set false to start expanded.
 # CLI FLAGS WIN over these values: `kb web --host … --port …` overrides the file.
 # -----------------------------------------------------------------------------
 web:
   host: 127.0.0.1
   port: 4747
+  # properties_show: [author, url]
+  # properties_collapsed: false

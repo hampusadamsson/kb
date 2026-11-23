@@ -508,6 +508,37 @@ main {
   background: var(--prop);
   color: var(--muted);
 }
+.props-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--prop);
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+.props-toggle .chev {
+  display: inline-block;
+  transition: transform 0.12s;
+}
+.props-toggle[aria-expanded="true"] .chev {
+  transform: rotate(90deg);
+}
+.props-toggle:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .props-toggle .chev {
+    transition: none;
+  }
+}
 .chip-x {
   border: 0;
   background: none;
@@ -2317,4 +2348,17 @@ main {
   .arule-when {
     flex-direction: column;
   }
+}
+.cards-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 0;
+}
+.cards-opts legend {
+  font-size: 11px;
+  color: var(--muted);
 }

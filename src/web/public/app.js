@@ -129,7 +129,7 @@ function render() {
       ? "No tickets match the current filters."
       : "No tickets yet. Use the + in a column header to create one.";
   }
-  renderBoards($("boards"), boards, handlers, { showTitles: sel === "all" });
+  renderBoards($("boards"), boards, handlers, { showTitles: sel === "all", web: data.web });
 }
 
 function renderTabs() {

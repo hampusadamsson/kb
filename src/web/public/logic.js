@@ -176,6 +176,39 @@ export const newRule = (cols) => ({
   timeout: "",
 });
 
+/** web block without the card-display keys (those have their own form fields). */
+function webBase(w) {
+  if (!w) return undefined;
+  const { properties_show: _s, properties_collapsed: _c, ...rest } = w;
+  return Object.keys(rest).length ? rest : undefined;
+}
+
+/** "a, b ,a" → ["a","b"] (trimmed, empty and duplicate entries dropped). */
+export function parseList(text) {
+  return [
+    ...new Set(
+      String(text ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+/**
+ * Property entries a card shows: all of them, or only keys in the `show` allow-list (null/undefined = all).
+ * Display only — never applied to the dialog, filters or API data.
+ */
+export function cardProps(props, show) {
+  const entries = Object.entries(props ?? {});
+  return Array.isArray(show) ? entries.filter(([k]) => show.includes(k)) : entries;
+}
+
+/** Label for the card's property toggle. */
+export function propsToggleLabel(count, expanded) {
+  return expanded ? "Hide properties" : `Show properties (${count})`;
+}
+
 /** GET /api/config → editable form state. `orig` = name in the file (null for new rows). */
 export function configToForm(c) {
   return {
@@ -183,8 +216,12 @@ export function configToForm(c) {
     glob: c.glob,
     // "props" (default) or "filename"; carried through so saving never drops it
     ticketId: c.ticketId === "filename" ? "filename" : "props",
-    // not editable in the form: carried through so saving never drops the user's web: block
-    web: c.web,
+    // host/port are not editable in the form: carried through so saving never drops them
+    web: webBase(c.web),
+    // card display (web.properties_*): "Cards" fieldset
+    propertiesCollapsed: c.web?.properties_collapsed !== false,
+    propertiesShow: (c.web?.properties_show ?? []).join(", "),
+    propertiesShowSet: c.web?.properties_show !== undefined,
     columns: colRows(c.columns),
     tickets: ticketsToForm(c.tickets),
     automations: (c.automations ?? []).map(ruleRow),
@@ -265,7 +302,12 @@ export function formToPayload(f) {
   const config = { name: f.name.trim(), glob: f.glob.trim(), columns: colValues(f.columns), boards: {} };
   // omitted when "props": the default, and older servers keep their current value
   if (f.ticketId === "filename") config.ticketId = "filename";
-  if (f.web) config.web = { ...f.web }; // untouched: the form does not edit it
+  const web = { ...f.web };
+  if (f.propertiesCollapsed === false) web.properties_collapsed = false; // true is the default: omitted
+  const show = parseList(f.propertiesShow);
+  if (show.length) web.properties_show = show;
+  else if (f.propertiesShowSet) web.properties_show = []; // file had "show none": an empty box keeps it
+  if (Object.keys(web).length) config.web = web;
   // always sent: the server keeps the current rules when the key is omitted (default object resets them)
   config.tickets = ticketsToConfig(f.tickets ?? ticketsToForm(undefined));
   if (f.automations?.length) config.automations = rulesToConfig(f.automations, f.columns);

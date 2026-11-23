@@ -238,10 +238,19 @@ export function scanGlobs(config: { glob: string; tickets?: TicketRulesInput }):
   return globs;
 }
 
-/** Optional `web` block: defaults for the web UI host/port (CLI flags win). */
+/**
+ * Optional `web` block: defaults for the web UI host/port (CLI flags win) and card display.
+ * `properties_show` is an allow-list of property keys shown on board cards (display only; absent = all);
+ * `properties_collapsed` (default true) starts card property chips collapsed.
+ */
 export const webSchema = z.object({
   host: z.string().min(1).optional(),
   port: z.number().int().min(0).max(65535).optional(),
+  properties_show: z
+    .array(z.string().min(1, "properties_show entries must not be empty"))
+    .refine((a) => new Set(a).size === a.length, "properties_show must be unique")
+    .optional(),
+  properties_collapsed: z.boolean().optional(),
 });
 
 /** Top-level `glob` schema: shared by load and save so a saved glob is always loadable. */

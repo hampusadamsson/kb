@@ -351,6 +351,27 @@ function configPanel() {
         ),
       ),
     ),
+    h(
+      "fieldset",
+      { class: "cards-opts" },
+      h("legend", { text: "Cards" }),
+      h(
+        "label",
+        { class: "check" },
+        h("input", {
+          type: "checkbox",
+          checked: form.propertiesCollapsed !== false,
+          onchange: (e) => ((form.propertiesCollapsed = e.target.checked), onDirty()),
+        }),
+        " Collapse properties by default",
+      ),
+      h(
+        "div",
+        { class: "field" },
+        h("label", { text: "Show only these properties (comma separated, empty = all)" }),
+        input(form.propertiesShow ?? "", (v) => ((form.propertiesShow = v), onDirty()), "Show only these properties"),
+      ),
+    ),
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Columns (in order)" }), columnList(form.columns, onDirty)),
     h("span", { class: "lbl", text: "Per-board column overrides (optional)" }),
     h(
