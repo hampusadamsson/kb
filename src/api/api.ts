@@ -352,17 +352,20 @@ const automationTest: Handler = async (kb, req, _p, ctx) => {
   const multi = Array.isArray(run);
   const continueOnError = b.continueOnError === true;
   const event = str(b.event, "event") ?? "moved_to";
-  if (event !== "moved_to" && event !== "created_in") throw new KanbanError("invalid", "event must be moved_to or created_in");
+  if (event !== "moved_to" && event !== "created_in" && event !== "schedule") {
+    throw new KanbanError("invalid", "event must be moved_to, created_in or schedule");
+  }
   const s = obj(b.sample, "sample") ?? {};
-  const to = str(s.to, "sample.to") ?? SAMPLE_STATUS;
+  const isSchedule = event === "schedule";
+  const to = isSchedule ? undefined : (str(s.to, "sample.to") ?? SAMPLE_STATUS);
   const labels = strArray(s.labels, "sample.labels") ?? [];
   const vars = {
     id: str(s.id, "sample.id") ?? "000",
     name: str(s.name, "sample.name") ?? "Sample ticket",
     body: str(s.body, "sample.body") ?? "Sample body",
     board: str(b.board, "board") ?? kb.load().config.name,
-    status: str(s.status, "sample.status") ?? to,
-    from: str(s.from, "sample.from") ?? (event === "moved_to" ? "todo" : undefined),
+    status: str(s.status, "sample.status") ?? to ?? SAMPLE_STATUS,
+    from: isSchedule ? undefined : (str(s.from, "sample.from") ?? (event === "moved_to" ? "todo" : undefined)),
     to,
     path: "sample.md",
     labels: labels.join(","),

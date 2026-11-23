@@ -147,15 +147,16 @@ const colRows = (cols) => cols.map((c) => ({ orig: c, value: c }));
 const ruleRow = (a) => ({
   orig: a.name,
   name: a.name,
-  event: a.when.created_in !== undefined ? "created_in" : "moved_to",
-  column: a.when.created_in ?? a.when.moved_to ?? "",
+  event: a.when.schedule !== undefined ? "schedule" : a.when.created_in !== undefined ? "created_in" : "moved_to",
+  column: a.when.in ?? a.when.created_in ?? a.when.moved_to ?? "",
+  schedule: a.when.schedule ?? "",
   labels: [...(a.when.labels ?? [])],
   props: Object.entries(a.when.props ?? {}).map(([key, raw]) => ({ key, value: String(raw), raw })),
   run: a.run,
   // a step list keeps its steps as-is; the form only edits a single script
   continueOnError: a.continueOnError === true,
   enabled: a.enabled !== false,
-  guard: a.guard !== false,
+  guard: a.when.schedule !== undefined ? a.guard === true : a.guard !== false,
   timeout: a.timeout === undefined ? "" : String(a.timeout), // field text; "" = none
 });
 
@@ -165,6 +166,7 @@ export const newRule = (cols) => ({
   name: "",
   event: "moved_to",
   column: colValues(cols)[0] ?? "",
+  schedule: "",
   labels: [],
   props: [],
   run: "",
@@ -223,7 +225,10 @@ export function timeoutLabel(seconds) {
 
 /** Form rule → config automation object (typed prop values preserved when unchanged). */
 function ruleToConfig(r, cols) {
-  const when = { [r.event]: effectiveColumn(cols, r.column) };
+  const col = effectiveColumn(cols, r.column);
+  const sched = r.event === "schedule";
+  const when = sched ? { schedule: (r.schedule ?? "").trim() } : { [r.event]: col };
+  if (sched && col) when.in = col; // column is an optional filter for schedules
   const labels = r.labels.map((l) => l.trim()).filter(Boolean);
   if (labels.length) when.labels = labels;
   const props = {};
@@ -235,7 +240,9 @@ function ruleToConfig(r, cols) {
   const out = { name: r.name.trim(), when, run: r.run };
   if (r.continueOnError) out.continueOnError = true;
   if (!r.enabled) out.enabled = false;
-  if (r.guard === false) out.guard = false; // default on: omitted from YAML
+  if (sched) {
+    if (r.guard) out.guard = true; // schedules default to off: omitted from YAML
+  } else if (r.guard === false) out.guard = false; // default on: omitted from YAML
   const t = parseTimeout(r.timeout).seconds;
   if (t > 0) out.timeout = t; // 0 / empty = no timeout: omitted from YAML
   return out;
@@ -340,8 +347,10 @@ export function checkRules(board, rules, cols) {
     const te = parseTimeout(r.timeout).error;
     if (te) return `${who}${where}: ${te}`;
     const col = effectiveColumn(cols, r.column);
-    if (!col) return `${who}${where} needs a column.`;
-    if (!have.includes(col)) return `Cannot remove column "${col}": used by automation "${name}"${where}. Change or remove the rule first.`;
+    if (r.event === "schedule" && !(r.schedule ?? "").trim()) return `${who}${where} needs a schedule.`;
+    if (!col && r.event !== "schedule") return `${who}${where} needs a column.`;
+    if (col && !have.includes(col))
+      return `Cannot remove column "${col}": used by automation "${name}"${where}. Change or remove the rule first.`;
   }
   return "";
 }

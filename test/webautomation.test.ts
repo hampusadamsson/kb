@@ -43,6 +43,17 @@ describe("POST /api/automation/test", () => {
     expect(fs.existsSync(path.join(dir, ".kb", "automation.log"))).toBe(false);
   });
 
+  it("schedule event has no sample from/to", async () => {
+    await start();
+    const r = await call("POST", {
+      run: "echo [{{ from }}] [{{ to }}] {{ event }} {{ status }}",
+      event: "schedule",
+      sample: { to: "x", from: "y" },
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.command).toBe("echo [''] [''] 'schedule' 'done'");
+  });
+
   it("quotes a hostile sample name", async () => {
     await start();
     const name = "x'; touch pwned; echo '";

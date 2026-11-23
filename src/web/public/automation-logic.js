@@ -4,6 +4,7 @@ import { automationState, effectiveColumn, parseTimeout, timeoutLabel, parseLoca
 export const EVENT_OPTIONS = [
   { value: "moved_to", label: "A ticket is moved to…", short: "moves to" },
   { value: "created_in", label: "A ticket is created in…", short: "is created in" },
+  { value: "schedule", label: "On a schedule (cron)…", short: "is in" },
 ];
 
 /** Variables offered as insert chips: [name, snippet, tooltip]. */
@@ -17,7 +18,7 @@ export const VARIABLES = [
   ["to", "{{ to }}", "Column it went to / was created in"],
   ["path", "{{ path }}", "Ticket file path"],
   ["labels", "{{ labels }}", "Labels, comma-separated"],
-  ["event", "{{ event }}", "moved_to or created_in"],
+  ["event", "{{ event }}", "moved_to, created_in or schedule"],
   ["props.<key>", "{{ props.KEY }}", "A ticket property (replace KEY with the property name)"],
 ];
 
@@ -99,7 +100,10 @@ export const runLabel = (run) => (Array.isArray(run) ? `${run.length} step${run.
 /** One-line human summary of a rule (column = effective column). */
 export function ruleSummary(r, column = r.column) {
   const ev = EVENT_OPTIONS.find((e) => e.value === r.event) ?? EVENT_OPTIONS[0];
-  const parts = [`When a ticket ${ev.short} ${column || "(no column)"}`];
+  const parts =
+    r.event === "schedule"
+      ? [`On schedule ${(r.schedule ?? "").trim() || "(no schedule)"}${column ? ` for tickets in ${column}` : ""}`]
+      : [`When a ticket ${ev.short} ${column || "(no column)"}`];
   const labels = r.labels.map((l) => l.trim()).filter(Boolean);
   if (labels.length) parts.push(`labels: ${labels.join(", ")}`);
   const props = r.props.filter((p) => p.key.trim());
@@ -122,8 +126,10 @@ export function ruleIssues(r, rules, cols) {
   if (te) out.timeout = te;
   const col = effectiveColumn(cols, r.column);
   const have = cols.map((c) => c.value.trim()).filter(Boolean);
-  if (!col) out.column = "Choose a column.";
-  else if (!have.includes(col)) out.column = `Column "${col}" no longer exists on this board.`;
+  if (r.event === "schedule" && !(r.schedule ?? "").trim()) out.schedule = "Enter a 5-field cron expression.";
+  if (!col) {
+    if (r.event !== "schedule") out.column = "Choose a column.";
+  } else if (!have.includes(col)) out.column = `Column "${col}" no longer exists on this board.`;
   return out;
 }
 

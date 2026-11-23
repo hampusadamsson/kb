@@ -92,9 +92,33 @@ export function ruleCard(r, ctx) {
   // ---- 1 When ----
   const evSel = h(
     "select",
-    { id: `${uid}-event`, onchange: (e) => ((r.event = e.target.value), ctx.onChange(), updateHead(), updatePreview()) },
+    {
+      id: `${uid}-event`,
+      onchange: (e) => {
+        r.event = e.target.value;
+        r.guard = r.event !== "schedule"; // schedules default to no loop guard
+        guard.checked = r.guard;
+        syncWhen();
+        ctx.onChange();
+        updateHead();
+        validate();
+        updatePreview();
+      },
+    },
     EVENT_OPTIONS.map((o) => h("option", { value: o.value, text: o.label, selected: o.value === r.event })),
   );
+  const schedErr = h("p", { class: "arule-err", id: `${uid}-sched-err`, hidden: true });
+  const schedIn = h("input", {
+    type: "text",
+    id: `${uid}-sched`,
+    placeholder: "*/5 * * * *",
+    value: r.schedule ?? "",
+    "aria-describedby": `${uid}-sched-err`,
+    oninput: (e) => ((r.schedule = e.target.value), ctx.onChange(), updateHead(), updatePreview()),
+    onblur: () => (touched.add("schedule"), validate()),
+  });
+  const schedField = h("div", { class: "field" }, h("label", { for: `${uid}-sched`, text: "Cron schedule (5 fields)" }), schedIn, schedErr);
+  const colLabel = h("label", { for: `${uid}-col`, text: "Column" });
   const colErr = h("p", { class: "arule-err", id: `${uid}-col-err`, hidden: true });
   const colSel = h("select", {
     id: `${uid}-col`,
@@ -103,11 +127,19 @@ export function ruleCard(r, ctx) {
   });
   const fillCols = () => {
     clear(colSel);
+    if (r.event === "schedule") colSel.append(h("option", { value: "", text: "(any column)", selected: !r.column }));
     // r.column may point at a renamed column: show its new name, keep the value in sync
     r.column = effectiveColumn(ctx.cols, r.column);
     for (const c of columnOptions(ctx.cols, r)) colSel.append(h("option", { value: c, text: c, selected: c === r.column }));
   };
-  fillCols();
+  const syncWhen = () => {
+    const sched = r.event === "schedule";
+    schedField.hidden = !sched;
+    colLabel.textContent = sched ? "Only tickets in column (optional)" : "Column";
+    if (sched && !touched.has("column") && r.orig === null) r.column = "";
+    fillCols();
+  };
+  syncWhen();
   colSel.addEventListener("focus", fillCols);
   colSel.addEventListener("mousedown", fillCols);
 
@@ -236,7 +268,7 @@ export function ruleCard(r, ctx) {
   const guard = h("input", {
     type: "checkbox",
     id: `${uid}-guard`,
-    checked: r.guard !== false,
+    checked: r.event === "schedule" ? r.guard === true : r.guard !== false,
     "aria-describedby": `${uid}-guard-hint`,
     onchange: (e) => ((r.guard = e.target.checked), ctx.onChange(), updateHead()),
   });
@@ -339,6 +371,7 @@ export function ruleCard(r, ctx) {
     };
     set(nameErr, nameIn, "name");
     set(colErr, colSel, "column");
+    set(schedErr, schedIn, "schedule");
     set(runErr, runTa, "run");
     set(timeoutErr, timeoutIn, "timeout");
     const bad = typeof r.run === "string" ? unknownVars(r.run) : [];
@@ -376,7 +409,8 @@ export function ruleCard(r, ctx) {
     else if (state === "disabled") statusEl.append("disabled");
     else if (state === "none") statusEl.append(ctx.runsKnown() ? "never run" : "");
     else statusEl.append(h("span", { class: `sdot ${state}`, "aria-hidden": "true" }), statusText(run));
-    if (r.guard === false) statusEl.append(h("span", { class: "arule-nog", title: "Loop guard is off", text: " · no loop guard" }));
+    if (r.event !== "schedule" && r.guard === false)
+      statusEl.append(h("span", { class: "arule-nog", title: "Loop guard is off", text: " · no loop guard" }));
   }
   function setOpen(on) {
     ctx.setOpen(r, on);
@@ -414,8 +448,9 @@ export function ruleCard(r, ctx) {
         "div",
         { class: "row arule-when" },
         h("div", { class: "field" }, h("label", { for: `${uid}-event`, text: "Event" }), evSel),
-        h("div", { class: "field" }, h("label", { for: `${uid}-col`, text: "Column" }), colSel),
+        h("div", { class: "field" }, colLabel, colSel),
       ),
+      schedField,
       colErr,
       h("div", { class: "field" }, h("label", { for: `${uid}-labels`, text: "Only if it has all these labels (optional)" }), chips.el),
       h("div", { class: "field" }, h("span", { class: "lbl", text: "Only if properties match (optional)" }), propRows),

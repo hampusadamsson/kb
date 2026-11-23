@@ -38,7 +38,13 @@ function table(head: string[], rows: string[][]): string {
 
 const whenText = (a: AutomationInfo): string => {
   const w = a.when;
-  const parts = [w.moved_to !== undefined ? `moved_to ${w.moved_to}` : `created_in ${w.created_in}`];
+  const parts = [
+    w.schedule !== undefined
+      ? `schedule "${w.schedule}"${w.in !== undefined ? ` in ${w.in}` : ""}`
+      : w.moved_to !== undefined
+        ? `moved_to ${w.moved_to}`
+        : `created_in ${w.created_in}`,
+  ];
   if (w.labels?.length) parts.push(`labels ${w.labels.join(",")}`);
   for (const [k, v] of Object.entries(w.props ?? {})) parts.push(`${k}=${String(v)}`);
   return parts.join(" ");

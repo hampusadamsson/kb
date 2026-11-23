@@ -145,7 +145,7 @@ function rewriteRenamedColumns(old: Config, next: ConfigInput, renames: Renames,
   const fix = (rules: Automation[] | undefined, map: Record<string, string> | undefined, cols: string[]) => {
     if (!rules || !map) return;
     for (const r of rules) {
-      for (const k of ["moved_to", "created_in"] as const) {
+      for (const k of ["moved_to", "created_in", "in"] as const) {
         const c = r.when[k];
         if (c !== undefined && !cols.includes(c) && map[c] !== undefined) r.when[k] = map[c];
       }
@@ -170,7 +170,7 @@ function automationBlocks(old: Config, next: ConfigInput, boardRen: Record<strin
     const oldCols = known ? columnsFor(old, oldName) : [];
     const cols = next.boards[board]?.columns ?? next.columns;
     for (const r of rules ?? []) {
-      const col = r.when.moved_to ?? r.when.created_in;
+      const col = r.when.moved_to ?? r.when.created_in ?? r.when.in;
       if (col !== undefined && !cols.includes(col) && oldCols.includes(col)) {
         out.push(`cannot remove column "${col}": used by automation "${r.name}" on board "${board}"`);
       }

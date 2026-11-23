@@ -22,11 +22,18 @@ export const automationSchema = z.object({
     .object({
       moved_to: z.string().optional(),
       created_in: z.string().optional(),
+      /** 5-field cron expression */
+      schedule: z.string().optional(),
+      /** column filter; only with schedule */
+      in: z.string().optional(),
       labels: z.array(z.string()).optional(),
       props: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     })
-    .refine((w) => (w.moved_to !== undefined) !== (w.created_in !== undefined), {
-      message: "when needs exactly one of moved_to / created_in",
+    .refine((w) => [w.moved_to, w.created_in, w.schedule].filter((v) => v !== undefined).length === 1, {
+      message: "when needs exactly one of moved_to / created_in / schedule",
+    })
+    .refine((w) => w.in === undefined || w.schedule !== undefined, {
+      message: "when.in only works together with schedule",
     }),
   /** one shell command, or a list of steps run sequentially */
   run: z.union([z.string(), z.array(z.string()).min(1)]),

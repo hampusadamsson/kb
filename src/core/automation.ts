@@ -1,12 +1,13 @@
 // Board automations: rule matching, command templates, runner interface. UI/process agnostic.
 import { automationsFor, type Automation, type Config } from "./config.js";
+import { parseCron } from "./cron.js";
 import { KanbanError } from "./errors.js";
 import { clipText } from "./events.js";
 import { matches, type Ticket } from "./tickets.js";
 
 export interface AutomationEvent {
-  type: "moved_to" | "created_in";
-  to: string;
+  type: "moved_to" | "created_in" | "schedule";
+  to?: string;
   from?: string;
 }
 
@@ -71,6 +72,11 @@ export interface AutomationRecord {
 
 /** Loop guardrail: a ticket with this many recorded automation runs gets no more (unless the rule has guard: false). */
 export const AUTOMATION_RUN_LIMIT = 15;
+
+/** Loop guard on for a rule: default on, except scheduled rules (off unless `guard: true`). */
+export function guardEnabled(rule: Pick<Automation, "guard" | "when">): boolean {
+  return rule.when.schedule !== undefined ? rule.guard === true : rule.guard !== false;
+}
 
 /** Runs recorded in one `automations` entry (entries without `runs` count as 1). */
 export function entryRuns(e: unknown): number {
@@ -252,6 +258,15 @@ export function automationProblems(config: {
       if (col !== undefined && !cols.includes(col)) {
         out.push(`${where}: column "${col}" is not a column of board "${board}"`);
       }
+      if (rule.when.schedule !== undefined) {
+        const cron = parseCron(rule.when.schedule);
+        if (!cron.ok) out.push(`${where}: invalid schedule "${rule.when.schedule}": ${cron.error}`);
+        const inCol = rule.when.in;
+        if (inCol !== undefined && !cols.includes(inCol)) out.push(`${where}: column "${inCol}" is not a column of board "${board}"`);
+        for (const v of steps.flatMap(templateVars)) {
+          if (v === "from" || v === "to") out.push(`${where}: {{${v}}} is not available in schedule rules`);
+        }
+      }
     }
   }
   return out;
@@ -299,7 +314,11 @@ export function ticketVars(ticket: Ticket, event: AutomationEvent): Record<strin
 
 export function matchRule(rule: Automation, event: AutomationEvent, ticket: Ticket): boolean {
   if (rule.enabled === false) return false;
-  if (rule.when[event.type] !== event.to) return false;
+  if (event.type === "schedule") {
+    // the scheduler decides timing; only the filters apply
+    if (rule.when.schedule === undefined) return false;
+    if (rule.when.in !== undefined && ticket.status !== rule.when.in) return false;
+  } else if (event.to === undefined || rule.when[event.type] !== event.to) return false;
   if (!matches(ticket, { labels: rule.when.labels })) return false;
   for (const [k, v] of Object.entries(rule.when.props ?? {})) {
     const s = String(v);
@@ -417,7 +436,7 @@ export function buildAutomationOverview(
         name: r.name,
         board,
         enabled: r.enabled !== false,
-        guard: r.guard !== false,
+        guard: guardEnabled(r),
         timeout: r.timeout ?? 0,
         when: r.when,
         run: typeof r.run === "string" ? clipText(r.run) : r.run.map((s) => clipText(s)),
