@@ -14,6 +14,22 @@ import {
   summarizeAutomations,
 } from "./logic.js";
 
+const META_OPEN_KEY = "kb.dialog.metaOpen";
+const loadMetaOpen = () => {
+  try {
+    return localStorage.getItem(META_OPEN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+};
+const saveMetaOpen = (open) => {
+  try {
+    localStorage.setItem(META_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    /* storage unavailable: keep the in-memory state */
+  }
+};
+
 const dlg = () => document.getElementById("ticket-dialog");
 let current = null; // the open session, if any
 
@@ -84,7 +100,7 @@ class Session {
       { id: "t-boards" },
       this.ctx.boardNames.map((b) => h("option", { value: b })),
     );
-    this.labels = chipInput({ label: "Add label", placeholder: "add label ⏎", readOnly: ro });
+    this.labels = chipInput({ label: "Add label", placeholder: "add label ⏎", readOnly: ro, onChange: () => this.updateSummary() });
     this.propList = h("div", { class: "prop-rows" });
     this.body = h("textarea", { id: "t-body", rows: create ? 5 : 6, disabled: ro });
     this.board.addEventListener("change", () => this.refreshStatusOptions(this.status.value));
@@ -162,6 +178,33 @@ class Session {
       hidden: true,
       onclick: () => this.resetAutomations(),
     });
+    this.summary = h("span", { class: "fold-sum" });
+    this.fold = h(
+      "details",
+      { class: "meta-fold", open: loadMetaOpen() },
+      h("summary", {}, h("span", { class: "fold-title", text: "Details" }), this.summary),
+      h(
+        "div",
+        { class: "fold-body" },
+        h(
+          "div",
+          { class: "row3" },
+          field("Status", "t-status", this.status),
+          field("Board", "t-board", this.board),
+          h("div", { class: "field grow" }, h("span", { class: "lbl", text: "Labels" }), this.labels.el),
+        ),
+        h(
+          "div",
+          { class: "field props-field" },
+          h("div", { class: "lbl-row" }, h("span", { class: "lbl", text: "Properties" }), addProp),
+          this.propList,
+        ),
+        meta,
+      ),
+    );
+    this.fold.addEventListener("toggle", () => saveMetaOpen(this.fold.open));
+    this.fold.addEventListener("input", () => this.updateSummary());
+    this.fold.addEventListener("change", () => this.updateSummary());
     const form = h(
       "form",
       { method: "dialog", class: "ticket-form", onsubmit: (e) => (e.preventDefault(), this.save()) },
@@ -180,21 +223,8 @@ class Session {
       ),
       this.banner,
       head,
-      meta,
       field("Name", "t-name", this.name),
-      h(
-        "div",
-        { class: "row3" },
-        field("Status", "t-status", this.status),
-        field("Board", "t-board", this.board),
-        h("div", { class: "field grow" }, h("span", { class: "lbl", text: "Labels" }), this.labels.el),
-      ),
-      h(
-        "div",
-        { class: "field props-field" },
-        h("div", { class: "lbl-row" }, h("span", { class: "lbl", text: "Properties" }), addProp),
-        this.propList,
-      ),
+      this.fold,
       boards,
       field("Body", "t-body", this.body),
       commentRow,
@@ -209,6 +239,38 @@ class Session {
       ),
     );
     return form;
+  }
+
+  /** One-line digest of the folded fields, read from the live controls so it is right while collapsed. */
+  updateSummary() {
+    const labels = this.labels.get();
+    const n = Object.keys(rowsToProps(this.rows)).length;
+    const parts = [this.status.value, this.board.value.trim()].filter(Boolean);
+    if (labels.length) parts.push(labels.map((l) => `#${l}`).join(" "));
+    if (n) parts.push(`${n} ${n === 1 ? "prop" : "props"}`);
+    const text = parts.join(" · ") || "no metadata";
+    this.summary.textContent = text;
+    this.summary.title = text;
+  }
+
+  /** Expand the metadata fold (if collapsed) and focus a field inside it. */
+  reveal(el) {
+    this.fold.open = true;
+    el?.focus();
+  }
+
+  /** Server errors about folded fields re-open the fold and focus the culprit. */
+  revealForError(msg) {
+    const m = /\b(status|board|label|propert)/i.exec(msg ?? "");
+    if (!m) return;
+    const kind = m[1].toLowerCase();
+    if (kind === "status") return this.reveal(this.status);
+    if (kind === "board") return this.reveal(this.board);
+    if (kind === "label") return this.reveal(this.labels.input);
+    const quoted = /"([^"]+)"/.exec(msg)?.[1];
+    const i = quoted ? this.rows.findIndex((r) => r.k.trim() === quoted) : -1;
+    const target = this.propList.children[i >= 0 ? i : 0]?.querySelector("input");
+    this.reveal(target ?? null);
   }
 
   focus() {
@@ -252,11 +314,13 @@ class Session {
             onclick: () => {
               this.rows = this.rows.filter((r) => r !== row);
               el.remove();
+              this.updateSummary();
             },
           }),
     );
     this.rows.push(row);
     this.propList.append(el);
+    this.updateSummary();
     if (focus) kin.focus();
   }
 
@@ -269,6 +333,7 @@ class Session {
     clear(this.propList);
     this.rows = [];
     for (const [k, v] of Object.entries(s.props)) this.addRow(k, v);
+    this.updateSummary();
     this.renderComments();
     this.commentDirty();
     this.syncReset();
@@ -463,7 +528,10 @@ class Session {
 
   handleError(e) {
     if (e instanceof ApiError && e.code === "stale") this.showBanner("This ticket changed on disk");
-    else this.showError(e.message);
+    else {
+      this.showError(e.message);
+      this.revealForError(e.message);
+    }
   }
 
   async save() {
@@ -482,7 +550,7 @@ class Session {
         closeDialog();
         this.ctx.onSaved?.();
       } catch (e) {
-        this.showError(e.message);
+        this.handleError(e);
       } finally {
         this.busy = false;
       }

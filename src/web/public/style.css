@@ -618,6 +618,63 @@ dialog::backdrop {
   flex: 1;
   min-width: 0;
 }
+/* collapsible metadata block (status/board/labels/props/path) in the ticket dialog */
+.meta-fold {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  flex: none;
+}
+.meta-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.meta-fold > summary:hover {
+  color: var(--fg);
+}
+.meta-fold > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.meta-fold .fold-title {
+  flex: none;
+  font-weight: 600;
+}
+.meta-fold .fold-sum {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta-fold[open] .fold-sum {
+  display: none;
+}
+.meta-fold .fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 8px 8px;
+}
+/* the body textarea takes whatever height the dialog has left (grows when the fold is closed) */
+#ticket-dialog .ticket-form > .field:has(#t-body) {
+  flex: 1 1 auto;
+}
+#ticket-dialog #t-body {
+  flex: 1 1 auto;
+  min-height: 96px;
+  resize: vertical;
+}
+/* desktop dialogs size to content, so give the freed room to the body explicitly */
+#ticket-dialog .meta-fold:not([open]) ~ .field > #t-body {
+  min-height: 220px;
+}
 .meta-list {
   display: flex;
   flex-wrap: wrap;

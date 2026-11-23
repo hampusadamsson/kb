@@ -400,6 +400,37 @@ describe("compact layout", () => {
     expect(card.indexOf('class: "name"')).toBeLessThan(card.indexOf('class: "id"'));
   });
 
+  it("the ticket dialog folds metadata into a persisted <details> with a live summary", () => {
+    const js = pub("dialog.js");
+    expect(js).toContain('"details"');
+    expect(js).toContain('class: "meta-fold"');
+    expect(js).toContain('h("summary"');
+    expect(js).toContain('"kb.dialog.metaOpen"');
+    expect(js).toMatch(/try \{\s*return localStorage\.getItem\(META_OPEN_KEY\)/);
+    expect(js).toContain("localStorage.setItem(META_OPEN_KEY");
+    // all fields stay inside the fold and the form still reads them
+    const fold = js.slice(js.indexOf('class: "meta-fold"'), js.indexOf('this.fold.addEventListener("toggle"'));
+    for (const f of ["this.status", "this.board", "this.labels.el", "this.propList", "meta,"]) expect(fold).toContain(f);
+    expect(fold).not.toContain("this.body");
+    expect(js.indexOf('field("Name"')).toBeLessThan(js.indexOf("this.fold,"));
+    expect(js.indexOf("this.fold,")).toBeLessThan(js.indexOf('field("Body"'));
+    expect(js).toMatch(/status: this\.status\.value,\s*board: this\.board\.value\.trim\(\)/);
+  });
+
+  it("the dialog auto-expands the fold and focuses the field on errors", () => {
+    const js = pub("dialog.js");
+    expect(js).toMatch(/reveal\(el\) \{\s*this\.fold\.open = true;\s*el\?\.focus\(\);/);
+    expect(js).toContain("this.revealForError(e.message)");
+  });
+
+  it("the body textarea grows into the room freed by the collapsed fold", () => {
+    const css = pub("style.css");
+    expect(css).toContain(".meta-fold > summary:focus-visible");
+    expect(css).toContain("text-overflow: ellipsis");
+    expect(css).toMatch(/#ticket-dialog #t-body \{[^}]*flex: 1 1 auto;[^}]*min-height: 96px/);
+    expect(css).toMatch(/#ticket-dialog \.meta-fold:not\(\[open\]\) ~ \.field > #t-body \{[^}]*min-height: 220px/);
+  });
+
   it("keeps controls at the 24px minimum target size", () => {
     const css = pub("style.css");
     const icon = css.slice(css.indexOf(".icon-btn {"), css.indexOf(".icon-btn:hover"));

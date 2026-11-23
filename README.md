@@ -355,6 +355,7 @@ The scheduler's long-lived instance re-reads `kanban.yaml` and rescans tickets o
 - Defaults can live in `kanban.yaml`: `web: { host: 127.0.0.1, port: 4747 }`. Flags `--host`, `--port`, `--no-open` and `--no-automation` override config.
 - Board tabs with columns from your config; drag a card to another column to change its status.
 - Create and edit tickets, add comments, filter by text, labels and properties (URL-hash state).
+- The ticket dialog's metadata (status, board, labels, properties, path) folds away under a one-line summary to give the body more room; the choice is remembered.
 - **Settings**: config editing, a visual automation builder, live runs, and the activity log.
 - **Activity log**: an audit table of what changed and which automations ran.
 - Live updates over SSE via a filesystem watcher — changes from the CLI show up immediately.
