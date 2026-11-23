@@ -84,6 +84,7 @@ export function automationsTab({ boards, onChange }) {
         add(copy, true);
       },
       onDelete: (r) => {
+        if (!window.confirm(`Delete automation “${ruleTitle(r)}”?`)) return;
         const i = b.rules.indexOf(r);
         b.rules.splice(i, 1);
         onChange();

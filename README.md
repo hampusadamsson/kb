@@ -322,6 +322,8 @@ Scheduled runs are recorded like any other automation run.
 
 To try a rule without waiting for the clock, open it in the web **Automations** view and press **Run test**. It really executes the command against a sample ticket with event `schedule`, shows the result, writes no log entry and touches no ticket. The same is available as `POST /api/automation/test`; it answers `503` under `--no-automation` and `429` while two tests are already running.
 
+Deleting a rule in the web **Automations** view asks for confirmation first; after confirming, an **Undo** banner stays for 12 s.
+
 To pause a rule, set `enabled: false`. A disabled scheduled rule is skipped before any ticket is scanned: nothing runs and nothing is recorded on tickets.
 
 ```yaml

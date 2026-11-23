@@ -198,4 +198,12 @@ describe("automations tab sources", () => {
     expect(rule).toContain("aria-describedby");
     expect(pub("style.css")).toContain("/* automations tab */");
   });
+  it("asks for confirmation before deleting a rule, before any mutation", () => {
+    const src = pub("automations.js");
+    const body = src.slice(src.indexOf("onDelete: (r) =>"));
+    const guard = body.indexOf("if (!window.confirm(`Delete automation “${ruleTitle(r)}”?`)) return;");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(body.indexOf("b.rules.splice"));
+    expect(guard).toBeLessThan(body.indexOf("showUndo(r, i)"));
+  });
 });
