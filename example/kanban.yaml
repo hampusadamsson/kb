@@ -138,9 +138,15 @@ tickets:
 # Per-rule keys:
 #   name     (required) unique per board; also the key under which run history
 #            is recorded in the ticket's `automations:` frontmatter
-#   when     (required) exactly one of moved_to / created_in — both or neither
-#            is a config error — plus optional `labels` (all must be present)
-#            and `props` (frontmatter key: value; "!value" negates)
+#   when     (required) exactly one of moved_to / created_in / schedule — more
+#            than one, or none, is a config error — plus optional `labels`
+#            (all must be present) and `props` (frontmatter key: value;
+#            "!value" negates). `schedule` is a 5-field cron string (local
+#            time, minute precision, no catch-up) and fires once per matching
+#            ticket; optional `in: <column>` limits it to that column. It runs
+#            only while `kb web` or `kb mcp` is running (one per board), the
+#            loop guard is off unless `guard: true`, and {{from}}/{{to}} are
+#            unavailable ({{event}} = schedule)
 #   run      (required) shell command — or a list of steps run in order (one
 #            shell call each). {{ … }} placeholders are shell-quoted
 #            automatically, so write them BARE — inside "…", '…' or backticks
@@ -201,6 +207,15 @@ automations:
 
 
 # -----------------------------------------------------------------------------
+  # schedule: cron trigger, once per ticket in `in`. Shipped disabled; cheap and
+  # side-effect free (prints to /dev/null) when enabled.
+  - name: weekday-review-nudge
+    when:
+      schedule: "0 9 * * mon-fri"
+      in: review
+    run: echo {{ id }} waiting in review > /dev/null
+    enabled: false
+
   # Multi-step `run`: a list is executed in order, one shell call per step.
   # Failure at step 1 (non-zero exit, error or timeout) skips step 2, unless
   # `continueOnError: true`. Cheap and side-effect free: prints to /dev/null.

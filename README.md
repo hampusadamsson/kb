@@ -244,7 +244,7 @@ tickets:
 
 ## Automations
 
-A rule runs a shell command when a ticket moves to (or is created in) a column. Placeholders like `{{ id }}` or `{{ props.key }}` are shell-quoted for you — write them bare, never inside quotes.
+A rule runs a shell command when a ticket moves to (or is created in) a column, or on a cron schedule. Placeholders like `{{ id }}` or `{{ props.key }}` are shell-quoted for you — write them bare, never inside quotes.
 
 ```yaml
 automations:
@@ -262,6 +262,24 @@ automations:
 `run` takes a single command or a list of steps run in order, one shell call each. A step that exits non-zero (or errors/times out) stops the sequence unless `continueOnError: true`; the run is recorded as failed at the first failing step, and the ticket keeps that step's exit code, error and `step:` number. The rule `timeout` applies per step.
 
 Rules run in the background; at most 15 runs per ticket (loop guardrail, `guard: false` opts out); `--no-automation` disables them. See [`example/kanban.yaml`](example/kanban.yaml).
+
+### Schedule trigger
+
+`when: { schedule: "<5-field cron>" }` runs a rule on a timer. `in: <column>` is optional and limits it to tickets in that column; `labels` and `props` filters still apply.
+
+```yaml
+automations:
+  - name: nag-review
+    when: { schedule: "0 9 * * mon-fri", in: review } # weekdays 09:00
+    run: echo {{ id }} still in review >> nag.log
+```
+
+- Fires once **per matching ticket** each time the cron matches; there is no ticket-less schedule.
+- Runs **only while `kb web` or `kb mcp` is running** with automations enabled — not for plain CLI commands, and not with `--no-automation`. Run only one of them per board: each has its own scheduler, so both running risks double-firing (the still-running check only mitigates this).
+- Uses the machine's local time, minute precision. Missed ticks are not caught up. A rule never fires twice in the same minute, and a ticket is skipped while the previous run of that rule on it is still running. DST: a repeated minute at fall-back fires once; minutes skipped at spring-forward are not caught up.
+- The loop guard is **off** for scheduled rules; set `guard: true` to enable it.
+- `{{ from }}` and `{{ to }}` are not available; `{{ event }}` is `schedule`.
+- Cron: 5 fields (minute hour day-of-month month day-of-week) with `*`, lists, ranges, steps, month/day names; `7` is Sunday. If both day-of-month and day-of-week are restricted, either matching fires (OR). No seconds, no `@daily`-style macros. An invalid expression is reported by `kb validate`.
 
 ## Web UI
 
