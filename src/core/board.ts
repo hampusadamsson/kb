@@ -10,6 +10,7 @@ import {
   ticketVars,
   automationProblems,
   buildAutomationOverview,
+  guardEnabled,
   type AutomationOverview,
   AUTOMATION_RUN_LIMIT,
   entryRuns,
@@ -32,8 +33,10 @@ import {
   STARTER_CONFIG,
   ticketIdOf,
   ticketRules,
+  type Automation,
   type Config,
 } from "./config.js";
+import { cronMatches, minuteKey, parseCron } from "./cron.js";
 import { KanbanError } from "./errors.js";
 import {
   clipText,
@@ -291,6 +294,8 @@ export class Kanban {
   private readonly automationsOn: boolean;
   private readonly onAutomation?: (rec: AutomationRecord) => void;
   private readonly inflight = new Set<Promise<void>>();
+  /** ruleKey (board + rule name) -> minuteKey of its last scheduled firing; not persisted */
+  private readonly scheduled = new Map<string, string>();
   private readonly sink?: EventSink;
   private readonly source: KbEventSource;
   private readonly isAlive?: (pid: number) => boolean;
@@ -388,145 +393,225 @@ export class Kanban {
     try {
       const ticket = scan(this.dir, config).tickets.find((t) => t.path === rel);
       if (!ticket) return;
-      const ref = { board: ticket.board, ticketId: String(ticket.id), ticketName: ticket.name, path: rel };
       let started = 0; // runs started in this dispatch (the scanned ticket snapshot does not include them)
       for (const rule of automationsFor(config, ticket.board)) {
         if (!matchRule({ ...rule, enabled: true }, event, ticket)) continue;
-        if (off || rule.enabled === false) {
-          const reason = rule.enabled === false ? "rule-disabled" : "automations-off";
-          this.emit(
-            "automation.skipped",
-            `automation "${rule.name}" skipped on #${String(ticket.id)} (${reason})`,
-            { rule: rule.name, reason, event },
-            ref,
-          );
-          continue;
-        }
-        // Loop guard (default on). KB_AUTOMATION=1 already stops CLI loops from scripts; this mainly
-        // protects against scripts calling the web API and other paths that re-trigger rules.
-        if (rule.guard !== false) {
-          const runs = totalRuns(ticket.data.automations) + started;
-          if (runs >= AUTOMATION_RUN_LIMIT) {
-            const reason = `guardrail: ${AUTOMATION_RUN_LIMIT} automation runs on this ticket`;
-            this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "skipped", at: commentKey(this.now(), true), reason });
-            this.emit(
-              "automation.skipped",
-              `automation "${rule.name}" skipped on #${String(ticket.id)} (guardrail: ${runs} runs)`,
-              { rule: rule.name, reason: "guardrail", runs, limit: AUTOMATION_RUN_LIMIT, event },
-              ref,
-            );
-            continue;
-          }
-        }
-        const startMs = this.now().getTime();
-        const startedAt = commentKey(this.now(), true);
-        // The `runs` counter backs the loop guard: if it cannot be persisted, stop rather than dispatch
-        // blind (a self-retriggering rule would never reach the limit). With `guard: false` the counter is
-        // not needed for safety, so a failed write is only reported and the run still happens.
-        if (!this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "running", at: startedAt }, true)) {
-          if (rule.guard !== false) continue;
-        }
-        started++;
-        this.emit("automation.started", `automation "${rule.name}" started on #${String(ticket.id)}`, { rule: rule.name, event }, ref);
-        const rec = (command: string, result: RunResult): AutomationRecord => ({
-          board: ticket.board,
-          rule: rule.name,
-          ticketId: ticket.id,
-          path: rel,
-          event,
-          command,
-          startedAt,
-          finishedAt: commentKey(this.now(), true),
-          status: result.exitCode === 0 && !result.error ? "done" : "failed",
-          result,
-        });
-        const finish = (r: AutomationRecord) => {
-          // A multi-step run records the first failing step's number (single `run` strings keep their shape).
-          const failedStep = Array.isArray(rule.run) ? r.failedStep : undefined;
-          const entry: Record<string, unknown> = { status: r.status, at: r.finishedAt, exit: r.result.exitCode };
-          if (r.result.error) entry.error = r.result.error;
-          if (failedStep !== undefined) entry.step = failedStep;
-          this.writeAutomationStatus(rel, ticket.id, rule.name, entry);
-          const data: Record<string, unknown> = {
-            rule: rule.name,
-            status: r.status,
-            exit: r.result.exitCode,
-            durationMs: this.now().getTime() - startMs,
-            command: clipText(r.command),
-          };
-          if (r.result.error) data.error = r.result.error;
-          if (failedStep !== undefined) data.step = failedStep;
-          if (r.result.error === KILLED_BY_USER) data.killed = true;
-          if (r.result.timedOut) {
-            data.timedOut = true;
-            data.timeoutSeconds = rule.timeout;
-          }
-          this.emit("automation.finished", `automation "${rule.name}" ${r.status} on #${String(ticket.id)}`, data, ref);
-          try {
-            this.onAutomation?.(r);
-          } catch {
-            // ignore
-          }
-        };
-        let commands: string[];
-        try {
-          // Render every step before running any, so a template error fails the whole run up front.
-          const vars = ticketVars(ticket, event);
-          commands = runSteps(rule).map((step) => renderCommand(step, vars));
-        } catch (e) {
-          finish(rec(ruleCommand(rule), { exitCode: null, stdout: "", stderr: "", error: (e as Error).message }));
-          continue;
-        }
-        let pid: number | undefined;
-        const p: Promise<void> = (async () => {
-          let result: RunResult = { exitCode: 0, stdout: "", stderr: "" };
-          let failedStep: number | undefined;
-          let firstFailure: RunResult | undefined;
-          for (const [i, command] of commands.entries()) {
-            try {
-              result = await runner!.run(command, {
-                cwd: this.dir,
-                env: { KB_AUTOMATION: "1" },
-                ...(rule.timeout ? { timeoutMs: rule.timeout * 1000 } : {}),
-                meta: { board: ticket.board, rule: rule.name, ticketId: String(ticket.id), ticketName: ticket.name, path: rel },
-                // Record the pid so `kb automations kill` can reach this run from another process.
-                onSpawn: (s) => {
-                  pid = s.pid;
-                  this.writeAutomationStatus(rel, ticket.id, rule.name, {
-                    status: "running",
-                    at: startedAt,
-                    pid: s.pid,
-                    pgid: s.pgid,
-                    host: os.hostname(),
-                  });
-                },
-              });
-            } catch (e) {
-              result = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
-            }
-            // Killed from another process (kb automations kill): record it like the web Kill button.
-            if (result.exitCode === null && result.error && result.error !== KILLED_BY_USER && pid && consumeKilled(this.dir, pid)) {
-              result = { ...result, error: KILLED_BY_USER };
-            }
-            if (result.exitCode !== 0 || result.error) {
-              if (failedStep === undefined) {
-                failedStep = i + 1;
-                firstFailure = result;
-              }
-              if (rule.continueOnError !== true) break;
-            }
-          }
-          // A failed multi-step run reports the first failure, not the last step's result.
-          const r = rec(commands.join(" && "), firstFailure ?? result);
-          finish(failedStep === undefined ? r : { ...r, status: "failed", failedStep });
-        })()
-          .catch(() => {})
-          .finally(() => this.inflight.delete(p));
-        this.inflight.add(p);
+        if (this.runRule(rule, ticket, event, off, started)) started++;
       }
     } catch {
       // never throw from automations
     }
+  }
+
+  /**
+   * Fire due scheduled rules (`when.schedule`) for `now`; the host calls this about once a minute.
+   * A rule fires at most once per minute per Board instance. Never throws.
+   */
+  runSchedule(now: Date = this.now()): { fired: number } {
+    let fired = 0;
+    const off = !this.runner || !this.automationsOn;
+    if (off && !this.sink) return { fired };
+    try {
+      const config = loadConfig(this.dir);
+      const minute = minuteKey(now);
+      const due: { rule: Automation; board: string }[] = [];
+      // boards without a config entry have no automations, so tickets need not be scanned for names
+      for (const board of [config.name, ...Object.keys(config.boards ?? {})]) {
+        for (const rule of automationsFor(config, board)) {
+          if (rule.when.schedule === undefined || rule.enabled === false) continue;
+          const cron = parseCron(rule.when.schedule);
+          if (!cron.ok || !cronMatches(cron.spec, now)) continue;
+          const key = `${board}\0${rule.name}`;
+          if (this.scheduled.get(key) === minute) continue;
+          this.scheduled.set(key, minute);
+          due.push({ rule, board });
+        }
+      }
+      if (!due.length) return { fired };
+      const event: AutomationEvent = { type: "schedule" };
+      const started = new Map<string, number>();
+      const nowMs = now.getTime();
+      for (const ticket of scan(this.dir, config).tickets) {
+        for (const { rule, board } of due) {
+          if (board !== ticket.board) continue;
+          if (!matchRule(rule, event, ticket)) continue;
+          const autos = ticket.data.automations;
+          const ent =
+            autos !== null && typeof autos === "object" && !Array.isArray(autos)
+              ? (autos as Record<string, unknown>)[rule.name]
+              : undefined;
+          if (ent !== null && typeof ent === "object" && (ent as { status?: unknown }).status === "running") {
+            const at = (ent as { at?: unknown }).at;
+            const ms = at instanceof Date ? at.getTime() : typeof at === "string" ? new Date(at).getTime() : NaN;
+            if (!isStaleRun(ent as Record<string, unknown>, ms, nowMs, { isAlive: this.isAlive, localHost: os.hostname() })) {
+              this.emit(
+                "automation.skipped",
+                `automation "${rule.name}" skipped on #${String(ticket.id)} (still-running)`,
+                { rule: rule.name, reason: "still-running", event },
+                { board: ticket.board, ticketId: String(ticket.id), ticketName: ticket.name, path: ticket.path },
+              );
+              continue;
+            }
+          }
+          if (this.runRule(rule, ticket, event, off, started.get(ticket.path) ?? 0)) {
+            started.set(ticket.path, (started.get(ticket.path) ?? 0) + 1);
+            fired++;
+          }
+        }
+      }
+    } catch {
+      // never throw from automations
+    }
+    return { fired };
+  }
+
+  /**
+   * Skip-or-start one matched rule on one ticket; returns true when a run was started.
+   * `started` is the number of runs already started for this ticket in the current pass.
+   */
+  private runRule(rule: Automation, ticket: Ticket, event: AutomationEvent, off: boolean, started: number): boolean {
+    const runner = this.runner;
+    const rel = ticket.path;
+    const ref = { board: ticket.board, ticketId: String(ticket.id), ticketName: ticket.name, path: rel };
+    if (off || rule.enabled === false) {
+      const reason = rule.enabled === false ? "rule-disabled" : "automations-off";
+      this.emit(
+        "automation.skipped",
+        `automation "${rule.name}" skipped on #${String(ticket.id)} (${reason})`,
+        { rule: rule.name, reason, event },
+        ref,
+      );
+      return false;
+    }
+    // Loop guard (default on). KB_AUTOMATION=1 already stops CLI loops from scripts; this mainly
+    // protects against scripts calling the web API and other paths that re-trigger rules.
+    if (guardEnabled(rule)) {
+      const runs = totalRuns(ticket.data.automations) + started;
+      if (runs >= AUTOMATION_RUN_LIMIT) {
+        const reason = `guardrail: ${AUTOMATION_RUN_LIMIT} automation runs on this ticket`;
+        this.writeAutomationStatus(rel, ticket.id, rule.name, { status: "skipped", at: commentKey(this.now(), true), reason });
+        this.emit(
+          "automation.skipped",
+          `automation "${rule.name}" skipped on #${String(ticket.id)} (guardrail: ${runs} runs)`,
+          { rule: rule.name, reason: "guardrail", runs, limit: AUTOMATION_RUN_LIMIT, event },
+          ref,
+        );
+        return false;
+      }
+    }
+    const startMs = this.now().getTime();
+    const startedAt = commentKey(this.now(), true);
+    // The `runs` counter backs the loop guard: if it cannot be persisted, stop rather than dispatch
+    // blind (a self-retriggering rule would never reach the limit). With `guard: false` the counter is
+    // not needed for safety, so a failed write is only reported and the run still happens.
+    if (
+      !this.writeAutomationStatus(
+        rel,
+        ticket.id,
+        rule.name,
+        { status: "running", at: startedAt },
+        !(rule.when.schedule !== undefined && rule.guard !== true),
+      )
+    ) {
+      if (guardEnabled(rule)) return false;
+    }
+    this.emit("automation.started", `automation "${rule.name}" started on #${String(ticket.id)}`, { rule: rule.name, event }, ref);
+    const rec = (command: string, result: RunResult): AutomationRecord => ({
+      board: ticket.board,
+      rule: rule.name,
+      ticketId: ticket.id,
+      path: rel,
+      event,
+      command,
+      startedAt,
+      finishedAt: commentKey(this.now(), true),
+      status: result.exitCode === 0 && !result.error ? "done" : "failed",
+      result,
+    });
+    const finish = (r: AutomationRecord) => {
+      // A multi-step run records the first failing step's number (single `run` strings keep their shape).
+      const failedStep = Array.isArray(rule.run) ? r.failedStep : undefined;
+      const entry: Record<string, unknown> = { status: r.status, at: r.finishedAt, exit: r.result.exitCode };
+      if (r.result.error) entry.error = r.result.error;
+      if (failedStep !== undefined) entry.step = failedStep;
+      this.writeAutomationStatus(rel, ticket.id, rule.name, entry);
+      const data: Record<string, unknown> = {
+        rule: rule.name,
+        status: r.status,
+        exit: r.result.exitCode,
+        durationMs: this.now().getTime() - startMs,
+        command: clipText(r.command),
+      };
+      if (r.result.error) data.error = r.result.error;
+      if (failedStep !== undefined) data.step = failedStep;
+      if (r.result.error === KILLED_BY_USER) data.killed = true;
+      if (r.result.timedOut) {
+        data.timedOut = true;
+        data.timeoutSeconds = rule.timeout;
+      }
+      this.emit("automation.finished", `automation "${rule.name}" ${r.status} on #${String(ticket.id)}`, data, ref);
+      try {
+        this.onAutomation?.(r);
+      } catch {
+        // ignore
+      }
+    };
+    let commands: string[];
+    try {
+      // Render every step before running any, so a template error fails the whole run up front.
+      const vars = ticketVars(ticket, event);
+      commands = runSteps(rule).map((step) => renderCommand(step, vars));
+    } catch (e) {
+      finish(rec(ruleCommand(rule), { exitCode: null, stdout: "", stderr: "", error: (e as Error).message }));
+      return true;
+    }
+    let pid: number | undefined;
+    const p: Promise<void> = (async () => {
+      let result: RunResult = { exitCode: 0, stdout: "", stderr: "" };
+      let failedStep: number | undefined;
+      let firstFailure: RunResult | undefined;
+      for (const [i, command] of commands.entries()) {
+        try {
+          result = await runner!.run(command, {
+            cwd: this.dir,
+            env: { KB_AUTOMATION: "1" },
+            ...(rule.timeout ? { timeoutMs: rule.timeout * 1000 } : {}),
+            meta: { board: ticket.board, rule: rule.name, ticketId: String(ticket.id), ticketName: ticket.name, path: rel },
+            // Record the pid so `kb automations kill` can reach this run from another process.
+            onSpawn: (s) => {
+              pid = s.pid;
+              this.writeAutomationStatus(rel, ticket.id, rule.name, {
+                status: "running",
+                at: startedAt,
+                pid: s.pid,
+                pgid: s.pgid,
+                host: os.hostname(),
+              });
+            },
+          });
+        } catch (e) {
+          result = { exitCode: null, stdout: "", stderr: "", error: (e as Error).message };
+        }
+        // Killed from another process (kb automations kill): record it like the web Kill button.
+        if (result.exitCode === null && result.error && result.error !== KILLED_BY_USER && pid && consumeKilled(this.dir, pid)) {
+          result = { ...result, error: KILLED_BY_USER };
+        }
+        if (result.exitCode !== 0 || result.error) {
+          if (failedStep === undefined) {
+            failedStep = i + 1;
+            firstFailure = result;
+          }
+          if (rule.continueOnError !== true) break;
+        }
+      }
+      // A failed multi-step run reports the first failure, not the last step's result.
+      const r = rec(commands.join(" && "), firstFailure ?? result);
+      finish(failedStep === undefined ? r : { ...r, status: "failed", failedStep });
+    })()
+      .catch(() => {})
+      .finally(() => this.inflight.delete(p));
+    this.inflight.add(p);
+    return true;
   }
 
   /** Write a starter kanban.yaml. */

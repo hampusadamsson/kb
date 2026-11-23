@@ -79,6 +79,7 @@ export async function runWeb(
     port,
     strictPort,
     runner,
+    schedule: runner !== undefined,
     live,
     log: createAutomationLog(cwd),
   });

@@ -10,6 +10,7 @@ import { errorResponse, handleApi } from "../api/api.js";
 import { createMcpHttpContext, handleMcpHttp } from "../mcp/http.js";
 import { isDir, PUBLIC_DIR, readPublic } from "./assets.js";
 import { EventHub } from "./watch.js";
+import { startScheduler } from "../scheduler.js";
 
 export interface ServerOptions {
   dir: string;
@@ -25,6 +26,8 @@ export interface ServerOptions {
   log?: AutomationLog;
   /** audit event log (default: <dir>/.kb/events.log) */
   events?: EventLog;
+  /** run cron-scheduled automations (needs a runner); stopped by close() */
+  schedule?: boolean;
 }
 
 export interface RunningServer {
@@ -335,6 +338,23 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   if (loopback) {
     allowedHosts = new Set(["localhost", "127.0.0.1", "[::1]"].map((n) => `${n}:${actual}`));
   }
+  // One long-lived Kanban (unlike the per-request ones): runSchedule dedupes same-minute firing per instance.
+  const scheduler =
+    opts.schedule && opts.runner
+      ? startScheduler({
+          now: opts.now,
+          kanban: () =>
+            createKanban({
+              dir,
+              now: opts.now,
+              runner: opts.runner,
+              events,
+              source: "web",
+              isAlive: pidAlive,
+              onAutomation: opts.log ? (rec) => opts.log!.append(rec) : undefined,
+            }),
+        })
+      : undefined;
   const shown = host.includes(":") ? `[${host}]` : host;
   return {
     url: `http://${shown}:${actual}`,
@@ -345,6 +365,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
+        scheduler?.stop();
         cleanup();
         server.close((err) => (err ? reject(err) : resolve()));
         server.closeAllConnections();

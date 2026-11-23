@@ -7,8 +7,10 @@ import path from "node:path";
 import { type ApiContext, type ApiResponse, handleApi } from "../api/api.js";
 import { createKanban, type Kanban, type KbEventSource } from "../core/index.js";
 import { createEventLog } from "../eventLog.js";
+import { pidAlive } from "../killRun.js";
 import { LiveRuns } from "../liveRuns.js";
 import { createShellRunner } from "../runner.js";
+import { startScheduler } from "../scheduler.js";
 import { runServer, type ToolCallResult, type ToolDefinition } from "./protocol.js";
 
 const WARN = "⚠ ";
@@ -529,5 +531,11 @@ export async function startMcpServer(opts: McpServerOptions): Promise<void> {
   const kanban = (): Kanban => createKanban({ dir, runner, events, source });
 
   const ctx: ToolContext = { kanban, api: { runner, events, live, dir } };
-  await runServer({ tools: createTools(ctx), instructions: INSTRUCTIONS });
+  // One long-lived Kanban: runSchedule dedupes same-minute firing per instance.
+  const scheduler = runner ? startScheduler({ kanban: () => createKanban({ dir, runner, events, source, isAlive: pidAlive }) }) : undefined;
+  try {
+    await runServer({ tools: createTools(ctx), instructions: INSTRUCTIONS });
+  } finally {
+    scheduler?.stop();
+  }
 }
