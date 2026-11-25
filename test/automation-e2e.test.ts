@@ -22,7 +22,7 @@ afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 function kb(args: string[], env: Record<string, string | undefined> = {}) {
   const e = { ...process.env, ...env };
-  if (env.KB_AUTOMATION === undefined) delete e.KB_AUTOMATION;
+  if (env.KB_AUTOMATION_DEPTH === undefined) delete e.KB_AUTOMATION_DEPTH;
   const r = spawnSync("node", [main, ...args], { cwd: dir, env: e, encoding: "utf8" });
   return { out: r.stdout, err: r.stderr, code: r.status };
 }
@@ -46,7 +46,7 @@ describe("cli automation e2e", () => {
     expect(log[0].rule).toBe("t");
   });
   it.each([
-    ["KB_AUTOMATION env", ["mv"], { KB_AUTOMATION: "1" }],
+    ["KB_AUTOMATION_DEPTH env", ["mv"], { KB_AUTOMATION_DEPTH: "3" }],
     ["--no-automation", ["--no-automation", "mv"], {}],
     ["mv --no-automation", ["mv", "--no-automation"], {}],
   ])("skips with %s", (_n, _a, env) => {
@@ -61,6 +61,12 @@ describe("cli automation e2e", () => {
     expect(kb(args, env).code).toBe(0);
     expect(fs.existsSync(path.join(dir, "out.txt"))).toBe(false);
     expect(fmOf(ticketFile()).automations).toBeUndefined();
+  });
+  it("fires at depth 1 (nested), skips at depth 3", () => {
+    setup("echo x >> out.txt");
+    const id = idOf(kb(["add", "hello"]).out);
+    expect(kb(["mv", id, "done"], { KB_AUTOMATION_DEPTH: "1" }).code).toBe(0);
+    expect(fs.readFileSync(path.join(dir, "out.txt"), "utf8")).toBe("x\n");
   });
   it("failing script: failed status, warning, exit 0", () => {
     setup("exit 3");

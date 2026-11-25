@@ -271,7 +271,7 @@ automations:
 
 `run` takes a single command or a list of steps run in order, one shell call each. A step that exits non-zero (or errors/times out) stops the sequence unless `continueOnError: true`; the run is recorded as failed at the first failing step, and the ticket keeps that step's exit code, error and `step:` number. The rule `timeout` applies per step.
 
-Rules run in the background; at most 15 runs per ticket (loop guardrail, `guard: false` opts out); `--no-automation` disables them. See [`example/kanban.yaml`](example/kanban.yaml).
+Rules run in the background. Loop safeguards: scripts get `KB_AUTOMATION_DEPTH` and rules stop firing at nesting depth 3; a rule never starts on a ticket where it is still running; and at most 15 runs per ticket (`guard: false` opts out of that cap); `--no-automation` disables them. See [`example/kanban.yaml`](example/kanban.yaml).
 
 ### Schedule trigger
 

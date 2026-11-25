@@ -3,7 +3,7 @@ import type { AutomationLog } from "../automationLog.js";
 import type { EventLog } from "../eventLog.js";
 import type { AutomationRunner, RunResult } from "../core/automation.js";
 import { automationSchema } from "../core/config.js";
-import { renderCommand } from "../core/automation.js";
+import { renderCommand, depthEnv } from "../core/automation.js";
 import { KanbanError, type Kanban, type Patch, type Ticket } from "../core/index.js";
 import { killRun, pidAlive } from "../killRun.js";
 import type { LiveRuns } from "../liveRuns.js";
@@ -397,7 +397,7 @@ const automationTest: Handler = async (kb, req, _p, ctx) => {
       try {
         r = await ctx.runner.run(step, {
           cwd: kb.dir,
-          env: { KB_AUTOMATION: "1" },
+          env: depthEnv(0),
           ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
           meta: { test: true, board: vars.board },
         });

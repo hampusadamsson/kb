@@ -3,15 +3,17 @@ import { createAutomationLog } from "../automationLog.js";
 import { createKanban, type Kanban, type KanbanOptions } from "../core/index.js";
 import type { AutomationRecord } from "../core/automation.js";
 import { createShellRunner } from "../runner.js";
+import { depthFromEnv } from "../core/automation.js";
 
-/** Automations are off inside script runs (KB_AUTOMATION set) or with --no-automation. */
+/** Automations are off only with --no-automation (nesting is bounded by KB_AUTOMATION_DEPTH in core). */
 export function automationEnabled(flagOff: boolean): boolean {
-  return !flagOff && !process.env.KB_AUTOMATION;
+  return !flagOff;
 }
 
-/** Event-log options for CLI-created Kanbans; scripts run by automations (KB_AUTOMATION) log as "automation". */
-export function eventOpts(cwd: string): Pick<KanbanOptions, "events" | "source"> {
-  return { events: createEventLog(cwd), source: process.env.KB_AUTOMATION ? "automation" : "cli" };
+/** Event-log and depth options for CLI-created Kanbans; scripts run by automations (KB_AUTOMATION_DEPTH > 0) log as "automation". */
+export function eventOpts(cwd: string): Pick<KanbanOptions, "events" | "source" | "depth"> {
+  const depth = depthFromEnv(process.env);
+  return { events: createEventLog(cwd), source: depth > 0 ? "automation" : "cli", depth };
 }
 
 export interface AutomationSession {

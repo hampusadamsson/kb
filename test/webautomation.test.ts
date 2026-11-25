@@ -34,9 +34,9 @@ const call = async (method: string, body?: unknown) => {
 describe("POST /api/automation/test", () => {
   it("renders and runs with the sample ticket", async () => {
     await start();
-    const r = await call("POST", { run: "echo {{ id }} {{ name }} $KB_AUTOMATION; pwd" });
+    const r = await call("POST", { run: "echo {{ id }} {{ name }} $KB_AUTOMATION_DEPTH; pwd" });
     expect(r.status).toBe(200);
-    expect(r.json.command).toBe("echo '000' 'Sample ticket' $KB_AUTOMATION; pwd");
+    expect(r.json.command).toBe("echo '000' 'Sample ticket' $KB_AUTOMATION_DEPTH; pwd");
     expect(r.json.result.exitCode).toBe(0);
     expect(r.json.result.stdout).toContain("000 Sample ticket 1");
     expect(r.json.result.stdout).toContain(fs.realpathSync(dir));

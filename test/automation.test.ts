@@ -187,7 +187,7 @@ describe("dispatch", () => {
 
     kb.move(id, "done");
     expect(runner.calls).toHaveLength(1);
-    expect(runner.calls[0]).toMatchObject({ command: "echo '001'", cwd: dir, env: { KB_AUTOMATION: "1" } });
+    expect(runner.calls[0]).toMatchObject({ command: "echo '001'", cwd: dir, env: { KB_AUTOMATION_DEPTH: "1" } });
     let d = fm(p);
     expect(d.automations.n).toEqual({ status: "running", at: AT, runs: 1 });
     expect(d.automations.c.status).toBe("done");
@@ -239,7 +239,7 @@ describe("dispatch", () => {
     expect(runner.calls.map((c) => c.command)).toEqual(["echo one", "echo two '001'", "echo three"]);
     runner.finish({}, 2);
     await kb.settled();
-    expect(runner.calls.every((c) => c.env.KB_AUTOMATION === "1")).toBe(true);
+    expect(runner.calls.every((c) => c.env.KB_AUTOMATION_DEPTH === "1")).toBe(true);
     expect(fm(p).automations.m).toEqual({ status: "done", at: AT, exit: 0, runs: 1 });
     expect(records.at(-1)).toMatchObject({ status: "done", command: "echo one && echo two '001' && echo three" });
     expect(records.at(-1)!.failedStep).toBeUndefined();

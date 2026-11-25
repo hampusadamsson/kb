@@ -73,6 +73,23 @@ export interface AutomationRecord {
 /** Loop guardrail: a ticket with this many recorded automation runs gets no more (unless the rule has guard: false). */
 export const AUTOMATION_RUN_LIMIT = 15;
 
+/** Env var carrying the automation nesting depth to scripts (absent/0 = not inside an automation). */
+export const AUTOMATION_DEPTH_ENV = "KB_AUTOMATION_DEPTH";
+
+/** Automations fired from a script nested this deep or deeper are skipped (0 = top level). */
+export const AUTOMATION_MAX_DEPTH = 3;
+
+/** Depth from an environment; invalid or missing → 0. */
+export function depthFromEnv(env: Record<string, string | undefined>): number {
+  const n = Number(env[AUTOMATION_DEPTH_ENV]);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+/** Env for a script run by an automation at `depth` (the script runs one level deeper). */
+export function depthEnv(depth: number): Record<string, string> {
+  return { [AUTOMATION_DEPTH_ENV]: String(depth + 1) };
+}
+
 /** Loop guard on for a rule: default on, except scheduled rules (off unless `guard: true`). */
 export function guardEnabled(rule: Pick<Automation, "guard" | "when">): boolean {
   return rule.when.schedule !== undefined ? rule.guard === true : rule.guard !== false;

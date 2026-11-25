@@ -18,7 +18,7 @@ const ROOT: Content = {
       [
         "EDITOR         editor for 'kb edit' and '--edit' (default: vi)",
         "NO_COLOR       disable colored output",
-        "KB_AUTOMATION  set by automation scripts; disables automations (like --no-automation)",
+        "KB_AUTOMATION_DEPTH  set by automation scripts (nesting level); automations stop at depth 3",
       ],
     ],
   ],

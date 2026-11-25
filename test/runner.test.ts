@@ -173,7 +173,7 @@ describe("shell runner", () => {
     expect(x.stdout).toContain("[output truncated]");
   });
   it("passes env and cwd", async () => {
-    const x = await r.run('echo "$KB_AUTOMATION $FOO"; pwd', { cwd: "/tmp", env: { KB_AUTOMATION: "1", FOO: "bar" } });
+    const x = await r.run('echo "$KB_AUTOMATION_DEPTH $FOO"; pwd', { cwd: "/tmp", env: { KB_AUTOMATION_DEPTH: "1", FOO: "bar" } });
     expect(x.stdout.split("\n")[0]).toBe("1 bar");
     expect(x.stdout).toMatch(/tmp/);
   });

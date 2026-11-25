@@ -93,7 +93,7 @@ describe("help content", () => {
     expect(helpOf(sub("completion"))).toContain("source <(kb completion zsh)");
     expect(helpOf(sub("completion"))).toContain("source <(kb completion bash)");
     expect(plain(root)).toContain("\nENVIRONMENT\n");
-    expect(plain(root)).toContain("KB_AUTOMATION");
+    expect(plain(root)).toContain("KB_AUTOMATION_DEPTH");
     expect(plain(root)).toMatch(/^ {2}help +Help about any command$/m);
   });
   it("no automation internals in help", () => {
@@ -103,7 +103,7 @@ describe("help content", () => {
       expect(out, c.name()).not.toContain("created_in");
       expect(out, c.name()).not.toContain("moved_to");
     }
-    expect(plain(root).match(/KB_AUTOMATION/g)?.length).toBe(1);
+    expect(plain(root).match(/KB_AUTOMATION_DEPTH/g)?.length).toBe(1);
     for (const n of ["add", "mv", "set", "web"]) {
       const notes = helpOf(sub(n)).split("\nNOTES\n")[1]!.split("\n\n")[0]!;
       expect(notes.split("\n").filter((l) => /automation/i.test(l)).length, n).toBeLessThanOrEqual(1);

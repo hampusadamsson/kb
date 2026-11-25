@@ -160,8 +160,9 @@ tickets:
 #   timeout  default none (0 = no timeout); whole seconds, max 86400
 #
 # Placeholders: id, name, body, board, status, from, to, path, labels, event,
-# and props.<key>. Automations are skipped while another automation runs
-# (KB_AUTOMATION), and `kb ... --no-automation` disables them.
+# and props.<key>. Scripts run with KB_AUTOMATION_DEPTH set; nested `kb` calls
+# may trigger rules, but not beyond depth 3, and a rule never starts on a ticket
+# where it is already running. `kb ... --no-automation` disables automations.
 # -----------------------------------------------------------------------------
 automations:
   # moved_to: fires when a ticket is moved INTO the given column.
@@ -232,8 +233,8 @@ automations:
   # `kb comment` appends a comment, all from one move into review. Disabled
   # because it mutates tickets — while enabled, each move into review would
   # label and comment the ticket again, up to the 15-run per-ticket guardrail.
-  # KB_AUTOMATION=1 is set for every step, so the nested `kb` calls do NOT
-  # re-trigger automations (no loop).
+  # Nested `kb` calls run with KB_AUTOMATION_DEPTH set; cascades are capped at
+  # depth 3 and a rule cannot re-enter itself on the same ticket.
   - name: mark-reviewed
     when:
       moved_to: review

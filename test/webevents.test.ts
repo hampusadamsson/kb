@@ -80,17 +80,17 @@ describe("GET /api/events", () => {
 });
 
 describe("CLI events (e2e)", () => {
-  it("kb add + kb mv log source cli; KB_AUTOMATION logs automation", async () => {
+  it("kb add + kb mv log source cli; KB_AUTOMATION_DEPTH logs automation", async () => {
     const run = (args: string[], env: Record<string, string> = {}) => {
       const e = { ...process.env, ...env };
-      if (!env.KB_AUTOMATION) delete e.KB_AUTOMATION;
+      if (!env.KB_AUTOMATION_DEPTH) delete e.KB_AUTOMATION_DEPTH;
       return spawnSync("node", [main, ...args], { cwd: dir, env: e, encoding: "utf8" });
     };
     const a = run(["add", "Task"]);
     expect(a.status).toBe(0);
     const id = /#(\S+)/.exec(a.stdout)![1];
     expect(run(["mv", id, "done"]).status).toBe(0);
-    expect(run(["set", id, "-n", "Renamed"], { KB_AUTOMATION: "1" }).status).toBe(0);
+    expect(run(["set", id, "-n", "Renamed"], { KB_AUTOMATION_DEPTH: "1" }).status).toBe(0);
     const r = await get();
     expect(r.json.events.map((e: any) => [e.type, e.source])).toEqual([
       ["ticket.renamed", "automation"],

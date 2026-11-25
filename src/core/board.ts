@@ -16,6 +16,8 @@ import {
   entryRuns,
   isStaleRun,
   totalRuns,
+  depthEnv,
+  AUTOMATION_MAX_DEPTH,
   type AutomationEvent,
   type AutomationRecord,
   type AutomationRunner,
@@ -191,6 +193,8 @@ export interface KanbanOptions {
    * the CLI/web pass one so a long-running (or hung) run is not mistaken for a dead one.
    */
   isAlive?: (pid: number) => boolean;
+  /** automation nesting depth of the caller (0 = top level; scripts run by automations get depth + 1) */
+  depth?: number;
 }
 
 // ---- helpers ----
@@ -299,8 +303,10 @@ export class Kanban {
   private readonly sink?: EventSink;
   private readonly source: KbEventSource;
   private readonly isAlive?: (pid: number) => boolean;
+  private readonly depth: number;
 
   constructor(opts: KanbanOptions) {
+    this.depth = opts.depth ?? 0;
     this.sink = opts.events;
     this.source = opts.source ?? "unknown";
     this.isAlive = opts.isAlive;
@@ -483,8 +489,35 @@ export class Kanban {
       );
       return false;
     }
-    // Loop guard (default on). KB_AUTOMATION=1 already stops CLI loops from scripts; this mainly
-    // protects against scripts calling the web API and other paths that re-trigger rules.
+    // Nesting limit: scripts run by automations carry KB_AUTOMATION_DEPTH; their kb calls may still
+    // fire rules, but only down to AUTOMATION_MAX_DEPTH levels.
+    if (this.depth >= AUTOMATION_MAX_DEPTH) {
+      this.emit(
+        "automation.skipped",
+        `automation "${rule.name}" skipped on #${String(ticket.id)} (max-depth)`,
+        { rule: rule.name, reason: "max-depth", depth: this.depth, limit: AUTOMATION_MAX_DEPTH, event },
+        ref,
+      );
+      return false;
+    }
+    // Re-entrancy: never start a rule on a ticket where the same rule is still running.
+    const autos = ticket.data.automations;
+    const cur =
+      autos !== null && typeof autos === "object" && !Array.isArray(autos) ? (autos as Record<string, unknown>)[rule.name] : undefined;
+    if (cur !== null && typeof cur === "object" && (cur as { status?: unknown }).status === "running") {
+      const at = (cur as { at?: unknown }).at;
+      const ms = at instanceof Date ? at.getTime() : typeof at === "string" ? new Date(at).getTime() : NaN;
+      if (!isStaleRun(cur as Record<string, unknown>, ms, this.now().getTime(), { isAlive: this.isAlive, localHost: os.hostname() })) {
+        this.emit(
+          "automation.skipped",
+          `automation "${rule.name}" skipped on #${String(ticket.id)} (still-running)`,
+          { rule: rule.name, reason: "still-running", event },
+          ref,
+        );
+        return false;
+      }
+    }
+    // Loop guard (default on): last-resort cap on total runs per ticket.
     if (guardEnabled(rule)) {
       const runs = totalRuns(ticket.data.automations) + started;
       if (runs >= AUTOMATION_RUN_LIMIT) {
@@ -574,7 +607,7 @@ export class Kanban {
         try {
           result = await runner!.run(command, {
             cwd: this.dir,
-            env: { KB_AUTOMATION: "1" },
+            env: depthEnv(this.depth),
             ...(rule.timeout ? { timeoutMs: rule.timeout * 1000 } : {}),
             meta: { board: ticket.board, rule: rule.name, ticketId: String(ticket.id), ticketName: ticket.name, path: rel },
             // Record the pid so `kb automations kill` can reach this run from another process.
